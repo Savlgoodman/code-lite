@@ -57,7 +57,7 @@ uv run python .\sdk_capability_probe.py --json --runtime nanobot
 | 权限管理 | `Sandbox`: `read-only`、`workspace-write`、`full-access`；`ApprovalMode`: `deny_all`、`auto_review`；低层 reviewer 有 `user`。 | `PermissionMode`: `default`、`acceptEdits`、`plan`、`bypassPermissions`、`dontAsk`、`auto`；还有 `allowed_tools`、`disallowed_tools`、settings 权限规则、sandbox settings。 | 没有统一 full sandbox 枚举；依赖工具自身、workspace policy 和 hook 审批。 | 产品权限模式不要和 runtime 原生命名一一等同，必须保留 capability caveat。 |
 | 可否指定 cwd/workspace | 支持。`CodexConfig.cwd`、`thread_start(cwd=...)`、`Thread.turn(cwd=...)`。 | 支持。`ClaudeAgentOptions.cwd`，并有 `add_dirs`。 | 支持。`Nanobot.from_config(workspace=...)`。 | 所有 adapter 都要接收 code-lite 的 `workspace_cwd`。项目 skill 读取用统一 SkillBridge 处理。 |
 | turn 内模型/思考强度 | 支持。`Thread.turn(model=..., effort=..., summary=...)`；`model_provider` 主要在线程启动时设置。 | 支持配置 `model`、`fallback_model`、`thinking`、`effort`、`max_thinking_tokens`。持久 client 的单次 `query()` 不接收 options，per-turn 切换可通过新 options/client 或新 session 实现。 | 支持 `run/run_streamed(model=..., model_preset=...)`；没有通用 thinking strength 字段。 | 统一请求保留 `model`, `model_preset_id`, `reasoning_effort`, `thinking`，由 adapter 选择可用字段。 |
-| 上下文窗口信息 | 有 usage 事件和类型：`thread/tokenUsage/updated`、`ThreadTokenUsage`、`TokenUsageBreakdown`；未验证到稳定的 max context window getter。 | `ResultMessage.model_usage` 可带 `contextWindow`、`maxOutputTokens` 等；普通 `usage` 也可见。 | 内部有 prompt token 估算和 `/status` 类逻辑，但 SDK 暂未暴露统一 context window 对象。 | UI 展示做 best-effort：`context.used_tokens`、`context.max_tokens`、`context.source` 可为空。 |
+| 上下文窗口信息 | 支持通过 Python SDK 的 turn stream 获取 `thread/tokenUsage/updated` 通知。`ThreadTokenUsage` 包含 `total`、`last`、`modelContextWindow`，Python 字段为 `model_context_window`。 | `ResultMessage.model_usage` 可带 `contextWindow`、`maxOutputTokens` 等；普通 `usage` 也可见。 | 内部有 prompt token 估算和 `/status` 类逻辑，但 SDK 暂未暴露统一 context window 对象。 | UI 展示做 best-effort：`context.used_tokens`、`context.max_tokens`、`context.source` 可为空。 |
 | 后续消息队列/运行中引导 | 未发现稳定的统一 SDK 队列 API。低层协议有 thread append 等能力，但不应先作为产品依赖。 | `query(prompt=AsyncIterable[dict])` 可接收异步输入，SDK control protocol 有 interrupt；但产品级排队仍应自己实现。 | 未发现内置队列 API。 | QueueManager 放在 code-lite。默认“当前 turn 结束后继续”，高级场景再做 interrupt-and-resume 或 runtime 特化。 |
 
 ## 3. 分项细节
@@ -256,6 +256,59 @@ item/autoApprovalReview/completed
 thread/tokenUsage/updated
 turn/completed
 ```
+
+结合 `H:\codex-plugin-remote` 逆向出的 app-server schema，以及 `openai_codex.generated.v2_all` 的本地反射，可以确认 Codex app-server 的上下文窗口信息来自 `thread/tokenUsage/updated`：
+
+```ts
+type ThreadTokenUsage = {
+  total: TokenUsageBreakdown
+  last: TokenUsageBreakdown
+  modelContextWindow: number | null
+}
+
+type TokenUsageBreakdown = {
+  totalTokens: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningOutputTokens: number
+}
+```
+
+Python SDK 字段名为：
+
+```python
+notification.payload.token_usage.model_context_window
+notification.payload.token_usage.total.total_tokens
+notification.payload.token_usage.last.total_tokens
+```
+
+本地 `openai-codex 0.1.0b2` 反射进一步确认，Python SDK 已把这个通知注册到 generated notification registry：
+
+1. `openai_codex.generated.notification_registry.NOTIFICATION_MODELS["thread/tokenUsage/updated"]` 指向 `ThreadTokenUsageUpdatedNotification`。
+2. `ThreadTokenUsageUpdatedNotification` 字段包含 `thread_id`、`turn_id`、`token_usage`。
+3. `ThreadTokenUsage` 字段包含 `total`、`last`、`model_context_window`，其中 `model_context_window` 对应 app-server JSON 字段 `modelContextWindow`。
+4. `TokenUsageBreakdown` 字段包含 `total_tokens`、`input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens`。
+
+adapter 可在 `TurnHandle.stream()` 或 `AsyncTurnHandle.stream()` 中直接处理该 notification：
+
+```python
+from openai_codex.generated.v2_all import ThreadTokenUsageUpdatedNotification
+
+turn = thread.turn("...")
+for event in turn.stream():
+    if (
+        event.method == "thread/tokenUsage/updated"
+        and isinstance(event.payload, ThreadTokenUsageUpdatedNotification)
+    ):
+        usage = event.payload.token_usage
+
+        context_max_tokens = usage.model_context_window
+        context_used_tokens = usage.total.total_tokens
+        last_turn_tokens = usage.last.total_tokens
+```
+
+当前逆向 schema 和 Python SDK 中，`thread/read` / `thread/resume` 返回的 `Thread` 不包含 token usage 字段，因此 adapter 应在运行中的 notification stream 里维护最近一次 usage snapshot。恢复历史会话后，如果还没有收到新的 `thread/tokenUsage/updated`，UI 应显示“未知”或使用 code-lite 自己 event store 中保存的上一份快照。
 
 Claude Code 可输出：
 
