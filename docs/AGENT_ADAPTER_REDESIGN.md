@@ -1,6 +1,6 @@
 # 多 Agent Adapter 重设计与 Codex SDK 探针结论
 
-本文设计 PC Repair Agent 的多 Agent 接入适配层，并记录 `openai-codex` Python SDK 的本地探针结论。目标是让 nanobot、Codex、Claude Code 等 Agent Runtime 可以通过统一协议接入 UI、权限策略、模型配置和审计系统。
+本文设计 code-lite 的多 Agent 接入适配层，并记录 `openai-codex` Python SDK 的本地探针结论。目标是让 Codex、Claude Code、opencode、nanobot 等 Agent Runtime 可以通过统一协议接入 UI、权限策略、模型配置、远程同步和审计系统。
 
 ## 1. 背景
 
@@ -24,7 +24,7 @@ session_state: bool
 notes: list[str]
 ```
 
-这对单一 nanobot 原型够用，但不够描述 Codex、Claude Code 这类更完整的 coding agent。后续需要表达：
+这对单一 nanobot 原型够用，但不够描述 Codex、Claude Code、opencode 这类更完整的 coding agent。后续需要表达：
 
 1. 支持哪些权限级别。
 2. 是否支持本地 sandbox。
@@ -152,7 +152,7 @@ item/fileChange/requestApproval
 2. 低层 JSON-RPC 客户端可以接入我们自己的审批 handler。
 3. adapter 可以把 Codex runtime 主动发起的审批请求转成 `approval.required` 事件。
 4. 该 handler 不是所有命令和所有文件修改的稳定前置闸门，只能覆盖 Codex runtime 判定需要审批的动作。
-5. PC Repair Agent 不能把 Codex `approval_handler` 当成产品级 Execution Gateway。
+5. code-lite 不能把 Codex `approval_handler` 当成产品级完整权限边界。
 
 ### 2.2.1 Smoke 结果
 
@@ -164,12 +164,12 @@ item/fileChange/requestApproval
 | `readonly` + 创建文件 | 命令事件出现，但状态为 `declined`，输出 `blocked by policy`；文件未创建 | Codex read-only sandbox 能阻止工作区写入 |
 | `ask` 映射为 `workspace-write` + `on-request/user` + 创建文件 | 文件被创建，`approval_handler` 未收到请求 | `ask` 不能仅靠 Codex 原生 approval 实现“所有写入先问用户” |
 
-因此 Codex 接入 PC Repair Agent 时必须收紧语义：
+因此 Codex 接入 code-lite 时必须收紧语义：
 
 1. `readonly` 可作为默认评估模式，但仍要接受它可能运行只读命令。
 2. `ask` 只能表示“Codex 原生升级审批请求转给 UI”，不能承诺工作区内每次写入都审批。
-3. 涉及真实 PC 修复、系统目录、驱动安装、注册表、服务、环境变量等动作时，不应交给 Codex 原生 shell/file edit 直接完成。
-4. 一方维修能力应通过 PC Repair Agent 自己的 Tool、PendingAction 和 Rust Execution Gateway 执行。
+3. 涉及仓库外路径、系统目录、权限提升、安装器、远程发布、密钥读取等动作时，不应仅依赖 Codex 原生 shell/file edit 的审批语义。
+4. code-lite 自己的高风险动作应通过产品层 PendingAction、审批记录和后续本地执行网关处理。
 
 ### 2.3 Tool 注册能力
 
@@ -187,7 +187,7 @@ Codex 协议中存在：
 因此建议：
 
 1. Codex adapter 的 `toolRegistration` 标记为 `mcp` 或 `external`，不要标为 `python_direct`。
-2. PC Repair Agent 的一方工具优先走产品 backend + Execution Gateway。
+2. code-lite 的一方工具优先走产品 backend、MCP 或后续执行网关。
 3. 如需让 Codex 调用一方工具，优先通过 MCP server 或 Codex 配置接入，而不是 Python SDK 直接注册。
 
 ## 3. 统一 Adapter 能力模型
@@ -250,7 +250,7 @@ PermissionMode = Literal["readonly", "ask", "auto", "fullaccess"]
 | `readonly` | 只读，不允许写入、执行修改或网络副作用 |
 | `ask` | 中高风险动作进入用户审批 |
 | `auto` | 低中风险自动允许，高风险审批或 adapter 原生自动审查 |
-| `fullaccess` | 尽量不中断，但 blocked 仍拒绝，Execution Gateway 仍复核 |
+| `fullaccess` | 尽量不中断，但 blocked 仍拒绝，产品层仍记录审计并保留硬阻断 |
 
 能力结构：
 
@@ -306,7 +306,7 @@ class ToolCapabilities:
 1. `python_direct`：像 nanobot entry point 或 Python Tool 子类。
 2. `mcp`：通过 MCP server 暴露。
 3. `runtime_builtin`：Codex/Claude Code 自带 shell、file edit、search 等。
-4. `gateway_action`：PC Repair Agent 自己的结构化执行网关。
+4. `gateway_action`：code-lite 自己的结构化动作或后续本地执行网关。
 
 ### 3.5 SessionCapabilities
 
@@ -339,21 +339,21 @@ class EventCapabilities:
 
 ## 4. Adapter 对比矩阵
 
-| 能力 | nanobot | Codex SDK | Claude Code |
-| --- | --- | --- | --- |
-| 文本流 | 支持 `text.delta` | 支持 agent message delta | 待验证 |
-| Reasoning 流 | 支持 | 协议有 reasoning 事件 | 待验证 |
-| 工具事件 | 支持 tool started/completed/failed | 支持 command/file/MCP/dynamic events | 待验证 |
-| 用户审批 | 自定义 hook 支持，可在工具执行前等待 UI | 仅支持 runtime 发起的审批请求；不能覆盖所有工作区写入 | 待验证 |
-| 自动审批 | 产品层实现 | SDK `auto_review` | 待验证 |
-| 只读模式 | 产品层约束 + 工具配置 | SDK `Sandbox.read_only`，可运行只读 shell，阻止写入 | 待验证 |
-| 完全允许 | 产品层实现，但 Gateway 复核 | SDK `Sandbox.full_access` + auto review | 待验证 |
-| Python Tool 注册 | 支持 entry point | 未发现直接支持 | 待验证 |
-| MCP | nanobot 支持 MCP 配置 | 协议支持 MCP | Claude Code 通常支持 MCP，待本地验证 |
-| 模型列表 | 来自产品配置或 provider | SDK `model_list()` | 待验证 |
-| per-turn 模型 | nanobot `model_preset` | `Thread.turn(model=...)` | 待验证 |
-| 思考强度 | 取决于模型 preset/provider 配置 | `Thread.turn(effort=...)` 支持 `none/minimal/low/medium/high/xhigh` | 待验证 |
-| 取消 | `RunStream.cancel()` | `TurnHandle.interrupt()` | 待验证 |
+| 能力 | nanobot | Codex SDK | Claude Code | opencode |
+| --- | --- | --- | --- | --- |
+| 文本流 | 支持 `text.delta` | 支持 agent message delta | 待验证 | 待验证 |
+| Reasoning 流 | 支持 | 协议有 reasoning 事件 | 待验证 | 待验证 |
+| 工具事件 | 支持 tool started/completed/failed | 支持 command/file/MCP/dynamic events | 待验证 | 待验证 |
+| 用户审批 | 自定义 hook 支持，可在工具执行前等待 UI | 仅支持 runtime 发起的审批请求；不能覆盖所有工作区写入 | 待验证 | 待验证 |
+| 自动审批 | 产品层实现 | SDK `auto_review` | 待验证 | 待验证 |
+| 只读模式 | 产品层约束 + 工具配置 | SDK `Sandbox.read_only`，可运行只读 shell，阻止写入 | 待验证 | 待验证 |
+| 完全允许 | 产品层实现，但仍需审计和 blocked 硬阻断 | SDK `Sandbox.full_access` + auto review | 待验证 | 待验证 |
+| Python Tool 注册 | 支持 entry point | 未发现直接支持 | 待验证 | 待验证 |
+| MCP | nanobot 支持 MCP 配置 | 协议支持 MCP | Claude Code 通常支持 MCP，待本地验证 | 待验证 |
+| 模型列表 | 来自产品配置或 provider | SDK `model_list()` | 待验证 | 待验证 |
+| per-turn 模型 | nanobot `model_preset` | `Thread.turn(model=...)` | 待验证 | 待验证 |
+| 思考强度 | 取决于模型 preset/provider 配置 | `Thread.turn(effort=...)` 支持 `none/minimal/low/medium/high/xhigh` | 待验证 | 待验证 |
+| 取消 | `RunStream.cancel()` | `TurnHandle.interrupt()` | 待验证 | 待验证 |
 
 ## 5. 产品模式到 Codex 映射
 
@@ -364,15 +364,15 @@ class EventCapabilities:
 | `readonly` | `read_only` | `deny_all` | 升级审批请求返回 deny；仍允许只读命令 |
 | `ask` | `workspace_write` | 低层 `on-request/user` | 只把 runtime 主动发起的审批请求转成 UI `approval.required` |
 | `auto` | `workspace_write` | `auto_review` | 记录 auto review 事件，必要时仍可 deny blocked |
-| `fullaccess` | `full_access` | `auto_review` | blocked 仍 deny，Execution Gateway 仍复核 |
+| `fullaccess` | `full_access` | `auto_review` | blocked 仍 deny，产品层仍记录审计 |
 
 需要注意：
 
 1. `openai-codex 0.1.0b2` 高层 `ApprovalMode` 没有 `ask`，所以 `ask` 只能基于低层 `CodexClient` 的协议字段尝试实现。
 2. smoke 已验证 `ask` 不能保证拦截工作区内写入，所以 UI 不能把它展示成“所有操作都会问我”。
-3. `fullaccess` 不是绕过 PC Repair Agent 的 blocked 策略。
-4. Codex runtime 自带命令执行能力，若用于普通用户 PC 修复，必须通过 sandbox 限制、事件观察和 Gateway 分层约束。
-5. 初版 Codex adapter 建议只开放 `readonly` 和受控工作区用途；系统级维修动作继续走 nanobot/产品 Tool/Gateway。
+3. `fullaccess` 不是绕过 code-lite blocked 策略。
+4. Codex runtime 自带命令执行能力，若用于仓库外路径、系统目录、发布上传或密钥相关任务，必须通过 sandbox 限制、事件观察和产品层策略约束。
+5. 初版 Codex adapter 建议只开放 `readonly` 和受控工作区用途；高风险动作继续走产品 PendingAction、MCP 工具或后续本地执行网关。
 
 ## 6. 统一 AgentEvent 映射
 
@@ -502,15 +502,10 @@ UI 用这些接口决定：
 ```json
 {
   "agentSettings": {
-    "defaultAdapterId": "nanobot",
+    "defaultAdapterId": "codex",
     "adapters": {
-      "nanobot": {
-        "enabled": true,
-        "defaultPermissionMode": "ask",
-        "defaultModelId": "model_deepseek_deepseek_v4_flash"
-      },
       "codex": {
-        "enabled": false,
+        "enabled": true,
         "defaultPermissionMode": "readonly",
         "defaultSandbox": "read-only",
         "defaultRuntimeModel": null,
@@ -520,20 +515,30 @@ UI 用这些接口决定：
         "enabled": false,
         "defaultPermissionMode": "readonly",
         "experimental": true
+      },
+      "opencode": {
+        "enabled": false,
+        "defaultPermissionMode": "readonly",
+        "experimental": true
+      },
+      "nanobot": {
+        "enabled": false,
+        "defaultPermissionMode": "ask",
+        "defaultModelId": "model_deepseek_deepseek_v4_flash"
       }
     }
   }
 }
 ```
 
-不要把不同 runtime 的私有配置强行塞进 nanobot config。`nanobot_config.json` 只给 nanobot 使用；Codex 使用 Codex 自己配置、CLI runtime 或 SDK 参数；Claude Code 同理。
+不要把不同 runtime 的私有配置强行塞进 nanobot config。`nanobot_config.json` 只给 nanobot 使用；Codex 使用 Codex 自己配置、CLI runtime 或 SDK 参数；Claude Code 和 opencode 同理。
 
 ## 9. 推荐落地顺序
 
 ### 阶段 1：Adapter 描述能力
 
 1. 扩展 `AgentAdapterCapabilities`。
-2. 为 nanobot、codex、claude_code 提供 descriptor。
+2. 为 codex、claude_code、opencode、nanobot 提供 descriptor。
 3. 新增 `/api/agents/adapters`。
 4. UI 先只读展示，不切换真实 runtime。
 
@@ -557,7 +562,7 @@ UI 用这些接口决定：
 
 1. nanobot 继续支持 Python Tool entry point。
 2. Codex 一方工具通过 MCP 接入。
-3. PC Repair Agent 的系统修改统一走 Execution Gateway。
+3. code-lite 一方高风险动作统一走 PendingAction、审批记录和后续本地执行网关。
 4. UI 不直接承诺“所有 Agent 都支持同一种 Tool 注册”。
 
 ### 阶段 5：Claude Code 调研与接入
@@ -565,6 +570,20 @@ UI 用这些接口决定：
 1. 验证 Claude Code 是否有 SDK 或只适合 CLI wrapper。
 2. 验证流式事件、审批、MCP、模型选择。
 3. 按同一 descriptor 模型补齐矩阵。
+
+### 阶段 6：opencode 调研与接入
+
+1. 验证 opencode 的 CLI、server、配置文件和事件输出方式。
+2. 验证模型 provider、MCP、工具调用、文件变更和取消机制。
+3. 按同一 descriptor 模型补齐矩阵。
+4. 明确 opencode 是使用 runtime 原生模型配置，还是接入 code-lite 统一模型配置。
+
+### 阶段 7：远程同步适配
+
+1. 将 adapter 输出统一写入有序 `AgentEvent`。
+2. 本地 UI 和远程观看都订阅同一事件流。
+3. 远端默认只读，远端控制和审批必须显式授权。
+4. 审计日志记录远端连接、断开和决策行为。
 
 ## 10. 当前建议
 
@@ -575,15 +594,15 @@ UI 用这些接口决定：
 ```text
 Agent Adapter = 对话、流式、模型、权限、事件映射
 Tool Extension = Python direct / MCP / runtime builtin / Gateway action
-Execution Gateway = PC Repair Agent 的最终系统修改边界
+Product Policy = code-lite 的权限模式、审计、远程授权和高风险动作边界
 ```
 
-这样 nanobot、Codex、Claude Code 可以各自保留原生能力，同时 UI 和安全策略仍有统一入口。
+这样 Codex、Claude Code、opencode、nanobot 可以各自保留原生能力，同时 UI、远程同步和安全策略仍有统一入口。
 
 当前对 Codex 的产品建议：
 
 1. Codex 适合作为代码仓库、脚本、配置和文档类任务的可选 runtime。
-2. Codex 不适合作为普通用户 PC 维修的直接命令执行器。
+2. Codex 不应被包装成覆盖所有系统动作的强审批执行器。
 3. Codex 默认权限应为 `readonly`，并在 UI 标记“实验性”。
 4. 如果开放 `ask`，文案应是“越界动作可能请求确认”，不是“每次写入都会确认”。
-5. 维修侧 Tool 注册优先选 nanobot Python Tool 或 MCP；系统修改统一走 PendingAction 和 Rust Execution Gateway。
+5. 一方工具优先选 MCP、产品 backend 或 runtime 原生扩展；高风险动作统一走 PendingAction 和产品层审计。

@@ -1,20 +1,21 @@
 # 项目目录结构设计
 
-本文档定义 PC Repair Agent 的目标仓库结构。当前只作为规划文档，不代表这些目录都需要立即创建。
+本文档定义 code-lite 的目标仓库结构。当前仓库仍保留部分早期原型命名，后续迁移时应保持小步、可验证，不一次性重命名所有运行时代码。
 
 ## 根目录结构
 
 ```text
-PC-agent/
+code-lite/
   docs/
   ui/
   src-tauri/
   backend/
-  skills/
   packages/
   scripts/
+  demo/
   tests/
   assets/
+  data/
   .gitignore
 ```
 
@@ -24,21 +25,28 @@ PC-agent/
 
 产品和工程文档。
 
-规划文件：
+核心入口：
 
 ```text
 docs/
   PRD.md
   ARCHITECTURE.md
   PROJECT_STRUCTURE.md
+  UI_DEVELOPMENT.md
+  DEVELOPMENT_WORKFLOW.md
+  AGENT_ADAPTER_REDESIGN.md
+  MODEL_PROVIDER_CONFIGURATION_DESIGN.md
+  REMOTE_SYNC_DESIGN.md        # 规划中
   ADR/
 ```
 
-`ADR/` 用于保存架构决策记录。当某个技术选择足够重要，例如“为什么选择 stdio JSON-RPC 而不是 HTTP”，就可以写一篇 ADR。
+`ADR/` 用于保存架构决策记录。当某个技术选择足够重要，例如“远程同步采用 WebSocket 还是 SSE”，就可以写一篇 ADR。
+
+历史维修或 nanobot 专项文档只作为原型资料保留，不再作为产品主方向入口。新增文档应优先围绕多 Agent、远程同步、权限审批、会话事件和运行时配置展开。
 
 ### `ui/`
 
-桌面前端 UI 源码目录。
+桌面前端 UI 源码目录，当前采用 React + Vite。
 
 建议结构：
 
@@ -49,11 +57,14 @@ ui/
     App.tsx
     pages/
       ChatPage.tsx
+      SettingsPage.tsx
+      RemotePage.tsx
     layout/
       AppTitlebar.tsx
       Sidebar.tsx
     components/
       MessageRenderer.tsx
+      RuntimeBadge.tsx
     features/
       chat/
         ApprovalCard.tsx
@@ -61,13 +72,23 @@ ui/
         ConversationHeader.tsx
         MessageList.tsx
         ToolCallViews.tsx
+        FileChangeList.tsx
         messageTools.ts
+      runtime/
+        RuntimePicker.tsx
+        RuntimeStatusPanel.tsx
+      remote/
+        RemoteSessionPanel.tsx
+        ViewerList.tsx
     lib/
       chatState.ts
       formatters.ts
+      eventStream.ts
     services/
       agentClient.ts
       conversationStore.ts
+      remoteClient.ts
+      settingsClient.ts
     styles.css
     types.ts
   package.json
@@ -78,17 +99,19 @@ ui/
 职责：
 
 1. `App.tsx` 只组合全局 layout 和当前 page，不承载业务状态。
-2. `pages/` 放页面级状态、effect 和业务编排，例如聊天页。
-3. `layout/` 放桌面壳稳定布局，例如标题栏和侧边栏。
-4. `features/` 放业务功能组件，例如 Agent 对话、工具调用、审批卡片和输入框。
-5. `components/` 放跨功能复用组件，例如 Markdown 渲染器。
-6. `lib/` 放纯函数、格式化和状态工具。
-7. `services/` 放 Tauri/backend 通信适配，例如 Agent 流和会话存储。
-8. `ui/AGENTS.md` 记录 UI 模块的色彩、样式、组件拆分和交互规范。
+2. `pages/` 放页面级状态、effect 和业务编排。
+3. `layout/` 放桌面壳稳定布局。
+4. `features/chat/` 放对话、消息、工具调用、文件变更和审批组件。
+5. `features/runtime/` 放 agent runtime 选择和能力展示。
+6. `features/remote/` 放远程连接、观看者和授权状态。
+7. `components/` 放跨功能复用组件。
+8. `lib/` 放纯函数、格式化和事件状态工具。
+9. `services/` 放 Tauri/backend 通信适配。
+10. `ui/AGENTS.md` 记录 UI 模块的色彩、样式、组件拆分和交互规范。
 
 ### `src-tauri/`
 
-Tauri 应用外壳和 Rust 执行网关目录。
+Tauri 应用外壳和本地桌面能力目录。
 
 建议结构：
 
@@ -96,17 +119,20 @@ Tauri 应用外壳和 Rust 执行网关目录。
 src-tauri/
   src/
     main.rs
+    lib.rs
     commands/
-    gateway/
-      risk_classifier.rs
-      executor.rs
-      approvals.rs
-      audit.rs
+      backend.rs
+      workspace.rs
+      window.rs
     sidecar/
       backend_process.rs
       protocol.rs
+    security/
+      permissions.rs
+      audit.rs
     config/
   capabilities/
+  binaries/
   tauri.conf.json
   Cargo.toml
 ```
@@ -114,111 +140,90 @@ src-tauri/
 职责：
 
 1. 暴露给 UI 的 Tauri 命令。
-2. Python sidecar 生命周期管理。
-3. 结构化操作校验。
-4. 风险分级。
-5. 高风险审批流程。
-6. 本地命令执行。
-7. 审计日志持久化。
+2. Python backend sidecar 生命周期管理。
+3. 打包和安装态资源管理。
+4. 本地 workspace 选择和桌面集成。
+5. 后续承载更强的本地权限边界、系统命令网关和审计落盘。
 
 ### `backend/`
 
-Python Agent 后台目录，最终会作为 sidecar 随 Tauri 应用分发。
+Python Agent Hub，最终作为 sidecar 随 Tauri 应用分发。
 
-建议结构：
+当前目录仍使用 `pc_agent_backend` 历史包名，目标职责已经转向 code-lite。后续可择机迁移为 `code_lite_backend`。
+
+建议目标结构：
 
 ```text
 backend/
-  pc_agent_backend/
-    main.py                 # CLI 入口，只负责参数解析和 uvicorn 启动
-    app.py                  # FastAPI app 工厂和服务装配
+  code_lite_backend/
+    main.py
+    app.py
     api/
-      router.py             # /api 路由聚合
-      dependencies.py       # FastAPI 依赖入口
+      router.py
+      dependencies.py
       routes/
         health.py
-        approvals.py
         conversations.py
         turns.py
+        approvals.py
+        settings.py
+        remote.py
+        runtimes.py
     agents/
-      registry.py           # 根据配置选择 Agent Adapter
-      risk.py               # 工具风险分级和说明
-      nanobot/              # nanobot SDK 真实适配层
-        adapter.py          # 流式运行、取消、会话 key 和 hook 装配
-        events.py           # nanobot 事件映射为 UI 统一事件
-        hooks.py            # 工具审批 hook
-      codex/                # Codex 适配层预留
-      claude_code/          # Claude Code 适配层预留
+      registry.py
+      descriptors.py
+      base.py
+      codex/
+        adapter.py
+        events.py
+        permissions.py
+      claude_code/
+        adapter.py
+        cli.py
+        events.py
+      opencode/
+        adapter.py
+        cli.py
+        events.py
+      nanobot/
+        adapter.py
+        events.py
+        hooks.py
     core/
-      config.py             # 环境、data 目录和最小配置创建
-      encoding.py           # stdio UTF-8 设置
-      json_utils.py         # JSON/NDJSON 序列化工具
-      paths.py              # 仓库和默认 workspace 路径
+      config.py
+      encoding.py
+      json_utils.py
+      paths.py
     schemas/
-      agent.py              # Agent Adapter 协议和运行请求模型
+      agent.py
+      events.py
+      approvals.py
+      remote.py
+      settings.py
     services/
-      approvals.py          # 审批等待与决策 broker
-      runtime.py            # AppServices 聚合对象
+      event_bus.py
+      conversations.py
+      approvals.py
+      remote_sessions.py
+      runtime_config.py
+      model_config.py
     storage/
-      conversations.py      # JSON 会话记录存储
+      conversations.py
+      events.py
+      audit.py
+      settings.py
   tests/
   pyproject.toml
 ```
 
 职责：
 
-1. 提供本地 FastAPI backend，作为 Tauri sidecar 的 HTTP/NDJSON 接口。
-2. 通过统一 Agent Adapter 协议隔离 nanobot、Codex、Claude Code 等运行时。
-3. 将工具调用、权限审批、流式事件映射放在具体 adapter 内，业务路由只依赖统一事件。
-4. 读写运行时 data 目录，包括自动创建最小 `config/nanobot_config.json` 和 `record/` 会话记录。
-5. 为后续 Skill、系统扫描、驱动下载、执行网关请求等模块保留独立目录边界。
-
-### `skills/`
-
-第一方 Skill 包目录。
-
-建议结构：
-
-```text
-skills/
-  driver-auto-install/
-    skill.json
-    README.md
-  laptop-oem-driver/
-    skill.json
-    README.md
-  runtime-completion/
-    skill.json
-    README.md
-  smart-diagnostics/
-    skill.json
-    README.md
-```
-
-每个 Skill 应声明：
-
-1. Skill ID。
-2. 展示名称。
-3. 描述。
-4. 版本。
-5. 所需权限。
-6. 支持平台。
-7. 风险类别。
-8. 入口点。
-
-示例 manifest：
-
-```json
-{
-  "id": "runtime-completion",
-  "name": "运行时环境补全",
-  "version": "0.1.0",
-  "platforms": ["windows"],
-  "permissions": ["system.read", "download.file", "installer.run"],
-  "riskCategories": ["medium", "high"],
-  "entry": "runtime_completion"
-}
-```
+1. 提供本地 backend API 和流式事件接口。
+2. 通过统一 Agent Adapter 协议隔离 Codex、Claude Code、opencode 和 nanobot。
+3. 将 runtime 私有事件映射为统一 `AgentEvent`。
+4. 管理会话、事件序号、审计日志和运行时配置。
+5. 为远程同步提供快照、增量事件和权限控制。
+6. 对敏感配置和会话导出做脱敏处理。
 
 ### `packages/`
 
@@ -230,6 +235,10 @@ skills/
 packages/
   protocol/
     schema/
+      agent-event.schema.json
+      approval.schema.json
+      runtime.schema.json
+      remote.schema.json
     typescript/
     python/
     rust/
@@ -237,15 +246,34 @@ packages/
 
 可能用途：
 
-1. 共享 JSON Schema。
-2. 操作定义。
-3. 事件定义。
-4. Skill manifest schema。
-5. 生成 TypeScript、Python 或 Rust 类型。
+1. 共享 `AgentEvent` JSON Schema。
+2. 共享审批对象和远程连接对象定义。
+3. 共享 runtime descriptor。
+4. 生成 TypeScript、Python 或 Rust 类型。
+
+### `demo/`
+
+原型和 SDK 探针目录。
+
+现有内容：
+
+1. nanobot CLI 审批 demo。
+2. Codex adapter probe。
+
+后续可新增：
+
+```text
+demo/
+  claude_code_adapter_probe.py
+  opencode_adapter_probe.py
+  remote_sync_probe.py
+```
+
+demo 可以调用模型或启动 runtime 的脚本必须在 README 中明确说明风险、环境变量和是否会写 workspace。
 
 ### `scripts/`
 
-开发自动化脚本目录。
+开发、打包、版本和验证脚本目录。
 
 建议结构：
 
@@ -255,15 +283,17 @@ scripts/
   build/
   package/
   verify/
+  migration/
 ```
 
 可能脚本：
 
-1. 启动 UI 和后台开发环境。
+1. 启动 UI 和 backend 开发环境。
 2. 构建 Python sidecar。
 3. 打包 Tauri 应用。
-4. 校验 Skill manifest。
-5. 运行 lint 和测试。
+4. 校验 protocol schema。
+5. 运行 lint、测试和静态检查。
+6. 执行命名迁移和版本同步。
 
 ### `tests/`
 
@@ -276,6 +306,7 @@ tests/
   fixtures/
   integration/
   e2e/
+  remote/
 ```
 
 单元测试应尽量靠近具体实现。根目录 `tests/` 主要放跨模块、跨语言或端到端测试。
@@ -293,38 +324,57 @@ assets/
   screenshots/
 ```
 
-不要把下载的驱动、运行时安装包或用户机器扫描数据放在这里。
+不要把用户仓库、模型输出、会话记录、日志、下载缓存或远程令牌放在这里。
 
 ## 运行时数据
 
 运行时数据不应提交到 git。
 
-预期本地运行时目录：
+目标本地运行时目录：
+
+```text
+data/
+  config/
+    app_config.json
+    model_config.json
+    runtime_config.json
+  conversations/
+  events/
+  logs/
+  remote/
+  cache/
+```
+
+兼容期可能仍存在：
 
 ```text
 data/
   config/
     nanobot_config.json
   record/
-  logs/
-  cache/
-downloads/
-driver-cache/
-runtime-cache/
-audit-logs/
 ```
 
-这些路径已经被 `.gitignore` 忽略。
+这些属于早期原型命名，迁移时应提供兼容读取和一次性迁移，避免破坏已有用户数据。
 
 ## 初始目录创建策略
 
-推荐第一阶段按这个顺序创建实际目录：
+推荐第一阶段按这个顺序推进：
 
-1. 用选定的前端框架创建 `ui/`。
-2. 通过 Tauri 初始化工具创建 `src-tauri/`。
-3. 创建 `backend/pc_agent/`，先放最小 sidecar 入口。
-4. 在深度连接 UI 和后台前，先创建 `packages/protocol/schema/`。
-5. 在实现完整 Skill 逻辑前，先创建 `skills/` manifest。
+1. 固化 `AgentEvent`、`AgentAdapterDescriptor` 和审批对象 schema。
+2. 在现有 backend 包名下补齐 Codex、Claude Code、opencode descriptor。
+3. 完成 Codex adapter 原型。
+4. 建立 `remote` API 和只读事件订阅。
+5. 将 UI 增加 runtime 状态和远程观看入口。
+6. 验证链路稳定后，再规划包名和产物名迁移。
 
-这样仓库会保持清晰，同时避免过早实现不稳定的业务代码。
+## 命名迁移建议
 
+从旧原型迁移到 code-lite 时，建议分批处理：
+
+1. 文档和 UI 文案。
+2. package name、Tauri product name、窗口标题和发布产物名。
+3. Python 包名和 Rust crate 名。
+4. 运行时目录名，例如从 `~/.repair-agent` 迁移到 `~/.code-lite`。
+5. 旧配置自动迁移和兼容读取。
+
+每批迁移都应单独验证，避免把产品改名和业务功能变更混在一起。

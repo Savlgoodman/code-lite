@@ -1,12 +1,12 @@
-# AI 模型提供商配置调研与设计
+# code-lite 模型提供商配置调研与设计
 
-本文记录模型提供商配置修复与完善的调研结论、目标数据模型、后端接口、前端交互和 nanobot 接入策略。本文是后续开发工作的设计依据，当前不包含实现代码。
+本文记录 code-lite 模型提供商配置修复与完善的调研结论、目标数据模型、后端接口、前端交互和各 Agent Runtime 的接入策略。本文是后续开发工作的设计依据，当前不包含实现代码。
 
 ## 1. 背景
 
 当前项目已经形成以下运行时边界：
 
-1. 应用运行配置落在运行时 data 目录，开发环境为 `data/config/nanobot_config.json`，普通环境为 `~/.repair-agent/config/nanobot_config.json`。
+1. 应用运行配置落在运行时 data 目录，目标配置文件包括 `app_config.json`、`model_config.json` 和 `runtime_config.json`；兼容期仍会读取 `data/config/nanobot_config.json` 和 `~/.repair-agent/config/nanobot_config.json`。
 2. UI 通过 Tauri `ensure_backend` 拉起或连接 Python backend。
 3. Python backend 通过 FastAPI 提供 `/api/turns/stream` NDJSON 流式接口，并在 nanobot adapter 中调用 `Nanobot.from_config(...)` 与 `run_streamed(...)`。
 4. 设置页已有“模型提供商配置”原型，但目前只覆盖“输入 URL/API Key，获取模型列表，写入一个默认模型”的最短链路。
@@ -25,14 +25,14 @@
 6. 支持删除模型、删除供应商，并处理默认模型被删除后的降级规则。
 7. 支持新会话默认模型策略：沿用上次使用模型，或固定使用指定模型。
 8. 支持对话中为下一轮切换模型，用于横向对比不同模型效果。
-9. 将产品配置安全同步为 nanobot 可消费的 `providers`、`modelPresets`、`agents.defaults.modelPreset`。
+9. 将产品配置安全同步给需要派生配置的 runtime，例如 nanobot 的 `providers`、`modelPresets`、`agents.defaults.modelPreset`。
 
 非目标：
 
 1. 本文不实现系统凭据存储，只定义后续应迁移方向。
 2. 本文不实现各家非标准模型列表接口的完整适配，只定义可扩展接口。
 3. 本文不改变 nanobot SDK 源码。
-4. 本文不处理 Codex、Claude Code adapter 的完整模型切换，仅要求统一协议预留字段。
+4. 本文不完整实现 Codex、Claude Code、opencode adapter 的模型切换，仅要求统一协议预留字段，并区分产品级模型配置和 runtime 原生配置。
 
 ## 3. 当前实现现状
 
@@ -45,7 +45,14 @@ REPAIR_AGENTS_ENV=DEV -> <repo>/data/config/nanobot_config.json
 其他环境              -> ~/.repair-agent/config/nanobot_config.json
 ```
 
-缺失时会创建最小 nanobot 配置，主要字段为：
+这些是早期 nanobot 原型路径。code-lite 目标路径应迁移为：
+
+```text
+开发环境 -> <repo>/data/config/model_config.json
+普通环境 -> ~/.code-lite/config/model_config.json
+```
+
+兼容期缺失时会创建最小 nanobot 配置，主要字段为：
 
 ```json
 {

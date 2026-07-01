@@ -1,6 +1,6 @@
 # 发布与版本更新
 
-本文记录当前 Windows 原型阶段的版本号、打包和更新策略。
+本文记录 code-lite 当前 Windows 原型阶段的版本号、打包和更新策略。
 
 完整编译和发布步骤见 `docs/BUILD_AND_RELEASE.md`。
 
@@ -68,11 +68,14 @@ src-tauri/target/release/bundle/msi/
 安装包会保留用户运行时数据，例如：
 
 ```text
-%USERPROFILE%\.repair-agent\config
-%USERPROFILE%\.repair-agent\record
-%USERPROFILE%\.repair-agent\logs
-%USERPROFILE%\.repair-agent\cache
+%USERPROFILE%\.code-lite\config
+%USERPROFILE%\.code-lite\conversations
+%USERPROFILE%\.code-lite\events
+%USERPROFILE%\.code-lite\logs
+%USERPROFILE%\.code-lite\cache
 ```
+
+兼容期需要继续读取旧 `%USERPROFILE%\.repair-agent` 数据，并在迁移完成前避免删除旧数据。
 
 ## 自动更新规划
 

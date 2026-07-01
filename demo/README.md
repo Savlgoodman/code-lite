@@ -1,6 +1,6 @@
-# nanobot SDK 命令行审批 Demo
+# code-lite SDK 探针与命令行审批 Demo
 
-这个 demo 用来验证 nanobot Python SDK 是否适合 PC Repair Agent 的后台 Agent 原型。
+这个目录保存 code-lite 的 SDK 探针和命令行审批 demo。现有 nanobot demo 用来验证 nanobot Python SDK 是否适合作为 code-lite 的兼容 adapter；Codex probe 用来验证 `openai-codex` Python SDK 的 adapter 接入能力。
 
 它展示：
 
@@ -47,7 +47,7 @@ uv run python .\cli_approval_demo.py --config .\nanobot_config.local.json
 你好，简单介绍一下你自己。
 列出当前 workspace 的顶层文件。
 用命令查看当前目录。
-/cancel-after 2 写一段较长的说明，介绍 Windows 驱动安装注意事项。
+/cancel-after 2 写一段较长的说明，介绍 coding agent 执行命令时的审批注意事项。
 /exit
 ```
 
@@ -56,7 +56,7 @@ uv run python .\cli_approval_demo.py --config .\nanobot_config.local.json
 如果要在运行中手动取消当前 turn，可以按 `Ctrl+C`。如果要自动演示取消，可以使用：
 
 ```text
-/cancel-after 2 请写一个较长的 Windows 维修检查清单。
+/cancel-after 2 请写一个较长的代码仓库任务检查清单。
 ```
 
 ## 重要说明
@@ -75,11 +75,11 @@ $env:PYTHONIOENCODING = "utf-8"
 ```text
 Python nanobot hook
   -> Tauri UI 审批弹窗
-  -> Rust Execution Gateway 二次风险审查
+  -> code-lite 产品层权限策略和后续执行网关二次审查
   -> 执行或拒绝
 ```
 
-也就是说，nanobot hook 负责“提前发现工具调用并等待用户选择”，Tauri/Rust 才是最终执行边界。
+也就是说，nanobot hook 负责“提前发现工具调用并等待用户选择”，code-lite 产品层才是最终权限与审计边界。
 
 ## Codex SDK Adapter 探针
 

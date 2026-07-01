@@ -1,5 +1,7 @@
 # nanobot 命令执行权限调研与切换设计
 
+> 历史资料：本文来自早期本地维修 agent 原型阶段，保留用于理解 nanobot 工具审批和权限切换能力。code-lite 当前产品方向以多 Agent SDK 接入、编码任务、通用任务和远程同步观看为主，新权限设计应优先参考 `docs/ARCHITECTURE.md`、`docs/AGENT_ADAPTER_REDESIGN.md` 和 `docs/REMOTE_SYNC_DESIGN.md`。
+
 本文调研 `nanobot-ai 0.2.2` 在工具执行权限、审批和自动放行方面的原生能力，并设计 PC Repair Agent 的命令执行权限切换方案。
 
 当前结论基于本仓库锁定依赖、已落地 backend 代码和本地安装包源码。公开资料只作为辅助参考，最终以当前运行时依赖 `backend/uv.lock` 中的 `nanobot-ai 0.2.2` 为准。
@@ -545,4 +547,3 @@ commandPermissionMode = "ask"
 自动审批：自动允许低中风险操作，高风险仍会确认。
 完全允许：尽量不中断 Agent，但禁止操作仍会被拦截并记录。
 ```
-

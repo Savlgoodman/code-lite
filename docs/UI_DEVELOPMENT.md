@@ -1,6 +1,6 @@
 # UI 与 Tauri 桌面壳开发文档
 
-本文记录 PC Repair Agent 当前 UI 原型、Tauri 桌面壳和 Python nanobot 后台的开发方式。当前阶段已经移除固定 mock 回复，UI 会通过 Tauri 启动本地 Python backend，并以流式事件展示 nanobot 输出。
+本文记录 code-lite 当前 UI 原型、Tauri 桌面壳和 Python Agent Hub 的开发方式。当前阶段 UI 通过 Tauri 启动本地 Python backend，并以流式事件展示 agent 输出；后续重点是接入 Codex、Claude Code、opencode，并加入远程同步观看。
 
 ## 当前状态
 
@@ -11,7 +11,7 @@
 3. 主区域聊天界面、工具调用卡片、审批面板、底部输入框。
 4. 新建会话、搜索会话、发送消息和 backend JSON 会话持久化。
 5. `streamdown` Markdown 渲染，用于 assistant 流式消息。
-6. Python backend 基于 nanobot SDK，提供本地 HTTP NDJSON 流式接口。
+6. Python backend 提供本地 HTTP NDJSON 流式接口，当前保留 nanobot 原型 adapter，并预留 Codex、Claude Code 等 adapter。
 7. Tauri 2 桌面壳，默认窗口 `1200x756`，最小窗口 `900x620`，支持拉伸。
 8. Windows 本地开发启动脚本，自动进入 VS Build Tools 环境并设置代理。
 
@@ -29,7 +29,7 @@
 │       ├── App.tsx           # 应用根入口，只组合全局 layout 和 page
 │       ├── pages/            # 页面级状态与业务编排，例如 ChatPage
 │       ├── layout/           # 桌面壳布局，例如标题栏和侧边栏
-│       ├── features/         # 业务组件，例如 chat、审批、工具调用
+│       ├── features/         # 业务组件，例如 chat、runtime、remote
 │       ├── components/       # 跨功能复用组件，例如 Markdown 消息渲染
 │       ├── lib/              # 纯函数、格式化、状态工具
 │       ├── services/         # 前端服务适配，例如 agentClient 和 conversationStore
@@ -38,14 +38,14 @@
 ├── backend/
 │   ├── pyproject.toml        # Python backend 依赖
 │   ├── uv.lock               # uv 锁文件
-│   └── pc_agent_backend/     # FastAPI backend 源码
+│   └── pc_agent_backend/     # FastAPI backend 源码，历史包名后续可迁移
 │       ├── main.py           # CLI/uvicorn 启动入口
 │       ├── app.py            # FastAPI app 工厂
-│       ├── api/              # health、conversation、turn、approval 路由
-│       ├── agents/           # nanobot/codex/claude_code adapter 层
+│       ├── api/              # health、conversation、turn、approval、settings 路由
+│       ├── agents/           # nanobot/codex/claude_code/opencode adapter 层
 │       ├── core/             # 配置、路径、编码、JSON 工具
 │       ├── schemas/          # 后端内部协议类型
-│       ├── services/         # 运行态服务和审批 broker
+│       ├── services/         # 运行态服务、审批 broker、模型配置
 │       └── storage/          # JSON 会话存储
 └── src-tauri/
     ├── Cargo.toml            # Tauri Rust 工程配置
@@ -136,13 +136,7 @@ npm run tauri:dev:win
 5. Tauri 自动启动 Vite，再启动桌面窗口。
 6. UI 首次发送消息时，Tauri 会通过 `ensure_backend` 启动 Python backend。
 
-开发态默认不声明 Tauri `externalBin`，因此不需要先生成 `src-tauri/binaries/pc-agent-backend-x86_64-pc-windows-msvc.exe`。打包时由 `src-tauri/tauri.release.conf.json` 注入 backend sidecar 配置。
-
-如需指定其他代理：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\dev-tauri.ps1 -Proxy http://127.0.0.1:7899
-```
+开发态默认不声明 Tauri `externalBin`，因此不需要先生成 `src-tauri/binaries/pc-agent-backend-x86_64-pc-windows-msvc.exe`。打包时由 `src-tauri/tauri.release.conf.json` 注入 backend sidecar 配置，产物名后续会随 code-lite 命名迁移。
 
 启动成功后，开发服务器默认监听：
 
@@ -150,10 +144,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-tauri.ps1 -Proxy http://1
 http://127.0.0.1:1420
 ```
 
-Tauri 桌面窗口标题为：
+Tauri 桌面窗口标题后续应迁移为：
 
 ```text
-PC Repair Agent
+code-lite
 ```
 
 Python backend 默认监听：
@@ -174,11 +168,15 @@ npm run backend:dev
 data/config/nanobot_config.json
 ```
 
-如果需要指定 nanobot 配置或切换 adapter：
+这是早期原型命名。后续应迁移为 code-lite 的统一 runtime 配置，同时保持兼容读取。
+
+如果需要指定配置或切换 adapter：
 
 ```powershell
 uv run --project backend python -m pc_agent_backend.main --config .\demo\nanobot_config.local.json --workspace . --agent-adapter nanobot
 ```
+
+adapter 目标值包括 `nanobot`、`codex`、`claude_code`，后续会加入 `opencode`。
 
 ## 前端单独调试
 
@@ -221,6 +219,8 @@ Tauri 启动 backend 时会把控制台输出写入运行时 data 目录：
 开发环境：data/logs/backend-*.log
 安装环境：%USERPROFILE%\.repair-agent\logs\backend-*.log
 ```
+
+安装环境目录仍是早期原型命名。迁移为 `%USERPROFILE%\.code-lite` 前需要先设计兼容迁移。
 
 关闭桌面窗口或退出应用时，Tauri 会停止本次由它启动的 backend 进程树。若端口上已有手动启动的 backend，Tauri 会复用该服务，但不会在退出时杀掉外部进程。
 
@@ -275,15 +275,15 @@ npm exec --prefix ui -- tauri icon .\src-tauri\icons\app-icon.svg --output .\src
 
 ## 后续集成建议
 
-UI 与后台集成时建议优先拆分以下边界：
+UI 与 backend 集成时建议优先拆分以下边界：
 
-1. 会话读取接口：读取会话列表、读取消息。
-2. Agent 运行接口：发送用户输入、接收流式文本、接收工具调用事件；无 `conversationId` 时由 backend 创建新会话。
-3. 审批接口：展示高风险命令说明、风险点、影响范围和确认结果。
-4. Skill 展示接口：展示驱动安装、笔记本驱动下载、运行时补全等技能入口和执行状态。
-5. 本机诊断接口：展示硬件、系统、运行时环境和驱动扫描结果。
+1. 会话读取接口：读取会话列表、读取消息和事件快照。
+2. Agent 运行接口：发送用户输入，接收流式文本、工具调用、命令输出、文件变更和 token usage；无 `conversationId` 时由 backend 创建新会话。
+3. Runtime 接口：展示 Codex、Claude Code、opencode、nanobot 的可用状态、能力边界和配置入口。
+4. 审批接口：展示风险说明、操作范围、runtime 来源和确认结果。
+5. 远程同步接口：展示连接码、观看者列表、连接状态、撤销入口和后续授权入口。
 
-建议先把 mock 数据替换为一层前端服务适配器，再让适配器对接 Tauri 或 Python 后台，避免 UI 组件直接绑定某个 SDK。
+建议先让 UI 只依赖统一 `AgentEvent` 和 runtime descriptor，再由 adapter 适配各 SDK 或 CLI，避免组件直接绑定某个 runtime。
 
 ## 常见问题
 
@@ -360,7 +360,7 @@ REPAIR_AGENTS_ENV=DEV  ->  <repo>/data/config/nanobot_config.json
 其他环境              ->  ~/.repair-agent/config/nanobot_config.json
 ```
 
-仓库内不再维护 `backend/config` 配置模板。需要临时调试其他配置时，可以使用 `--config` 指定显式路径。
+这是历史兼容路径。仓库内不维护真实本地配置，后续会迁移到 code-lite 的统一配置文件。需要临时调试其他配置时，可以使用 `--config` 指定显式路径。
 
 API Key 使用环境变量：
 
@@ -387,7 +387,7 @@ Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
 3. `src-tauri/target/`
 4. `backend/.venv/`
 5. `.cache/`
-6. 日志、临时文件、本地密钥和真实用户诊断数据。
+6. 日志、临时文件、本地密钥、真实用户数据和远程连接令牌。
 
 提交前建议检查：
 

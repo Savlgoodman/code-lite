@@ -1,5 +1,7 @@
 # nanobot Python SDK 调研记录
 
+> 历史资料：本文来自早期 nanobot 原型调研，保留用于理解 nanobot 作为兼容 adapter 的能力。code-lite 当前产品方向以 Codex、Claude Code、opencode 等多 Agent Runtime 接入和远程同步观看为主。
+
 ## 1. 调研对象
 
 仓库：`HKUDS/nanobot`

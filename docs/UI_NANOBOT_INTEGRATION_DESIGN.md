@@ -1,5 +1,7 @@
 # UI 接入 nanobot 与 Markdown 渲染设计
 
+> 历史资料：本文记录早期 UI 去 mock 并接入 nanobot backend 的设计。code-lite 当前新功能应优先围绕统一 `AgentEvent`、多 Agent Adapter 和远程同步观看设计展开。
+
 本文设计“去掉前端 mock 数据，接入 nanobot Python 后台”的实现方案，并明确 Markdown 渲染采用 `D:\project\doc-pilot\hermes-api-webui` 当前使用的 `streamdown` 库。
 
 当前文档只做设计，不包含实现代码改动。

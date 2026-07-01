@@ -1,6 +1,8 @@
-# PC Repair Agent - Agent 协作规范
+# code-lite - Agent 协作规范
 
-本文件面向所有参与本仓库工作的 AI Coding Agent 和开发者。当前 UI 与 Tauri 桌面壳已进入原型阶段，Python 后台、Agent Runtime 和审批网关等模块仍在规划与验证中。本文件只记录高频协作规则、文档入口、简要启动入口、提交规范和文件编码要求；完整实现细节统一沉淀到 `docs/` 下的专项文档。
+本文件面向所有参与本仓库工作的 AI Coding Agent 和开发者。code-lite 是一个桌面端多 Agent 工作台，目标是接入 Codex、Claude Code、opencode 等 agent runtime，为用户完成编码任务和其他自动化任务，并支持远程连接、远程同步观看和后续授权协作。
+
+当前 UI 与 Tauri 桌面壳已进入原型阶段，Python backend 已具备本地流式事件接口和早期 adapter 结构。后续重点是把产品叙事、adapter 抽象、远程同步、权限审批和运行时配置统一到 code-lite 方向。
 
 ## AI Coding 规范
 
@@ -11,7 +13,7 @@
 3. **禁止写入敏感信息**：不要把 API Key、Token、账号密码、私钥等敏感信息写入仓库文件；配置文件只保留环境变量占位或示例值。
 4. **禁止 Emoji**：代码、注释、提交信息、文档和用户可见文案中不使用 emoji 表情。
 5. **禁止擅自启动长期进程**：未经用户明确要求，不自行后台启动前端、后端、数据库、Agent 服务或其他长期运行进程。
-6. **优先阅读文档**：开始涉及需求、架构、nanobot、demo 或目录设计的任务前，先阅读本文件和相关 `docs/` 文档。
+6. **优先阅读文档**：开始涉及需求、架构、Agent Adapter、远程同步、demo 或目录设计的任务前，先阅读本文件和相关 `docs/` 文档。
 7. **小步修改**：每次改动尽量围绕一个明确目标，不做无关重构，不顺手格式化无关文件。
 8. **可验证优先**：能用脚本、命令或静态检查验证的改动，应在完成后执行验证，并在回复中说明结果。
 
@@ -48,24 +50,27 @@ Path("docs/PRD.md").write_text(content, encoding="utf-8")
 
 | 路径 | 用途 |
 |------|------|
-| `docs/PRD.md` | 产品需求文档，记录产品定位、核心功能、MVP 范围和路线规划 |
-| `docs/ARCHITECTURE.md` | 架构设计文档，记录 Tauri、Python 后台、Agent Runtime、审批网关等设计方向 |
-| `docs/PROJECT_STRUCTURE.md` | 项目目录结构规划，记录未来代码目录和职责边界 |
+| `docs/PRD.md` | 产品需求文档，记录 code-lite 的产品定位、核心功能、MVP 范围和路线规划 |
+| `docs/ARCHITECTURE.md` | 架构设计文档，记录 Tauri、Python Agent Hub、多 Agent Adapter、远程同步和权限边界 |
+| `docs/PROJECT_STRUCTURE.md` | 项目目录结构规划，记录目标代码目录、职责边界和命名迁移策略 |
 | `docs/UI_DEVELOPMENT.md` | UI 与 Tauri 桌面壳开发文档，记录环境依赖、启动流程、目录职责和常见问题 |
 | `docs/DEVELOPMENT_WORKFLOW.md` | 开发流程规范，记录 dev 集成、分支命名、master 使用范围、变基合并和版本升级要求 |
-| `docs/UI_NANOBOT_INTEGRATION_DESIGN.md` | UI 去 mock、接入 nanobot Python 后台和 streamdown Markdown 渲染的设计文档 |
-| `docs/NANOBOT_SDK_RESEARCH.md` | nanobot SDK 调研记录，包含流式输出、工具审批、自定义 Tool、Skill 注入和配置建议 |
-| `demo/README.md` | nanobot 命令行 demo 使用说明 |
+| `docs/AGENT_ADAPTER_REDESIGN.md` | 多 Agent Adapter 设计与 Codex SDK 探针结论，后续需扩展 Claude Code 和 opencode |
+| `docs/REMOTE_SYNC_DESIGN.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
+| `docs/MODEL_PROVIDER_CONFIGURATION_DESIGN.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
+| `docs/NANOBOT_SDK_RESEARCH.md` | nanobot SDK 调研记录，作为兼容 adapter 和原型资料保留 |
+| `demo/README.md` | SDK 探针和命令行 demo 使用说明 |
 
 阅读建议：
 
 1. 做产品需求相关任务，先读 `docs/PRD.md`。
-2. 做架构和模块边界相关任务，先读 `docs/ARCHITECTURE.md` 和 `docs/PROJECT_STRUCTURE.md`。
+2. 做架构、模块边界相关任务，先读 `docs/ARCHITECTURE.md` 和 `docs/PROJECT_STRUCTURE.md`。
 3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/UI_DEVELOPMENT.md`。
-4. 做 UI 去 mock、接入 nanobot、流式事件、审批闭环和 Markdown 渲染相关任务，先读 `docs/UI_NANOBOT_INTEGRATION_DESIGN.md`。
-5. 做 nanobot、Skill、Tool、审批流相关任务，先读 `docs/NANOBOT_SDK_RESEARCH.md`。
-6. 做 demo 相关任务，先读 `demo/README.md` 和 `demo/pyproject.toml`。
-7. 做功能开发、Bug 修复、性能优化、重构或发布合并前，先读 `docs/DEVELOPMENT_WORKFLOW.md`。
+4. 做 Codex、Claude Code、opencode、adapter 能力模型和 runtime 事件相关任务，先读 `docs/AGENT_ADAPTER_REDESIGN.md`。
+5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/REMOTE_SYNC_DESIGN.md`。
+6. 做模型供应商、模型选择和 runtime 配置相关任务，先读 `docs/MODEL_PROVIDER_CONFIGURATION_DESIGN.md`。
+7. 做 nanobot 兼容 adapter 或旧 demo 相关任务，先读 `docs/NANOBOT_SDK_RESEARCH.md` 和 `demo/README.md`。
+8. 做功能开发、Bug 修复、性能优化、重构或发布合并前，先读 `docs/DEVELOPMENT_WORKFLOW.md`。
 
 ## 开发与启动入口
 
@@ -73,7 +78,7 @@ Path("docs/PRD.md").write_text(content, encoding="utf-8")
 
 1. `ui/`：React + Vite 前端 UI，使用 `streamdown` 渲染 assistant Markdown，当前由 backend 流式事件驱动消息。
 2. `src-tauri/`：Tauri 2 桌面壳，默认窗口为 `1200x756`，最小窗口为 `900x620`。
-3. `backend/`：Python nanobot 后台，使用 uv 管理依赖，提供本地 NDJSON 流式接口。
+3. `backend/`：Python Agent Hub 原型，使用 uv 管理依赖，提供本地 NDJSON 流式接口；当前仍包含 nanobot adapter、Codex adapter 占位和 Claude Code adapter 占位。
 4. `scripts/dev-tauri.ps1`：Windows 本地开发启动脚本，会临时设置 VS Build Tools、Cargo PATH 和代理环境。
 
 常用命令：
@@ -129,9 +134,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-tauri.ps1 -Proxy http://1
 示例：
 
 ```text
-feat/settings-0630-model-provider
-fix/backend-0630-sidecar-lifecycle
-perf/overview-0630-cache
+feat/adapter-0701-codex-runtime
+feat/remote-0701-viewer-sync
+fix/backend-0701-sidecar-lifecycle
+perf/events-0701-stream-cache
 ```
 
 `master` 分支只保留以下操作：
@@ -152,14 +158,14 @@ perf/overview-0630-cache
 
 | 前缀 | 用途 | 示例 |
 |------|------|------|
-| `feat:` | 新功能 | `feat: 增加命令审批原型` |
-| `fix:` | 修复问题 | `fix: 修复 demo 配置路径错误` |
-| `docs:` | 文档变更 | `docs: 更新 nanobot 调研记录` |
-| `refactor:` | 重构 | `refactor: 调整 Agent 适配层结构` |
-| `test:` | 测试相关 | `test: 添加工具注册验证脚本` |
-| `chore:` | 构建、依赖、工具链 | `chore: 初始化 uv 项目配置` |
+| `feat:` | 新功能 | `feat: 增加 Codex adapter 原型` |
+| `fix:` | 修复问题 | `fix: 修复远程事件重连序号错误` |
+| `docs:` | 文档变更 | `docs: 更新 code-lite 架构文档` |
+| `refactor:` | 重构 | `refactor: 调整 Agent Adapter 描述模型` |
+| `test:` | 测试相关 | `test: 添加事件协议验证脚本` |
+| `chore:` | 构建、依赖、工具链 | `chore: 更新 sidecar 打包配置` |
 | `style:` | 纯格式调整 | `style: 统一 Markdown 表格格式` |
-| `perf:` | 性能优化 | `perf: 优化硬件扫描缓存逻辑` |
+| `perf:` | 性能优化 | `perf: 优化远程同步事件缓存` |
 
 提交规则：
 
@@ -176,8 +182,8 @@ perf/overview-0630-cache
 1. API Key、Token、账号密码、私钥。
 2. `.env`、本地配置、真实用户数据。
 3. Python 虚拟环境、Node 依赖、Rust 编译产物。
-4. 日志、下载缓存、驱动缓存、运行时 session。
-5. 包含真实机器信息或用户隐私的诊断报告。
+4. 日志、下载缓存、运行时 session。
+5. 包含真实仓库私密内容、用户隐私或远程连接令牌的诊断报告。
 
 配置文件应提供示例模板，例如：
 
@@ -190,4 +196,4 @@ config.example.json
 
 ## 当前阶段约束
 
-当前 UI 与 Tauri 桌面壳已进入原型阶段，`AGENTS.md` 只保留高频入口和协作规范；详细设计、启动流程、排错步骤和模块说明应写入 `docs/` 下的专项文档。后续 Python 后台、Agent Runtime、审批网关等模块落地后，也应优先补充对应专项文档，再在本文件中加入简要入口。
+当前 UI 与 Tauri 桌面壳已进入原型阶段，`AGENTS.md` 只保留高频入口和协作规范；详细设计、启动流程、排错步骤和模块说明应写入 `docs/` 下的专项文档。后续 Codex、Claude Code、opencode、远程同步和权限审批等模块落地后，也应优先补充对应专项文档，再在本文件中加入简要入口。

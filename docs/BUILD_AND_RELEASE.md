@@ -1,6 +1,6 @@
 # 编译与发布
 
-本文记录 Windows 原型阶段的本地编译、打包和发布产物整理流程。
+本文记录 code-lite Windows 原型阶段的本地编译、打包和发布产物整理流程。
 
 ## 环境要求
 
@@ -59,7 +59,7 @@ npm run version:sync
 npm run package:win
 ```
 
-打包命令会在默认 Tauri 配置之外合并 `src-tauri/tauri.release.conf.json`，并把 `src-tauri/binaries/pc-agent-backend-x86_64-pc-windows-msvc.exe` 作为 backend sidecar 打入安装包。开发模式不合并该配置，因此无需预先生成 sidecar。
+打包命令会在默认 Tauri 配置之外合并 `src-tauri/tauri.release.conf.json`，并把当前 backend sidecar 打入安装包。现阶段 sidecar 文件名仍可能使用历史 `pc-agent-backend-x86_64-pc-windows-msvc.exe`，后续应随 code-lite 命名迁移。开发模式不合并该配置，因此无需预先生成 sidecar。
 
 指定版本并打包：
 
@@ -113,14 +113,16 @@ npm run release:win
 .\release.ps1 -SkipBuild
 ```
 
-`dist/` 会包含：
+目标 `dist/` 产物命名应迁移为：
 
 ```text
-PC Repair Agent_<version>_x64-setup.exe
-PC Repair Agent_<version>_x64_en-US.msi
-pc-repair-agent.exe
-pc-agent-backend.exe
+code-lite_<version>_x64-setup.exe
+code-lite_<version>_x64_en-US.msi
+code-lite.exe
+code-lite-backend.exe
 ```
+
+当前脚本和 Tauri 配置可能仍输出历史名称，迁移发布产物名时应同步更新 `release.ps1`、`scripts/package-windows.ps1`、Tauri 配置和版本同步脚本。
 
 `dist/` 是本地发布产物目录，已被 `.gitignore` 忽略，不提交到仓库。
 
@@ -129,10 +131,13 @@ pc-agent-backend.exe
 当前阶段推荐手动分发 NSIS 或 MSI 安装包。用户安装新版本会保留运行时数据：
 
 ```text
-%USERPROFILE%\.repair-agent\config
-%USERPROFILE%\.repair-agent\record
-%USERPROFILE%\.repair-agent\logs
-%USERPROFILE%\.repair-agent\cache
+%USERPROFILE%\.code-lite\config
+%USERPROFILE%\.code-lite\conversations
+%USERPROFILE%\.code-lite\events
+%USERPROFILE%\.code-lite\logs
+%USERPROFILE%\.code-lite\cache
 ```
+
+兼容期需要继续读取旧 `%USERPROFILE%\.repair-agent` 数据，并提供一次性迁移或兼容读取策略。
 
 自动更新规划见 `docs/RELEASE_AND_UPDATE.md`。
