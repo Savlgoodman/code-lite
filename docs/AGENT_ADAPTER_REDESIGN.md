@@ -2,6 +2,8 @@
 
 本文设计 code-lite 的多 Agent 接入适配层，并记录 `openai-codex` Python SDK 的本地探针结论。目标是让 Codex、Claude Code、opencode、nanobot 等 Agent Runtime 可以通过统一协议接入 UI、权限策略、模型配置、远程同步和审计系统。
 
+更新入口：Codex、Claude Code、nanobot 三个 Python SDK 的横向能力矩阵和统一 adapter 方案见 `docs/AGENT_SDK_CAPABILITY_RESEARCH.md`。
+
 ## 1. 背景
 
 当前 backend 已有统一入口：
