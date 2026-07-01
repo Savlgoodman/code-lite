@@ -40,7 +40,9 @@ uv run python .\sdk_capability_probe.py --json --runtime nanobot
    - [OpenAI Codex SDK](https://developers.openai.com/codex/sdk)
    - [Claude Agent SDK Python](https://code.claude.com/docs/en/agent-sdk/python)
    - [Claude Agent SDK Session Storage](https://code.claude.com/docs/en/agent-sdk/session-storage)
+   - [Claude Code Hooks Reference](https://code.claude.com/docs/en/hooks)
    - [Claude Code Settings](https://code.claude.com/docs/en/settings)
+   - [Claude Code Manage Costs](https://code.claude.com/docs/en/costs)
    - [PyInstaller Spec Files](https://pyinstaller.org/en/stable/spec-files.html)
    - [PyInstaller Hooks](https://pyinstaller.org/en/stable/hooks.html)
 
@@ -57,7 +59,8 @@ uv run python .\sdk_capability_probe.py --json --runtime nanobot
 | 权限管理 | `Sandbox`: `read-only`、`workspace-write`、`full-access`；`ApprovalMode`: `deny_all`、`auto_review`；低层 reviewer 有 `user`。 | `PermissionMode`: `default`、`acceptEdits`、`plan`、`bypassPermissions`、`dontAsk`、`auto`；还有 `allowed_tools`、`disallowed_tools`、settings 权限规则、sandbox settings。 | 没有统一 full sandbox 枚举；依赖工具自身、workspace policy 和 hook 审批。 | 产品权限模式不要和 runtime 原生命名一一等同，必须保留 capability caveat。 |
 | 可否指定 cwd/workspace | 支持。`CodexConfig.cwd`、`thread_start(cwd=...)`、`Thread.turn(cwd=...)`。 | 支持。`ClaudeAgentOptions.cwd`，并有 `add_dirs`。 | 支持。`Nanobot.from_config(workspace=...)`。 | 所有 adapter 都要接收 code-lite 的 `workspace_cwd`。项目 skill 读取用统一 SkillBridge 处理。 |
 | turn 内模型/思考强度 | 支持。`Thread.turn(model=..., effort=..., summary=...)`；`model_provider` 主要在线程启动时设置。 | 支持配置 `model`、`fallback_model`、`thinking`、`effort`、`max_thinking_tokens`。持久 client 的单次 `query()` 不接收 options，per-turn 切换可通过新 options/client 或新 session 实现。 | 支持 `run/run_streamed(model=..., model_preset=...)`；没有通用 thinking strength 字段。 | 统一请求保留 `model`, `model_preset_id`, `reasoning_effort`, `thinking`，由 adapter 选择可用字段。 |
-| 上下文窗口信息 | 支持通过 Python SDK 的 turn stream 获取 `thread/tokenUsage/updated` 通知。`ThreadTokenUsage` 包含 `total`、`last`、`modelContextWindow`，Python 字段为 `model_context_window`。 | `ResultMessage.model_usage` 可带 `contextWindow`、`maxOutputTokens` 等；普通 `usage` 也可见。 | 内部有 prompt token 估算和 `/status` 类逻辑，但 SDK 暂未暴露统一 context window 对象。 | UI 展示做 best-effort：`context.used_tokens`、`context.max_tokens`、`context.source` 可为空。 |
+| 上下文窗口信息 | 支持通过 Python SDK 的 turn stream 获取 `thread/tokenUsage/updated` 通知。`ThreadTokenUsage` 包含 `total`、`last`、`modelContextWindow`，Python 字段为 `model_context_window`。 | `ResultMessage.model_usage` 可带 `contextWindow`、`maxOutputTokens` 等；`ClaudeSDKClient.get_context_usage()` 可读取 `/context` 同类信息。 | 内部有 prompt token 估算和 `/status` 类逻辑，但 SDK 暂未暴露统一 context window 对象。 | UI 展示做 best-effort：`context.used_tokens`、`context.max_tokens`、`context.source` 可为空。 |
+| 上下文自动/手动压缩 | 支持手动压缩。`Thread.compact()` / `AsyncThread.compact()` 发送 `thread/compact/start`；`thread/compacted` 通知表示压缩发生。配置类型里有 `model_auto_compact_token_limit`、`compact_prompt`，但当前通知不区分手动/自动。 | 支持自动压缩和 `/compact`。SDK 有 `PreCompact` hook，字段 `trigger` 为 `manual` 或 `auto`；官方文档还有 `PostCompact`，但当前 Python SDK 类型只建模到 `PreCompact`。`get_context_usage()` 可读 `isAutoCompactEnabled` 和 `autoCompactThreshold`。 | 暂未验证到统一压缩 API 或压缩通知。 | 统一事件建议用 `agent.context.compaction.started`、`agent.context.compacted`；触发来源字段 best-effort，不能所有 runtime 都保证。 |
 | 后续消息队列/运行中引导 | 未发现稳定的统一 SDK 队列 API。低层协议有 thread append 等能力，但不应先作为产品依赖。 | `query(prompt=AsyncIterable[dict])` 可接收异步输入，SDK control protocol 有 interrupt；但产品级排队仍应自己实现。 | 未发现内置队列 API。 | QueueManager 放在 code-lite。默认“当前 turn 结束后继续”，高级场景再做 interrupt-and-resume 或 runtime 特化。 |
 
 ## 3. 分项细节
@@ -254,6 +257,7 @@ item/mcpToolCall/progress
 item/autoApprovalReview/started
 item/autoApprovalReview/completed
 thread/tokenUsage/updated
+thread/compacted
 turn/completed
 ```
 
@@ -310,6 +314,32 @@ for event in turn.stream():
 
 当前逆向 schema 和 Python SDK 中，`thread/read` / `thread/resume` 返回的 `Thread` 不包含 token usage 字段，因此 adapter 应在运行中的 notification stream 里维护最近一次 usage snapshot。恢复历史会话后，如果还没有收到新的 `thread/tokenUsage/updated`，UI 应显示“未知”或使用 code-lite 自己 event store 中保存的上一份快照。
 
+Codex 上下文压缩能力：
+
+1. 手动压缩 API 已确认：`Thread.compact()` / `AsyncThread.compact()` 调用低层 `thread/compact/start`，参数只有 `threadId`，响应是空对象。
+2. 压缩通知已确认：`openai_codex.generated.notification_registry.NOTIFICATION_MODELS["thread/compacted"]` 指向 `ContextCompactedNotification`，字段为 `thread_id`、`turn_id`。
+3. `ContextCompactedNotification` 在逆向 schema 中标注为 deprecated，建议优先理解为“压缩已发生”的兼容信号；rollout / response item 中还存在 `compaction`、`compaction_trigger`、`context_compaction` item 类型，其中 `context_compaction` 是更接近新模型的历史记录形态。
+4. 配置类型里有 `model_auto_compact_token_limit`、`model_context_window`、`compact_prompt`，说明 Codex app-server 协议保留了自动压缩阈值与压缩 prompt 配置；但当前 `thread/compacted` payload 不包含 `trigger=manual|auto`，adapter 不能仅凭该通知稳定区分自动压缩和手动压缩。
+5. code-lite 如果由 UI 主动调用 `thread.compact()`，可以把本地 intent 标记为 `trigger="manual"`；runtime 自行发出的 `thread/compacted` 应记录为 `trigger="runtime"` 或 `unknown`，除非后续 SDK 暴露更明确字段。
+
+adapter 示例：
+
+```python
+compact_result = thread.compact()
+
+for event in turn.stream():
+    if event.method == "thread/compacted":
+        yield AgentEvent(
+            type="agent.context.compacted",
+            data={
+                "thread_id": event.payload.thread_id,
+                "turn_id": event.payload.turn_id,
+                "trigger": "runtime",
+                "source": "codex.thread.compacted",
+            },
+        )
+```
+
 Claude Code 可输出：
 
 ```text
@@ -322,6 +352,39 @@ RateLimitEvent
 ```
 
 在 `include_partial_messages=True` 时，可获得 partial assistant stream。`include_hook_events=True` 时可把 hook lifecycle 纳入消息流。
+
+Claude Code 上下文压缩能力：
+
+1. 自动压缩是 Claude Code 原生能力。官方文档说明 `autoCompactEnabled` 默认开启，会在上下文接近限制时自动压缩；也可通过环境变量 `DISABLE_AUTO_COMPACT` 禁用。
+2. 手动压缩通过 Claude Code 的 `/compact` 命令触发；官方文档支持 `/compact Focus on code samples and API usage` 这种自定义压缩说明。
+3. Python SDK 当前没有 `ClaudeSDKClient.compact()` 这类显式方法；手动触发是否能通过向会话发送 slash command 稳定实现，需要单独 smoke test。第一版 adapter 不应把它声明成稳定 SDK API。
+4. Python SDK 已建模 `PreCompact` hook：`PreCompactHookInput.trigger` 为 `manual` 或 `auto`，`custom_instructions` 在手动 `/compact` 时包含用户传入的说明，自动压缩时为空。
+5. 官方 hook 文档还定义 `PostCompact`，字段包含 `trigger` 和 `compact_summary`，可用于压缩完成后的外部同步；但本地 `claude-agent-sdk 0.2.110` 的 `HookEvent` / `HookInput` 类型没有建模 `PostCompact`，因此 code-lite 当前只能把 `PreCompact` 作为已验证 SDK 入口，把 `PostCompact` 标记为 CLI 文档能力、待 Python SDK 验证。
+6. `ClaudeAgentOptions.include_hook_events=True` 时，hook lifecycle 会以 `HookEventMessage` 进入消息流，便于 UI 和远程端展示压缩开始/完成相关状态。
+7. `ClaudeSDKClient.get_context_usage()` 可读取与 `/context` 类似的信息，包括 `totalTokens`、`maxTokens`、`rawMaxTokens`、`percentage`、`isAutoCompactEnabled`、`autoCompactThreshold`。它适合用来展示压缩前后的上下文占用状态，不是压缩通知本身。
+
+hook 示例：
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
+
+async def on_pre_compact(input_data, tool_use_id, context):
+    trigger = input_data["trigger"]  # "manual" or "auto"
+    custom_instructions = input_data.get("custom_instructions")
+    return {"continue_": True}
+
+options = ClaudeAgentOptions(
+    hooks={"PreCompact": [HookMatcher(hooks=[on_pre_compact])]},
+    include_hook_events=True,
+)
+```
+
+code-lite 对 Claude Code 的建议映射：
+
+1. `PreCompact(trigger="manual")` -> `agent.context.compaction.started`，`trigger="manual"`。
+2. `PreCompact(trigger="auto")` -> `agent.context.compaction.started`，`trigger="auto"`。
+3. 如果未来 Python SDK 暴露 `PostCompact` 或消息流能稳定收到 `PostCompact` hook event，则映射为 `agent.context.compacted`，并保存 `compact_summary`。
+4. 在没有 `PostCompact` 的当前 SDK 版本中，可在下一条 `ResultMessage` 或 `get_context_usage()` 刷新后发出 best-effort 的 `agent.context.updated`，不要伪造完整的 `agent.context.compacted` summary。
 
 nanobot 事件包括：
 
@@ -442,6 +505,8 @@ approval.auto_review.started
 approval.auto_review.completed
 agent.usage.updated
 agent.context.updated
+agent.context.compaction.started
+agent.context.compacted
 agent.session.updated
 agent.run.completed
 agent.run.failed
