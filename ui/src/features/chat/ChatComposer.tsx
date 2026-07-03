@@ -70,10 +70,9 @@ export function ChatComposer({
   selectedConfig,
   selectedModelFamily,
 }: ChatComposerProps) {
-  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
-  const [isReasoningMenuOpen, setIsReasoningMenuOpen] = useState(false);
-  const modelMenuRef = useRef<HTMLDivElement | null>(null);
-  const reasoningMenuRef = useRef<HTMLDivElement | null>(null);
+  const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
+  const [isModelListOpen, setIsModelListOpen] = useState(false);
+  const statusMenuRef = useRef<HTMLDivElement | null>(null);
 
   // 从 models 中提取模型族
   const modelFamilies = useMemo(() => {
@@ -98,55 +97,57 @@ export function ChatComposer({
   const reasoningConfig = configOptions.find((o) => o.id === "reasoning_effort") ?? null;
   const reasoningValues = reasoningConfig?.values ?? [];
 
-  // 当前完整模型 ID = 模型族[推理强度]
-  const currentFullModelId = currentFamily && reasoningEffort
-    ? `${currentFamily.id}[${reasoningEffort}]`
-    : null;
-
   const hasModes = modes.length > 1;
   const hasModelPicker = modelFamilies.length > 0;
   const hasReasoningPicker = reasoningValues.length > 0;
-  const hasAnyControls = hasModes || hasModelPicker || hasReasoningPicker;
-
-  // 当前选中的模型（完整 ID 匹配）
-  const selectedFullModel = models.find((m) => m.id === currentFullModelId) ?? null;
+  const hasAnyControls = hasModelPicker || hasReasoningPicker;
 
   useEffect(() => {
-    if (!isModelMenuOpen && !isReasoningMenuOpen) return;
+    if (!isStatusMenuOpen) return;
 
     function closeOnOutside(event: MouseEvent) {
       const target = event.target as Node;
-      if (isModelMenuOpen && !modelMenuRef.current?.contains(target)) {
-        setIsModelMenuOpen(false);
-      }
-      if (isReasoningMenuOpen && !reasoningMenuRef.current?.contains(target)) {
-        setIsReasoningMenuOpen(false);
+      if (!statusMenuRef.current?.contains(target)) {
+        setIsStatusMenuOpen(false);
+        setIsModelListOpen(false);
       }
     }
 
     window.addEventListener("mousedown", closeOnOutside);
     return () => window.removeEventListener("mousedown", closeOnOutside);
-  }, [isModelMenuOpen, isReasoningMenuOpen]);
+  }, [isStatusMenuOpen]);
 
   function selectFamily(familyId: string) {
     onModelFamilyChange(familyId);
-    setIsModelMenuOpen(false);
+    setIsStatusMenuOpen(false);
+    setIsModelListOpen(false);
   }
 
   function selectReasoning(value: string) {
     onReasoningEffortChange(value);
-    setIsReasoningMenuOpen(false);
+    onConfigChange("reasoning_effort", value);
+    setIsStatusMenuOpen(false);
+    setIsModelListOpen(false);
   }
 
-  // 推理强度展示名
-  const reasoningLabel = useMemo(() => {
-    const labelMap: Record<string, string> = {
-      low: "低", medium: "中", high: "高", xhigh: "超高", none: "无",
-    };
-    return reasoningConfig?.valueLabels?.[reasoningEffort]
-      ?? labelMap[reasoningEffort]
-      ?? reasoningEffort;
-  }, [reasoningEffort, reasoningConfig]);
+  function toggleStatusMenu() {
+    const nextOpen = !isStatusMenuOpen;
+    setIsStatusMenuOpen(nextOpen);
+    if (!nextOpen) {
+      setIsModelListOpen(false);
+    }
+  }
+
+  const statusLabel = [
+    currentFamily?.label,
+    hasReasoningPicker ? reasoningEffort : null,
+  ].filter(Boolean).join(" ") || (hasReasoningPicker ? "推理" : "模型");
+
+  function reasoningOptionLabel(value: string) {
+    return ({ low: "低", medium: "中", high: "高", xhigh: "超高", none: "无" } as Record<string, string>)[value]
+      ?? reasoningConfig?.valueLabels?.[value]
+      ?? value;
+  }
 
   return (
     <div className="composer-wrap">
@@ -192,80 +193,88 @@ export function ChatComposer({
               {/* 底部状态栏：模型族 + 推理强度 */}
               {hasAnyControls ? (
                 <div className="composer-status-bar">
-                  {/* 模型族选择 */}
-                  {hasModelPicker && (
-                    <div className="status-model-picker" ref={modelMenuRef}>
+                  {(hasModelPicker || hasReasoningPicker) && (
+                    <div className="status-combined-picker" ref={statusMenuRef}>
                       <button
                         className="status-chip"
-                        onClick={() => { setIsModelMenuOpen(!isModelMenuOpen); setIsReasoningMenuOpen(false); }}
+                        aria-expanded={isStatusMenuOpen}
+                        aria-haspopup="menu"
+                        onClick={toggleStatusMenu}
                         type="button"
+                        title={statusLabel}
                       >
-                        <span>{currentFamily?.label ?? "模型"}</span>
-                        <ChevronDown size={12} />
+                        <span>{statusLabel}</span>
+                        <ChevronDown size={13} />
                       </button>
-                      {isModelMenuOpen && (
-                        <div className="status-dropdown" role="menu">
-                          {modelFamilies.map((family) => (
-                            <button
-                              key={family.id}
-                              className={`status-dropdown-item ${family.id === selectedModelFamily ? "selected" : ""}`}
-                              onClick={() => selectFamily(family.id)}
-                              role="menuitem"
-                              type="button"
-                            >
-                              <span>{family.label}</span>
-                              {family.id === selectedModelFamily ? <Check size={14} /> : null}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 推理强度选择 */}
-                  {hasReasoningPicker && (
-                    <div className="status-reasoning-picker" ref={reasoningMenuRef}>
-                      <button
-                        className="status-chip"
-                        onClick={() => { setIsReasoningMenuOpen(!isReasoningMenuOpen); setIsModelMenuOpen(false); }}
-                        type="button"
-                      >
-                        <span>{reasoningLabel}</span>
-                        <ChevronDown size={12} />
-                      </button>
-                      {isReasoningMenuOpen && (
-                        <div className="status-dropdown" role="menu">
-                          {reasoningValues.map((v) => {
-                            const label = reasoningConfig?.valueLabels?.[v]
-                              ?? ({ low: "低", medium: "中", high: "高", xhigh: "超高", none: "无" } as Record<string, string>)[v]
-                              ?? v;
-                            return (
-                              <button
-                                key={v}
-                                className={`status-dropdown-item ${v === reasoningEffort ? "selected" : ""}`}
-                                onClick={() => selectReasoning(v)}
-                                role="menuitem"
-                                type="button"
-                              >
-                                <span>{label}</span>
-                                {v === reasoningEffort ? <Check size={14} /> : null}
-                              </button>
-                            );
-                          })}
-                          {/* 分隔线后显示模型族信息 */}
-                          {currentFamily && (
-                            <>
-                              <div className="status-dropdown-divider" />
-                              <button
-                                className="status-dropdown-item family-info"
-                                onClick={() => { setIsReasoningMenuOpen(false); setIsModelMenuOpen(true); }}
-                                type="button"
-                              >
-                                <span>{currentFamily.label}</span>
-                                <ChevronDown size={12} />
-                              </button>
-                            </>
-                          )}
+                      {isStatusMenuOpen && (
+                        <div className={`status-menu-panels ${isModelListOpen ? "model-open" : ""}`}>
+                          <div className="status-menu-panel status-primary-menu" role="menu">
+                            {hasReasoningPicker ? (
+                              <>
+                                <div className="status-menu-title">推理</div>
+                                {reasoningValues.map((value) => (
+                                  <button
+                                    key={value}
+                                    className={`status-dropdown-item ${value === reasoningEffort ? "selected" : ""}`}
+                                    onClick={() => selectReasoning(value)}
+                                    role="menuitem"
+                                    type="button"
+                                  >
+                                    <span>{reasoningOptionLabel(value)}</span>
+                                    {value === reasoningEffort ? <Check size={14} /> : null}
+                                  </button>
+                                ))}
+                                {currentFamily ? (
+                                  <>
+                                    <div className="status-dropdown-divider" />
+                                    <button
+                                      aria-expanded={isModelListOpen}
+                                      className={`status-dropdown-item status-model-trigger ${isModelListOpen ? "expanded" : ""}`}
+                                      onClick={() => setIsModelListOpen((open) => !open)}
+                                      role="menuitem"
+                                      type="button"
+                                    >
+                                      <span>{currentFamily.label}</span>
+                                      <ChevronDown size={14} />
+                                    </button>
+                                    {isModelListOpen ? (
+                                      <div className="status-model-list" role="group" aria-label="模型">
+                                        <div className="status-model-list-title">模型</div>
+                                        {modelFamilies.map((family) => (
+                                          <button
+                                            key={family.id}
+                                            className={`status-dropdown-item ${family.id === currentFamily?.id ? "selected" : ""}`}
+                                            onClick={() => selectFamily(family.id)}
+                                            role="menuitem"
+                                            type="button"
+                                          >
+                                            <span>{family.label}</span>
+                                            {family.id === currentFamily?.id ? <Check size={14} /> : null}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : null}
+                              </>
+                            ) : (
+                              <>
+                                <div className="status-menu-title">模型</div>
+                                {modelFamilies.map((family) => (
+                                  <button
+                                    key={family.id}
+                                    className={`status-dropdown-item ${family.id === currentFamily?.id ? "selected" : ""}`}
+                                    onClick={() => selectFamily(family.id)}
+                                    role="menuitem"
+                                    type="button"
+                                  >
+                                    <span>{family.label}</span>
+                                    {family.id === currentFamily?.id ? <Check size={14} /> : null}
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

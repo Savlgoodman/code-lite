@@ -896,27 +896,27 @@
   }
 }
 
-/* ─── 底部状态栏：模型族 + 推理强度 ─── */
+/* 底部状态栏：模型族 + 推理强度 */
 .composer-status-bar {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.status-model-picker,
-.status-reasoning-picker {
+.status-combined-picker {
   position: relative;
 }
 
 .status-chip {
+  max-width: 240px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
-  border-radius: 16px;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
-  color: var(--text-secondary, #a0a5ac);
+  color: #323740;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -924,69 +924,167 @@
 }
 
 .status-chip:hover {
-  border-color: var(--orange, #e8734a);
-  color: var(--orange, #e8734a);
-  background: rgba(232, 115, 74, 0.06);
+  border-color: #e4e1dd;
+  background: #f4f4f3;
+  color: #20242b;
+}
+
+.status-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-chip svg {
-  opacity: 0.6;
+  flex: 0 0 auto;
+  color: #6f747b;
 }
 
-.status-dropdown {
+.status-menu-panels {
   position: absolute;
-  bottom: calc(100% + 6px);
   right: 0;
-  min-width: 160px;
-  max-height: 260px;
-  overflow-y: auto;
-  padding: 6px;
-  border-radius: 10px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
-  background: var(--bg-elevated, #1a1a1e);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  bottom: calc(100% + 8px);
   z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.status-menu-panel {
+  width: 206px;
+  max-width: min(206px, calc(100vw - 48px));
+  max-height: min(440px, calc(100vh - 150px));
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 9px 6px 6px;
+  border: 1px solid #dfdfdf;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(32, 36, 43, 0.13);
+  scrollbar-width: none;
+  transition: max-height 0.18s ease, width 0.18s ease;
+}
+
+.status-menu-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.status-primary-menu {
+  min-height: 206px;
+}
+
+.status-menu-title {
+  padding: 0 9px 4px;
+  color: #999da3;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .status-dropdown-item {
+  width: 100%;
+  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 8px 12px;
-  border: none;
-  border-radius: 6px;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
   background: transparent;
-  color: var(--text-primary, #e4e4e7);
+  color: #20242b;
   font-size: 13px;
+  line-height: 1.35;
   cursor: pointer;
   text-align: left;
   transition: background 0.1s ease;
 }
 
 .status-dropdown-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: #f1f1f1;
 }
 
 .status-dropdown-item.selected {
-  color: var(--orange, #e8734a);
+  color: #20242b;
 }
 
 .status-dropdown-item.selected span {
-  font-weight: 500;
+  font-weight: 400;
 }
 
-.status-dropdown-item.family-info {
-  color: var(--text-secondary, #a0a5ac);
+.status-dropdown-item span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dropdown-item svg {
+  flex: 0 0 auto;
+  color: #4a4f56;
+}
+
+.status-model-trigger {
+  background: #f1f1f1;
+}
+
+.status-model-trigger svg {
+  transition: transform 0.16s ease;
+}
+
+.status-model-trigger.expanded svg {
+  transform: rotate(180deg);
+}
+
+.status-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 188px;
+  overflow: visible;
+  padding: 4px 0 8px;
+  animation: status-model-list-in 0.16s ease;
+}
+
+.status-model-list-title {
+  padding: 3px 9px 1px;
+  color: #999da3;
   font-size: 12px;
+}
+
+@keyframes status-model-list-in {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+
+  to {
+    max-height: 188px;
+    opacity: 1;
+  }
 }
 
 .status-dropdown-divider {
   height: 1px;
-  background: var(--border-color, rgba(255, 255, 255, 0.08));
-  margin: 4px 0;
+  flex: 0 0 auto;
+  background: #e7e7e7;
+  margin: 4px 0 5px;
+}
+
+@media (max-width: 780px) {
+  .status-menu-panel {
+    width: min(206px, calc(100vw - 56px));
+  }
+
+  .status-dropdown-item {
+    min-height: 30px;
+    font-size: 13px;
+  }
+
+  .status-menu-title {
+    font-size: 13px;
+  }
 }
 
