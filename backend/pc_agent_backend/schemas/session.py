@@ -86,6 +86,69 @@ _CONFIG_VALUE_LABELS: dict[str, dict[str, str]] = {
     },
 }
 
+_MODE_LABELS: dict[str, str] = {
+    "read-only": "只读",
+    "agent": "Agent",
+    "agent-full-access": "完全访问",
+    "workspace": "工作区",
+}
+
+
+def _build_modes(
+    raw_config: dict[str, Any],
+    session_result: Any,
+    default_mode: str,
+) -> list[SessionMode]:
+    """从多个来源合并 modes 列表。
+
+    优先级：
+    1. configOptions.mode.values —— ACP 声明的完整可用 modes
+    2. session_result.modes —— ACP 返回的当前 session modes
+    3. default_mode fallback
+    """
+    from pc_agent_backend.agents.acp.capabilities import parse_modes_from_session_result
+
+    mode_ids: list[str] = []
+    mode_labels: dict[str, str] = {}
+
+    # 来源 1: configOptions.mode
+    mode_config = raw_config.get("mode")
+    if isinstance(mode_config, dict):
+        values = mode_config.get("values")
+        if isinstance(values, list):
+            mode_ids = [str(v) for v in values if str(v).strip()]
+        # 从 option_labels 获取展示名
+        option_labels = mode_config.get("option_labels")
+        if isinstance(option_labels, dict):
+            mode_labels = {str(k): str(v) for k, v in option_labels.items()}
+
+    # 来源 2: session_result.modes（补充来源 1 中可能缺失的）
+    if not mode_ids:
+        raw_modes = parse_modes_from_session_result(session_result)
+        mode_ids = [str(m.get("id") or "") for m in raw_modes if str(m.get("id") or "").strip()]
+        for m in raw_modes:
+            mid = str(m.get("id") or "")
+            mlabel = str(m.get("label") or "")
+            if mid and mlabel:
+                mode_labels.setdefault(mid, mlabel)
+
+    # 来源 3: fallback
+    if not mode_ids:
+        mode_ids = [default_mode]
+
+    # 确保 default_mode 在列表中
+    if default_mode and default_mode not in mode_ids:
+        mode_ids.insert(0, default_mode)
+
+    return [
+        SessionMode(
+            id=mode_id,
+            label=mode_labels.get(mode_id) or _MODE_LABELS.get(mode_id, mode_id),
+            is_default=(mode_id == default_mode),
+        )
+        for mode_id in mode_ids
+    ]
+
 
 def build_session_capabilities(
     *,
@@ -107,18 +170,12 @@ def build_session_capabilities(
 
     raw = to_jsonable(session_result)
 
-    # 解析 modes
-    raw_modes = parse_modes_from_session_result(session_result)
-    modes = [
-        SessionMode(
-            id=m["id"],
-            label=m.get("label") or m["id"],
-            is_default=(m["id"] == default_mode),
-        )
-        for m in raw_modes
-    ]
-    if not modes:
-        modes = [SessionMode(id=default_mode, label=default_mode, is_default=True)]
+    # 解析 configOptions（先解析，因为 modes 可能从 configOptions.mode.values 提取）
+    raw_config = parse_config_options_from_session_result(session_result)
+
+    # 解析 modes —— 优先从 configOptions.mode.values 获取完整列表，
+    # 其次从 session_result.modes 获取，最后 fallback 到 default_mode
+    modes = _build_modes(raw_config, session_result, default_mode)
 
     # 解析 models
     models_data = parse_models_from_session_result(session_result, runtime)
@@ -133,12 +190,11 @@ def build_session_capabilities(
         for m in models_data.get("models", [])
     ]
 
-    # 解析 config options
-    raw_config = parse_config_options_from_session_result(session_result)
+    # 解析 config options（排除 mode 和 model，因为它们已通过 modes/models 提供）
     config_options = []
     for config_id, config_def in raw_config.items():
         if config_id in ("mode", "model"):
-            continue  # mode 和 model 已通过 modes/models 提供
+            continue
         if not isinstance(config_def, dict):
             continue
         config_type = str(config_def.get("type") or "enum")
@@ -147,12 +203,19 @@ def build_session_capabilities(
             config_values = [str(v) for v in config_values]
         else:
             config_values = None
+        # 优先使用 ACP 返回的 option_labels，其次用内置映射
+        option_labels = config_def.get("option_labels") or _CONFIG_VALUE_LABELS.get(config_id)
+        # 优先使用 ACP 返回的 name 作为 label
+        acp_name = config_def.get("name")
+        label = _CONFIG_OPTION_LABELS.get(config_id, acp_name or config_id)
+        current_value = config_def.get("current_value")
         config_options.append(SessionConfigOption(
             id=config_id,
-            label=_CONFIG_OPTION_LABELS.get(config_id, config_id),
+            label=label,
             type=config_type,
             values=config_values,
-            value_labels=_CONFIG_VALUE_LABELS.get(config_id),
+            current_value=current_value,
+            value_labels=option_labels,
         ))
 
     return SessionCapabilities(
