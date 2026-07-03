@@ -41,8 +41,7 @@
 
 .outline-action,
 .text-action,
-.model-chip,
-.composer-select-control {
+.model-chip {
   height: 32px;
   display: inline-flex;
   align-items: center;
@@ -56,8 +55,7 @@
 
 .outline-action:hover,
 .text-action:hover,
-.model-chip:hover,
-.composer-select-control:hover {
+.model-chip:hover {
   background: #f5f5f3;
 }
 
@@ -717,25 +715,6 @@
   color: var(--orange);
 }
 
-.composer-select-control {
-  border-color: transparent;
-  background: transparent;
-  color: var(--orange);
-}
-
-.composer-select-control select {
-  max-width: 126px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  outline: 0;
-}
-
-.composer-select-control select:disabled {
-  opacity: 0.55;
-}
-
 .model-chip {
   min-width: 0;
   max-width: 172px;
@@ -860,6 +839,94 @@
 .model-menu-item svg {
   flex: 0 0 auto;
   color: #20242b;
+}
+
+.access-mode-picker {
+  position: relative;
+}
+
+.access-mode-chip {
+  max-width: 180px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--orange);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.access-mode-chip:hover {
+  border-color: #e4e1dd;
+  background: #fff4ef;
+  color: #db4f1d;
+}
+
+.access-mode-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.access-mode-chip svg {
+  flex: 0 0 auto;
+}
+
+.access-mode-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 100;
+  width: 220px;
+  max-width: min(220px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 7px;
+  border: 1px solid #dfdfdf;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(32, 36, 43, 0.13);
+}
+
+.access-mode-item {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #20242b;
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+}
+
+.access-mode-item:hover {
+  background: #f1f1f1;
+}
+
+.access-mode-item span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-mode-item svg {
+  flex: 0 0 auto;
+  color: #4a4f56;
 }
 
 .send-button {

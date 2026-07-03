@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Check, ChevronDown, Paperclip, Send, ShieldCheck, Square } from "lucide-react";
+import { Check, ChevronDown, Hand, Paperclip, Send, ShieldAlert, ShieldCheck, Square } from "lucide-react";
 
 import type {
   AgentSummary,
@@ -71,7 +71,9 @@ export function ChatComposer({
   selectedModelFamily,
 }: ChatComposerProps) {
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
+  const [isAccessMenuOpen, setIsAccessMenuOpen] = useState(false);
   const [isModelListOpen, setIsModelListOpen] = useState(false);
+  const accessMenuRef = useRef<HTMLDivElement | null>(null);
   const statusMenuRef = useRef<HTMLDivElement | null>(null);
 
   // 从 models 中提取模型族
@@ -101,13 +103,17 @@ export function ChatComposer({
   const hasModelPicker = modelFamilies.length > 0;
   const hasReasoningPicker = reasoningValues.length > 0;
   const hasAnyControls = hasModelPicker || hasReasoningPicker;
+  const currentMode = modes.find((mode) => mode.id === accessMode) ?? modes.find((mode) => mode.isDefault) ?? modes[0];
 
   useEffect(() => {
-    if (!isStatusMenuOpen) return;
+    if (!isAccessMenuOpen && !isStatusMenuOpen) return;
 
     function closeOnOutside(event: MouseEvent) {
       const target = event.target as Node;
-      if (!statusMenuRef.current?.contains(target)) {
+      if (isAccessMenuOpen && !accessMenuRef.current?.contains(target)) {
+        setIsAccessMenuOpen(false);
+      }
+      if (isStatusMenuOpen && !statusMenuRef.current?.contains(target)) {
         setIsStatusMenuOpen(false);
         setIsModelListOpen(false);
       }
@@ -115,7 +121,37 @@ export function ChatComposer({
 
     window.addEventListener("mousedown", closeOnOutside);
     return () => window.removeEventListener("mousedown", closeOnOutside);
-  }, [isStatusMenuOpen]);
+  }, [isAccessMenuOpen, isStatusMenuOpen]);
+
+  function accessModeLabel(mode: SessionMode | undefined) {
+    const labels: Record<string, string> = {
+      "agent-full-access": "完全访问权限",
+      agent: "自动审查",
+      "read-only": "默认权限",
+    };
+    return mode ? labels[mode.id] ?? mode.label : "权限";
+  }
+
+  function accessModeIcon(modeId: string, size = 15) {
+    if (modeId === "agent-full-access") {
+      return <ShieldAlert size={size} />;
+    }
+    if (modeId === "agent") {
+      return <ShieldCheck size={size} />;
+    }
+    return <Hand size={size} />;
+  }
+
+  function selectAccessMode(modeId: string) {
+    onAccessModeChange(modeId);
+    setIsAccessMenuOpen(false);
+  }
+
+  function toggleAccessMenu() {
+    setIsAccessMenuOpen((open) => !open);
+    setIsStatusMenuOpen(false);
+    setIsModelListOpen(false);
+  }
 
   function selectFamily(familyId: string) {
     onModelFamilyChange(familyId);
@@ -174,18 +210,37 @@ export function ChatComposer({
               </button>
               {/* 权限模式 */}
               {hasModes && (
-                <label className="composer-select-control">
-                  <ShieldCheck size={15} />
-                  <select
-                    onChange={(event) => onAccessModeChange(event.target.value)}
+                <div className="access-mode-picker" ref={accessMenuRef}>
+                  <button
+                    aria-expanded={isAccessMenuOpen}
+                    aria-haspopup="menu"
+                    className="access-mode-chip"
+                    onClick={toggleAccessMenu}
                     title={`${agent?.label ?? "Agent"} 访问权限`}
-                    value={accessMode}
+                    type="button"
                   >
-                    {modes.map((mode) => (
-                      <option key={mode.id} value={mode.id}>{mode.label}</option>
-                    ))}
-                  </select>
-                </label>
+                    {accessModeIcon(currentMode?.id ?? accessMode)}
+                    <span>{accessModeLabel(currentMode)}</span>
+                    <ChevronDown size={13} />
+                  </button>
+                  {isAccessMenuOpen ? (
+                    <div className="access-mode-menu" role="menu">
+                      {modes.map((mode) => (
+                        <button
+                          key={mode.id}
+                          className={`access-mode-item ${mode.id === accessMode ? "selected" : ""}`}
+                          onClick={() => selectAccessMode(mode.id)}
+                          role="menuitem"
+                          type="button"
+                        >
+                          {accessModeIcon(mode.id, 16)}
+                          <span>{accessModeLabel(mode)}</span>
+                          {mode.id === accessMode ? <Check size={14} /> : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
 
