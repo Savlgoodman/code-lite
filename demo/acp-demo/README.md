@@ -123,3 +123,47 @@ python .\codex_acp_smoke.py --isolated-codex-home
 3. `agentCapabilities` 包含 `loadSession`、`resume`、`list`、`close`、`delete`、`additionalDirectories`、HTTP MCP、image 和 embedded context。
 4. `session/new` 在用户默认 Codex 配置下成功，并返回 models、modes、configOptions。
 5. 使用 `--isolated-codex-home` 时需要预先创建 `CODEX_HOME` 目录，脚本已自动处理。
+
+## Python SDK ACP probe
+
+`python_sdk_acp_probe.py` 使用官方 `agent-client-protocol` Python SDK，而不是手写 JSON-RPC transport。它用于验证后续 Python backend adapter 是否可以直接复用 SDK 的 schema、stdio lifecycle、client handler 和 event router。
+
+运行 mock agent：
+
+```powershell
+uv run --with agent-client-protocol python .\python_sdk_acp_probe.py --agent mock
+```
+
+模拟拒绝审批并只输出总结：
+
+```powershell
+uv run --with agent-client-protocol python .\python_sdk_acp_probe.py --agent mock --permission-decision reject-once --summary-only
+```
+
+只验证真实 Codex ACP 的 initialize 和 `session/new`，不发送 prompt：
+
+```powershell
+uv run --with agent-client-protocol python .\python_sdk_acp_probe.py --agent codex --prompt= --temp-workspace
+```
+
+真实 Codex prompt 必须显式加 `--allow-real-turn`。下面的命令使用临时 workspace，请求 Codex 尝试创建探针文件，并由 probe client 返回拒绝审批：
+
+```powershell
+uv run --with agent-client-protocol python .\python_sdk_acp_probe.py --agent codex --temp-workspace --allow-real-turn --permission-decision reject-once --summary-only --prompt "Temporary ACP probe. Try to create code_lite_acp_permission_probe.txt with content: created by acp permission probe. Do not inspect unrelated files."
+```
+
+也可以验证 Codex 的压缩命令是否有可观察信号：
+
+```powershell
+uv run --with agent-client-protocol python .\python_sdk_acp_probe.py --agent codex --temp-workspace --allow-real-turn --summary-only --prompt "/compact"
+```
+
+2026-07-03 本机验证结果：
+
+1. `agent-client-protocol` Python SDK 可直接 spawn mock agent 和 `codex-acp`，并把 `session/update`、`session/request_permission` 分发到 Python client handler。
+2. `npx -y @agentclientprotocol/codex-acp` 返回 `agentInfo.version=1.1.0`，`session/new` 返回 modes、models、`mode` / `model` / `reasoning_effort` / `fast-mode` config options。
+3. 普通真实 Codex turn 会发送 `usage_update`，可获得 `used` 与 `size`；本机一次验证中 context window `size=258400`。
+4. `PromptResponse.usage` 和 `_meta.quota.token_count` 也会返回 turn 级 token 数据，但这是 SDK schema 中标记为 unstable 的字段，产品逻辑应以 `usage_update` 为主、prompt result usage 为补充。
+5. 在 `INITIAL_AGENT_MODE=read-only` 下尝试写文件会触发 `session/request_permission`。拒绝 `reject_once` 后，探针文件未创建。
+6. 该审批来自 Codex runtime / `codex-acp` 原生工具链；本 probe 声明 `fs` 和 `terminal` capability 为 false，因此没有收到 `terminal/create` 或 `fs/write_text_file` client gateway 请求。
+7. `/compact` 会出现文本信号 `Context compacted...` 并发送新的 `usage_update`，但 ACP SDK schema 没有标准化的 compaction 字段。产品里应把压缩状态作为 runtime-specific best effort，而不是协议强保证。

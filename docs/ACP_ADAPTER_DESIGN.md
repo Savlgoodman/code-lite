@@ -4,6 +4,8 @@
 
 本文记录 code-lite 使用 ACP 作为 Claude Code、Codex、opencode 统一 adapter 路线的调研结论和落地建议。本文不替代 `docs/AGENT_SDK_CAPABILITY_RESEARCH.md`，而是补充一条新的接入路线：当 runtime 提供 ACP server 时，code-lite 可以作为 ACP client 统一控制 agent。
 
+后续实现以 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` 为主入口。本文保留为 ACP 协议、runtime 分发、权限和配置疑虑的调研记录。
+
 ## 1. 总结
 
 ACP 的完整名称是 Agent Client Protocol。它是一套基于 JSON-RPC 2.0 的 agent-client 通信协议。典型本地形态是：
@@ -26,6 +28,8 @@ ACP Agent Server
 3. code-lite 不直接连接“模型”，也不直接连接“Codex/Claude/opencode 内核”，而是连接一个可执行的 ACP server 命令。
 4. ACP 可以显著降低 code-lite 接入多 agent 的协议成本，但不会消除 runtime 安装、认证、配置和权限边界问题。
 5. code-lite 的产品级权限和远程同步仍必须建立在统一 `AgentEvent`、`ApprovalBroker` 和后续执行网关之上。
+
+补充验证：2026-07-03 本机 `npm view` 显示 `@agentclientprotocol/codex-acp` 声明依赖 `@openai/codex`，`@agentclientprotocol/claude-agent-acp` 声明依赖 `@anthropic-ai/claude-agent-sdk`。因此 code-lite 设置页托管安装这些 ACP 包时，会同时安装对应 runtime SDK/CLI 依赖；但认证、本机配置、隔离目录、自定义 binary 和 opencode 分发方式仍要作为产品安装与预检流程处理。
 
 ## 2. ACP 与 MCP、SDK 的关系
 
@@ -199,7 +203,7 @@ opencode acp
 
 不要在 manifest 中保存 API key、token、账号密码或私钥。
 
-### 5.3 不建议每次直接 npx
+### 5.3 设置页安装向导
 
 `npx -y @agentclientprotocol/codex-acp` 对开发验证很方便，但不适合作为产品默认运行方式，原因：
 
@@ -208,7 +212,41 @@ opencode acp
 3. 缓存和安装路径不透明。
 4. 供应链审计困难。
 
-产品应在 setup wizard 中下载固定版本、校验 hash、落到 code-lite 托管目录，然后后续直接启动本地固定路径。
+产品应在设置页提供“补全运行时”安装向导，而不是在每次对话时临时 `npx`：
+
+```text
+设置页 Agent Runtime 检测
+  -> 检查 code-lite 托管 Node runtime
+  -> 如缺失，提示用户安装托管 Node
+  -> 使用托管 npm/npx 安装固定版本 ACP package
+  -> 写入 runtime manifest
+  -> 后续启动本地固定路径
+```
+
+Codex 与 Claude Code 的默认补全项：
+
+| Runtime | 安装包 | 启动命令 | 说明 |
+| --- | --- | --- | --- |
+| Codex ACP | `@agentclientprotocol/codex-acp@<pinned>` | `codex-acp` | npm 包包含兼容的 `@openai/codex` 依赖；不要求用户单独预装 Codex CLI |
+| Claude Code ACP | `@agentclientprotocol/claude-agent-acp@<pinned>` | `claude-agent-acp` | 依赖 Claude Agent SDK 的 native binary optional dependency；安装后需检查 binary 是否完整 |
+
+如果用户没有 Node/npm 环境，code-lite 不要求用户手动安装系统 Node，而是由设置页安装 code-lite 托管 Node runtime。托管 Node 只用于运行 code-lite 管理的 ACP npm 包，不默认加入系统 PATH。
+
+安装完成后 manifest 应记录：
+
+```json
+{
+  "adapterId": "codex-acp",
+  "package": "@agentclientprotocol/codex-acp",
+  "packageVersion": "<pinned>",
+  "nodeRuntime": "code-lite-managed",
+  "command": "C:/Users/.../code-lite/runtimes/acp/codex-acp/<version>/node_modules/.bin/codex-acp.cmd",
+  "source": "code-lite-managed-npm",
+  "verifiedAt": "2026-07-02T00:00:00Z"
+}
+```
+
+运行时仍允许高级用户选择系统命令或自定义绝对路径，但默认产品体验应是“设置页检测并补全”，而不是要求用户提前安装 Codex、Claude Code、Node 或 npm。
 
 ## 6. 配置与认证归属
 
@@ -361,6 +399,17 @@ UI 策略：
 3. source 字段记录为 `acp.usage_update`、`codex.native`、`claude.native` 或 `opencode.native`。
 4. 不把 cost 作为结算数据，只作为 runtime 自报信息。
 
+### 8.1 2026-07-03 Codex ACP 实测
+
+使用 `demo/acp-demo/python_sdk_acp_probe.py` 和官方 `agent-client-protocol` Python SDK 连接真实 `codex-acp` 后，当前结论是：
+
+1. `npx -y @agentclientprotocol/codex-acp` 可由 Python SDK 直接 spawn，`initialize` 返回 `agentInfo.version=1.1.0`。
+2. `session/new` 返回 `read-only`、`agent`、`agent-full-access` 三种 mode，以及 `mode`、`model`、`reasoning_effort`、`fast-mode` 等 config options。
+3. 普通真实 turn 会发送 `usage_update`，本机探针观察到 `used` 与 `size`；其中一次 context window `size=258400`。
+4. `PromptResponse.usage` 和 `_meta.quota.token_count` 也会返回 turn 级 token 数据，但 Python SDK schema 标记这些字段为 unstable，产品逻辑应以 `usage_update` 为主。
+5. `/status` 作为 slash command 不一定发送 `usage_update`，不能当作稳定的 context 采样 API。
+6. `/compact` 会触发可观察文本和新的 `usage_update`，但 ACP SDK schema 没有标准化的 compaction 字段。code-lite 可以 best-effort 记录 runtime-specific 压缩信号，但不要把它设计成跨 runtime 强保证。
+
 ## 9. 权限与审批
 
 ACP 的审批入口是 `session/request_permission`。Agent 可以在工具调用前向 Client 请求用户选择，例如 allow once 或 reject once。
@@ -381,6 +430,8 @@ session/request_permission
 2. 只有当文件写入通过 `fs/write_text_file`、命令执行通过 `terminal/create`，code-lite 才能强制在执行前拦截。
 3. 如果 ACP wrapper 内部直接调用底层 runtime 的 shell/file tools，code-lite 可能只能收到工具事件或权限请求，不能保证硬阻断。
 4. runtime 自身 sandbox、permission mode、hooks、settings 仍然需要配置。
+
+2026-07-03 Codex ACP 实测中，`INITIAL_AGENT_MODE=read-only` 下让 Codex 尝试创建临时文件时，`codex-acp` 通过 `session/request_permission` 发出了审批请求，options 包含 `allow_once`、`allow_always`、带 exec policy amendment 的 allow，以及 `reject_once`。probe client 选择 `reject_once` 后，临时文件没有创建。这说明 ACP 审批对 Codex compat mode 有实用价值，但仍应按照上面的 caveat 继续设计 gateway mode。
 
 ### 9.1 两种运行模式
 
@@ -583,3 +634,5 @@ MVP 建议先实现 compat mode，再逐步走向 gateway mode。
 14. OpenCode CLI docs: <https://opencode.ai/docs/cli.md>
 15. OpenCode config docs: <https://opencode.ai/docs/config.md>
 16. Codex manual: <https://developers.openai.com/codex/codex-manual.md>
+17. ACP Python SDK: <https://github.com/agentclientprotocol/python-sdk>
+18. ACP Python SDK quickstart: <https://agentclientprotocol.github.io/python-sdk/quickstart/>

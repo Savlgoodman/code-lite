@@ -6,6 +6,8 @@
 
 因此新的判断是：短期不重写 backend 技术栈，而是在当前 Python Agent Hub 中新增 `acp` adapter。
 
+后续实现以 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` 为主入口。本文保留 Python backend 侧设计推导、VibeX 参考和 Python SDK demo 记录。
+
 ## 1. 结论
 
 新的推荐架构：
@@ -66,7 +68,7 @@ Tauri / Rust backend
 
 不能直接照搬点：
 
-1. VibeX 的 ACP client 使用 Rust `agent-client-protocol` crate，Python 需要自己实现轻量 JSON-RPC transport，或等后续成熟 Python client。
+1. VibeX 的 ACP client 使用 Rust `agent-client-protocol` crate；Python 侧现在已有官方 `agent-client-protocol` SDK，可以优先复用 SDK 的 schema、stdio connection 和 router，不必从零手写完整 JSON-RPC transport。
 2. VibeX 前端已经围绕 ACP-native timeline 重构；code-lite 当前 UI 暂不改，仍消费现有 `AgentEvent`。
 3. VibeX 是 Tauri command 直连 Rust runtime；code-lite 当前是 UI 到 FastAPI，本地 HTTP/NDJSON 仍保留。
 
@@ -194,7 +196,7 @@ ACP adapter 不应只认识一种命令。建议 registry 描述 runtime 分发�
 3. 如果 ACP server 提供平台二进制，则可以不依赖用户本机 Node。
 4. 产品态可以由 code-lite 托管 Node runtime 或托管固定 binary，避免要求用户预装 Node。
 
-因此新的产品安装策略是：
+因此新的产品安装策略是把 Python backend 和 ACP runtime 分开：
 
 ```text
 Python backend sidecar
@@ -202,7 +204,8 @@ Python backend sidecar
 
 ACP runtime
   独立托管在 code-lite runtime 目录。
-  可来自 npm package、binary release、system command 或 custom path。
+  默认通过设置页补全。
+  可来自 managed npm package、binary release、system command 或 custom path。
 ```
 
 建议目录：
@@ -229,11 +232,108 @@ ACP runtime
 
 manifest 不保存 API key、token、账号密码或私钥。
 
+### 6.1 设置页补全 Node 与 ACP npm 包
+
+Codex ACP 和 Claude Code ACP 的默认产品路径采用“设置页补全”：
+
+```text
+用户打开设置页
+  -> code-lite 检测 ACP runtime
+  -> 未找到托管 Node runtime
+  -> 提示安装 code-lite 托管 Node
+  -> 使用托管 npm/npx 安装固定版本 ACP package
+  -> 写入 runtime manifest
+  -> 后续 Python adapter 启动本地固定命令
+```
+
+默认补全项：
+
+| Runtime | npm package | 启动命令 | 检测重点 |
+| --- | --- | --- | --- |
+| Codex ACP | `@agentclientprotocol/codex-acp@<pinned>` | `codex-acp` | package 内是否带兼容 `@openai/codex` 依赖，initialize 是否成功 |
+| Claude Code ACP | `@agentclientprotocol/claude-agent-acp@<pinned>` | `claude-agent-acp` | optional native Claude Code binary 是否安装完整，initialize 是否成功 |
+
+如果用户本机没有 Node/npm，code-lite 不要求用户自己去安装系统 Node，而是安装 code-lite 托管 Node runtime。托管 Node 只用于运行 code-lite 管理的 ACP npm 包，不默认加入系统 PATH，不修改用户全局 npm 配置。
+
+建议目录：
+
+```text
+%USERPROFILE%/.code-lite/runtimes/
+  node/<version>/
+    node.exe
+    npm.cmd
+    npx.cmd
+  acp/
+    codex-acp/<package-version>/
+      package.json
+      node_modules/
+      node_modules/.bin/codex-acp.cmd
+    claude-agent-acp/<package-version>/
+      package.json
+      node_modules/
+      node_modules/.bin/claude-agent-acp.cmd
+```
+
+安装命令应由 code-lite 构造，目标目录固定在 runtime cache 中，例如：
+
+```powershell
+<managed-node>\npm.cmd install --prefix <runtime-dir>\acp\codex-acp\<version> @agentclientprotocol/codex-acp@<pinned>
+<managed-node>\npm.cmd install --prefix <runtime-dir>\acp\claude-agent-acp\<version> @agentclientprotocol/claude-agent-acp@<pinned>
+```
+
+开发期可以继续使用：
+
+```powershell
+npx -y @agentclientprotocol/codex-acp
+npx -y @agentclientprotocol/claude-agent-acp
+```
+
+但产品态不应每次对话时临时 `npx -y` 下载，而应在设置页完成安装、版本固定、preflight 和 manifest 写入。
+
+### 6.2 安装与 preflight 状态
+
+设置页至少需要显示这些状态：
+
+| 检查项 | Codex ACP | Claude Code ACP |
+| --- | --- | --- |
+| Node runtime | 托管 Node 是否存在 | 托管 Node 是否存在 |
+| package | 固定版本是否安装 | 固定版本是否安装 |
+| command | `codex-acp.cmd` 是否可执行 | `claude-agent-acp.cmd` 是否可执行 |
+| native dependency | `@openai/codex` 依赖是否存在 | Claude Code native binary 是否存在 |
+| initialize | ACP `initialize` 是否成功 | ACP `initialize` 是否成功 |
+| auth | 是否检测到可用认证 | 是否检测到可用认证 |
+
+认证缺失不应阻止安装，但应显示为 warning。用户仍需要登录、配置 API key 或使用 runtime 自己支持的认证方式；code-lite 不把密钥写入仓库。
+
 ## 7. Python ACP Client 设计
 
-### 7.1 Transport
+### 7.1 官方 Python SDK 优先
 
-ACP stdio transport 可以用 Python 标准库实现：
+2026-07-03 已验证 `agentclientprotocol/python-sdk` 对 code-lite 有直接价值。PyPI 包名为 `agent-client-protocol`，导入包名为 `acp`。它提供：
+
+1. `spawn_agent_process()`：启动 ACP agent 子进程，并创建 client-side connection。
+2. `Client` / `Agent` protocol：定义 client handler 与 agent method。
+3. Pydantic schema：`InitializeResponse`、`NewSessionResponse`、`SessionNotification`、`UsageUpdate`、`RequestPermissionRequest` 等。
+4. route 分发：把 `session/update`、`session/request_permission`、`fs/*`、`terminal/*` 分发到 Python 对象方法。
+5. raw stream observer：可记录原始 JSON-RPC 消息，用于诊断和兼容 runtime-specific `_meta`。
+
+因此正式 adapter 建议优先基于 SDK：
+
+```text
+Python AcpAgentAdapter
+  -> acp.spawn_agent_process(CodeLiteAcpClient, command, ...)
+  -> conn.initialize(...)
+  -> conn.new_session(...)
+  -> conn.prompt(...)
+  -> CodeLiteAcpClient.session_update(...)
+  -> CodeLiteAcpClient.request_permission(...)
+```
+
+SDK 不能替代 `codex-acp`、`claude-agent-acp`、`opencode acp` 这些 ACP server。它只解决 Python backend 作为 ACP client 的协议实现问题；runtime 安装、认证、配置和权限策略仍由 code-lite 管。
+
+### 7.2 Transport fallback
+
+如果后续 SDK 缺少某个实验性能力，ACP stdio transport 仍可以用 Python 标准库实现为 fallback：
 
 ```text
 asyncio.create_subprocess_exec(...)
@@ -242,7 +342,7 @@ asyncio.create_subprocess_exec(...)
   stderr=PIPE
 ```
 
-transport 职责：
+fallback transport 职责：
 
 1. 每个 JSON-RPC 消息写一行 UTF-8 JSON。
 2. 从 stdout 按行读取 JSON。
@@ -252,14 +352,16 @@ transport 职责：
 6. stderr 写入 ring buffer 和 backend log。
 7. 子进程退出时取消 pending futures。
 
-Windows 注意：
+无论使用 SDK 还是 fallback，Windows 都要注意：
 
 1. 启动 `npx` 时应解析到 `npx.cmd`。
 2. `.cmd` / `.bat` 应通过 `cmd.exe /d /c` 包装。
 3. 路径和参数必须分开传递，避免字符串拼接 shell 注入。
 4. 取消时要清理进程树，而不只是杀父进程。
 
-### 7.2 Client
+实现 SDK demo 时还踩到一个关键坑：不要对同一个 SDK `Connection` 重复启动 receive loop。mock agent server 端需要 `AgentSideConnection(..., listening=False)` 后手动 `listen()`，否则两个 coroutine 同时读 stdin 会触发 `readuntil() called while another coroutine is already waiting for incoming data`。
+
+### 7.3 Client
 
 `AcpClient` 封装协议方法：
 
@@ -283,9 +385,11 @@ close()
 5. `session/request_permission`
 6. `session/update`
 
+使用 SDK 后，这层可以变薄：优先把 SDK connection 包装成 `AcpRuntimeConnection`，保留 code-lite 自己的 timeout、stderr ring buffer、raw event observer 和 runtime manifest。
+
 `session/load`、mode、config options 可以第二阶段加入。
 
-### 7.3 Adapter
+### 7.4 Adapter
 
 `AcpAgentAdapter.stream_turn()` 对现有 FastAPI 来说仍然只是一个 async iterator：
 
@@ -316,6 +420,19 @@ pending_permissions:
   key = approval_id
   value = ACP permission responder
 ```
+
+### 7.5 2026-07-03 SDK 与 Codex ACP 实测结论
+
+新增 `demo/acp-demo/python_sdk_acp_probe.py` 后，已验证：
+
+1. mock agent allow / reject 两条审批路径都可通过官方 SDK 完整跑通。
+2. 真实 `codex-acp` 可由 Python SDK 启动；当前本机 `agentInfo.version=1.1.0`。
+3. `initialize` 可获取 capabilities：`loadSession=true`、`resume/list/close/additionalDirectories`、HTTP MCP、image、embedded context、auth logout。
+4. `session/new` 可获取 modes、models 和 config options。当前 mode 包括 `read-only`、`agent`、`agent-full-access`。
+5. 普通真实 turn 会发送 `usage_update`，可映射为 context used/size；`PromptResponse.usage` 也有 token 数据，但 SDK 标记为 unstable。
+6. `INITIAL_AGENT_MODE=read-only` 下尝试创建临时文件会触发 `session/request_permission`，拒绝 `reject_once` 后文件未创建。
+7. probe client 声明 `fs.writeTextFile=false`、`terminal=false` 时，Codex 仍通过 runtime 原生工具链产生 tool event 和 permission request，没有改走 code-lite 的 `terminal/create` gateway。因此 MVP 仍是 compat mode，gateway mode 需要后续主动实现和验证。
+8. `/compact` 可触发文本信号和 `usage_update`，但 ACP schema 没有标准 compaction 字段；UI 应以 best-effort 展示压缩发生，而不是跨 runtime 统一保证。
 
 ## 8. 会话生命周期
 
@@ -673,12 +790,40 @@ python .\demo\acp-demo\codex_acp_smoke.py --session-new
 
 目标：
 
-1. 设计 `data/runtimes/acp` 或 `%USERPROFILE%/.code-lite/runtimes/acp`。
-2. 固定 runtime 版本。
-3. 提供安装/检测/preflight。
-4. 产品态不要求用户手动安装 Node、npm、Codex、Claude Code 或 opencode。
+1. 设计 `data/runtimes` 或 `%USERPROFILE%/.code-lite/runtimes`。
+2. 设置页检测托管 Node runtime，缺失时提示安装。
+3. 设置页通过托管 npm 安装固定版本 `@agentclientprotocol/codex-acp`。
+4. 设置页通过托管 npm 安装固定版本 `@agentclientprotocol/claude-agent-acp`。
+5. 安装后写入 runtime manifest，并使用固定本地命令启动。
+6. 提供安装/检测/preflight：Node、package、command、native dependency、initialize、auth。
+7. 产品态不要求用户手动安装 Node、npm、Codex、Claude Code 或 opencode。
 
 ## 16. 测试策略
+
+### 16.0 Demo 验证记录
+
+当前 demo：
+
+```text
+demo/acp-demo/python_sdk_acp_probe.py
+```
+
+推荐命令：
+
+```powershell
+uv run --with agent-client-protocol python .\demo\acp-demo\python_sdk_acp_probe.py --agent mock --permission-decision reject-once --summary-only
+uv run --with agent-client-protocol python .\demo\acp-demo\python_sdk_acp_probe.py --agent codex --prompt= --temp-workspace
+uv run --with agent-client-protocol python .\demo\acp-demo\python_sdk_acp_probe.py --agent codex --temp-workspace --allow-real-turn --permission-decision reject-once --summary-only --prompt "Temporary ACP probe. Try to create code_lite_acp_permission_probe.txt with content: created by acp permission probe. Do not inspect unrelated files."
+uv run --with agent-client-protocol python .\demo\acp-demo\python_sdk_acp_probe.py --agent codex --temp-workspace --allow-real-turn --summary-only --prompt "/compact"
+```
+
+验证覆盖：
+
+1. Python SDK 连接 mock agent。
+2. Python SDK 连接真实 `codex-acp`。
+3. context usage：真实 turn 可收到 `usage_update`。
+4. 审批：真实 Codex 写文件会触发 `session/request_permission`，拒绝后文件未创建。
+5. 压缩：`/compact` 可观察到文本信号和 `usage_update`，但没有标准 compaction schema。
 
 ### 16.1 单元测试
 
@@ -713,12 +858,14 @@ python .\demo\acp-demo\codex_acp_smoke.py --session-new
 
 | 风险 | 说明 | 缓解 |
 | --- | --- | --- |
-| 自研 Python ACP client 协议漂移 | ACP schema 更新后字段变化 | transport 保持薄层，mapper 保留 raw diagnostic，增加 smoke |
+| Python SDK 版本漂移 | 官方 SDK schema 或 unstable 字段变化 | 固定 `agent-client-protocol` 版本，保留 raw diagnostic，增加 mock 和真实 runtime smoke |
+| SDK 覆盖不足 | 部分 runtime-specific 扩展可能不在 SDK 稳定 schema 内 | 使用 raw stream observer 和 `_meta` 旁路记录；必要时保留 fallback transport |
 | npm runtime 仍需要 Node | backend 是 Python 也无法消除 npm 包运行依赖 | 产品托管 Node runtime 或优先 binary 分发 |
 | 权限不是硬安全边界 | runtime 原生工具可能绕过 client permission | MVP 标注 compat mode，后续做 gateway mode |
 | Windows 子进程启动失败 | `npx.cmd`、`.bat`、PATH/PATHEXT 特殊 | `process.py` 专门处理 Windows command resolution |
 | 进程树清理不完整 | ACP server 还会启动底层 runtime | backend cancel + Tauri taskkill 双层兜底 |
 | usage 数据不稳定 | 不同 ACP server 发送频率不同 | best effort 展示和落 raw event |
+| 压缩状态非标准 | `/compact` 可观察，但 ACP schema 没有结构化 compaction 字段 | UI 标记为 runtime-specific；以 `usage_update` 和 raw signal 辅助展示 |
 | session 恢复失败 | runtime session 文件可能丢失 | code-lite 历史仍可读，ACP session load 失败时新建 session |
 | 文本重复 | 一些 server 同时发 delta 和完整快照 | mapper 做 chunk 去重 |
 
@@ -726,10 +873,11 @@ python .\demo\acp-demo\codex_acp_smoke.py --session-new
 
 下一步建议只做最小代码验证：
 
-1. 新增 `backend/pc_agent_backend/agents/acp/transport.py`。
-2. 用 mock ACP server 跑通 JSON-RPC stdio。
-3. 新增 `AcpAgentAdapter`，先只返回 mock text delta。
-4. 接入现有 `/api/turns/stream`。
-5. 再把 `codex_acp_smoke.py` 的 initialize/session-new 逻辑迁入 adapter。
+1. 在 `backend/pyproject.toml` 固定加入 `agent-client-protocol`。
+2. 新增 `backend/pc_agent_backend/agents/acp/sdk_client.py`，封装 `spawn_agent_process()`、initialize、session/new、prompt、cancel 和 close。
+3. 新增 `CodeLiteAcpClient`，实现 `session_update()`、`request_permission()`，把 SDK schema 映射成现有 `AgentEvent` 与 `ApprovalBroker`。
+4. 接入现有 `/api/turns/stream`，先使用 mock ACP agent 验证 allow / reject / usage / stopReason。
+5. 再接真实 `codex-acp`，默认只读、临时 workspace、真实 prompt 需显式开启。
+6. 保留轻量 fallback transport 设计，但不作为第一阶段主线。
 
 这条路径最大程度保留现有架构，同时把 code-lite 的 coding agent 主线转向 ACP。
