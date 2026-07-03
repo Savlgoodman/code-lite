@@ -14,6 +14,7 @@ from code_lite_backend.agents.acp.capabilities import (
 )
 from code_lite_backend.agents.acp.client import AcpClientHandler
 from code_lite_backend.agents.acp.mapper import to_jsonable
+from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
 from code_lite_backend.agents.runtimes import (
     RuntimeDescriptor,
     codex_env,
@@ -35,6 +36,8 @@ class AcpAgentAdapter:
 
     所有 ACP runtime（Codex、Claude Code、opencode）共用此 adapter。
     差异通过 RuntimeDescriptor 隔离。
+
+    使用 AcpRuntimeManager 管理常驻连接，实现跨 turn 复用。
     """
 
     def __init__(
@@ -45,6 +48,7 @@ class AcpAgentAdapter:
         runtime_config: RuntimeConfig,
         approvals: ApprovalBroker,
         agent_runtime_config_store: AgentRuntimeConfigStore,
+        runtime_manager: AcpRuntimeManager | None = None,
     ) -> None:
         self.name = runtime
         self.descriptor = descriptor
@@ -52,6 +56,7 @@ class AcpAgentAdapter:
         self._approvals = approvals
         self._agent_runtime_config_store = agent_runtime_config_store
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
+        self._runtime_manager = runtime_manager or AcpRuntimeManager()
 
     @property
     def capabilities(self) -> AgentAdapterCapabilities:
@@ -168,8 +173,6 @@ class AcpAgentAdapter:
     ) -> None:
         command = self._resolve_command()
         env = self._resolve_env()
-        stderr_task: asyncio.Task[None] | None = None
-        process: Any | None = None
         try:
             await output_queue.put({
                 "type": "agent.run.started",
@@ -181,46 +184,58 @@ class AcpAgentAdapter:
                     "command": command,
                 },
             })
-            async with acp.spawn_agent_process(
-                client,
-                command[0],
-                *command[1:],
+
+            # 使用 RuntimeManager 确保连接存在
+            connection = await self._runtime_manager.ensure_connection(
+                descriptor=self.descriptor,
+                command=command,
                 env=env,
-                cwd=str(request.workspace),
-                observers=[client.observe_stream],
-                use_unstable_protocol=True,
-            ) as (conn, process):
-                stderr_task = asyncio.create_task(self._drain_stderr(process, client))
-                initialize_result = await asyncio.wait_for(
-                    conn.initialize(
-                        protocol_version=acp.PROTOCOL_VERSION,
-                        client_capabilities=_build_client_capabilities(),
-                        client_info=acp_schema.Implementation(
-                            name="code-lite",
-                            title="code-lite",
-                            version="0.1.4",
-                        ),
-                    ),
-                    timeout=30,
+                workspace=request.workspace,
+                approvals=self._approvals,
+            )
+
+            # 获取 conversation lock（串行化同一会话的 prompt）
+            lock = self._runtime_manager.get_turn_lock(request.conversation_id)
+            async with lock:
+                # 更新 client handler 以使用 persistent connection 的 client
+                # 注意：sdk_connection 的回调是通过 connection 创建时的 client_handler
+                # 我们需要确保 events 能正确路由到当前 turn 的 output_queue
+                connection_sdk = connection.sdk_connection
+                # 把 connection 的 client_handler 的 output_queue 临时指向当前 turn 的 queue
+                original_handler = connection._client_handler
+                if original_handler is not None:
+                    original_handler.output_queue = output_queue  # type: ignore[assignment]
+                    original_handler.conversation_id = request.conversation_id
+                    original_handler.turn_id = request.turn_id
+                    original_handler.native_session_id = None
+
+                # 确保 native session 存在
+                binding = await self._runtime_manager.ensure_session(
+                    connection=connection,
+                    conversation_id=request.conversation_id,
+                    workspace=request.workspace,
                 )
-                session_result = await asyncio.wait_for(
-                    conn.new_session(cwd=str(request.workspace), mcp_servers=[]),
-                    timeout=30,
-                )
-                client.native_session_id = str(session_result.session_id)
-                await self._configure_session(conn, session_result, request)
-                prompt_result = await conn.prompt(
-                    session_id=session_result.session_id,
+                if original_handler is not None:
+                    original_handler.native_session_id = binding.native_session_id
+                client.native_session_id = binding.native_session_id
+
+                # 配置 session（mode, model, reasoning effort）
+                await self._configure_session(connection_sdk, binding, request)
+
+                # 发送 prompt
+                prompt_result = await connection_sdk.prompt(
+                    session_id=binding.native_session_id,
                     prompt=[acp.text_block(request.prompt)],
                 )
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(conn.close_session(session_result.session_id), timeout=5)
+
                 await output_queue.put({
                     "type": "agent.text.completed",
                     "conversationId": request.conversation_id,
                     "turnId": request.turn_id,
                 })
-                usage_dict = client.latest_usage.to_dict() if client.latest_usage else None
+                usage_dict = client.latest_usage.to_dict() if client.latest_usage else (
+                    original_handler.latest_usage.to_dict() if original_handler and original_handler.latest_usage else None
+                )
                 await output_queue.put({
                     "type": "agent.run.completed",
                     "conversationId": request.conversation_id,
@@ -229,10 +244,11 @@ class AcpAgentAdapter:
                     "result": {
                         "stopReason": getattr(prompt_result, "stop_reason", None),
                         "runtime": self.descriptor.id,
-                        "nativeSessionId": client.native_session_id,
-                        "agentInfo": to_jsonable(getattr(initialize_result, "agent_info", None)),
+                        "nativeSessionId": binding.native_session_id,
+                        "agentInfo": to_jsonable(getattr(connection.initialize_result, "agent_info", None)),
                     },
                 })
+
         except asyncio.CancelledError:
             await output_queue.put({
                 "type": "agent.run.failed",
@@ -249,7 +265,11 @@ class AcpAgentAdapter:
                 "error": f"{self.descriptor.label} ACP 启动失败：{exc}",
             })
         except Exception as exc:
-            stderr = "\n".join(client.stderr_tail)
+            # 尝试从 connection 获取 stderr
+            connection = self._runtime_manager.get_connection_for_conversation(request.conversation_id)
+            stderr = ""
+            if connection is not None:
+                stderr = "\n".join(connection.stderr_ring_buffer)
             suffix = f"\n\n{self.descriptor.label} stderr:\n{stderr}" if stderr else ""
             await output_queue.put({
                 "type": "agent.run.failed",
@@ -258,19 +278,12 @@ class AcpAgentAdapter:
                 "error": f"{self.descriptor.label} ACP 运行失败：{type(exc).__name__}: {exc}{suffix}",
             })
         finally:
-            if stderr_task is not None:
-                stderr_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await stderr_task
-            if process is not None:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(process.wait(), timeout=5)
             await output_queue.put(None)
 
     async def _configure_session(
-        self, conn: Any, session_result: Any, request: AgentRunRequest
+        self, conn: Any, session_binding: Any, request: AgentRunRequest
     ) -> None:
-        session_id = str(session_result.session_id)
+        session_id = session_binding.native_session_id
 
         # 设置模式
         mode = self._resolve_mode(request.access_mode)
@@ -285,8 +298,7 @@ class AcpAgentAdapter:
         model = str(
             request.runtime_model or request.model_metadata.get("model") or ""
         ).strip()
-        available_model_ids = extract_available_model_ids(session_result)
-        if model and model in available_model_ids:
+        if model:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(
                     conn.set_session_model(session_id=session_id, model_id=model),

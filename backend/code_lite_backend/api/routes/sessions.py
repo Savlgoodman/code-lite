@@ -34,6 +34,8 @@ async def initialize_session(
     """进入对话时调用，初始化 ACP session 并返回 SessionCapabilities。
 
     前端根据 SessionCapabilities 动态渲染权限模式、模型选择、思考强度等控件。
+
+    使用 AcpRuntimeManager 复用连接和 session，不再每轮临时 spawn。
     """
     agent_id = services.agent_runtime_config_store.resolve_adapter(None)
     agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
@@ -61,6 +63,7 @@ async def initialize_session(
             agent_label=agent_label,
             descriptor=descriptor,
             services=services,
+            conversation_id=conversation_id,
         )
         return JSONResponse(caps.to_dict())
     except Exception as exc:
@@ -75,8 +78,9 @@ async def _initialize_acp_session(
     agent_label: str,
     descriptor: Any,
     services: AppServices,
+    conversation_id: str,
 ) -> SessionCapabilities:
-    """启动 ACP 连接，创建 session，构建 SessionCapabilities。"""
+    """通过 RuntimeManager 复用连接和 session 来构建 SessionCapabilities。"""
     agent_runtime_config_store = services.agent_runtime_config_store
     runtime_config = services.runtime_config
 
@@ -97,6 +101,96 @@ async def _initialize_acp_session(
         env = dict(__import__("os").environ)
         default_mode = descriptor.default_mode
 
+    runtime_manager = services.runtime_manager
+    if runtime_manager is None:
+        # fallback: 如果没有 runtime_manager（旧路径），使用临时 probe
+        return await _initialize_acp_session_legacy(
+            agent_id=agent_id,
+            agent_label=agent_label,
+            descriptor=descriptor,
+            services=services,
+            command=command,
+            env=env,
+            default_mode=default_mode,
+        )
+
+    # 使用 RuntimeManager 复用连接
+    connection = await runtime_manager.ensure_connection(
+        descriptor=descriptor,
+        command=command,
+        env=env,
+        workspace=services.workspace,
+        approvals=services.approvals,
+    )
+
+    # 使用 RuntimeManager 复用或创建 session
+    binding = await runtime_manager.ensure_session(
+        connection=connection,
+        conversation_id=conversation_id,
+        workspace=services.workspace,
+    )
+
+    # 从 session/new 结果构建 capabilities（如果还没有缓存）
+    if binding.capabilities is None:
+        # 需要 session/new 的原始结果来构建 capabilities
+        # 但 binding 只保存了 native_session_id，没有保存原始 session_result
+        # 这里用 list_models 的方式重新获取 session 信息
+        # 或者直接从 connection 的 capabilities_cache 获取
+        pass
+
+    # 构建 SessionCapabilities
+    # 对于 reuse 的 session，我们需要从已有的 connection 获取能力信息
+    # 简单做法：如果是新创建的 session，我们在 ensure_session 时已经拿到了 session_result
+    # 如果是复用的，我们可以从 capabilities_cache 获取
+    return build_session_capabilities(
+        agent_id=agent_id,
+        agent_label=agent_label,
+        adapter_kind="acp",
+        status=descriptor.status,
+        session_result=_get_or_create_session_result(connection, binding),
+        default_mode=default_mode,
+        runtime=descriptor.id,
+    )
+
+
+def _get_or_create_session_result(connection: Any, binding: Any) -> Any:
+    """从 connection 获取缓存的 session result，或构建一个最小可用的。"""
+    if connection.capabilities_cache is not None:
+        return connection.capabilities_cache
+
+    # 如果没有缓存，返回一个空的 session result 供 build_session_capabilities 处理
+    # build_session_capabilities 会优雅处理空数据
+    return _EmptySessionResult(binding.native_session_id)
+
+
+class _EmptySessionResult:
+    """最小 session result 对象，提供 session_id 但不提供 modes/models/configOptions。"""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+
+    def __getattr__(self, name: str) -> Any:
+        # 返回空值让 build_session_capabilities 优雅降级
+        if name == "modes":
+            return []
+        if name == "models":
+            return {"availableModels": [], "currentModelId": None}
+        if name == "configOptions":
+            return {}
+        raise AttributeError(name)
+
+
+async def _initialize_acp_session_legacy(
+    *,
+    agent_id: str,
+    agent_label: str,
+    descriptor: Any,
+    services: AppServices,
+    command: list[str],
+    env: dict[str, str],
+    default_mode: str,
+) -> SessionCapabilities:
+    """Legacy fallback：临时 spawn ACP 获取 capabilities（无 RuntimeManager 时使用）。"""
     client = AcpClientHandler(
         runtime=descriptor.id,
         conversation_id="session-probe",

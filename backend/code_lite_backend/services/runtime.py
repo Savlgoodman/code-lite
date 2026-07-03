@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
 from code_lite_backend.core.config import RuntimeConfig
 from code_lite_backend.schemas.agent import AgentAdapter
 from code_lite_backend.services.approvals import ApprovalBroker
@@ -22,3 +23,4 @@ class AppServices:
     model_config_store: ModelConfigStore
     agent_runtime_config_store: AgentRuntimeConfigStore
     agent_adapter: AgentAdapter
+    runtime_manager: AcpRuntimeManager | None = None
