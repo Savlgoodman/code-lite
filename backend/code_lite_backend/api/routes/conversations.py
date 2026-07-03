@@ -17,6 +17,42 @@ async def list_conversations(services: AppServices = Depends(get_services)) -> d
     return {"sessions": services.conversation_store.list_sessions()}
 
 
+@router.post("/conversations")
+async def create_conversation(
+    payload: dict[str, Any],
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    """创建新会话并绑定 agent。
+
+    body: { "agentId": "codex", "title": "...", "preview": "..." }
+    agentId 必填，后续该会话的所有 turn 都使用绑定的 agent。
+    """
+    agent_id = str(payload.get("agentId") or "").strip()
+    if not agent_id:
+        # fallback: 使用当前 activeAdapter
+        agent_id = services.agent_runtime_config_store.resolve_adapter(None)
+
+    title = str(payload.get("title") or "").strip() or None
+    preview = str(payload.get("preview") or "").strip() or None
+
+    session = services.conversation_store.create_session(title=title, preview=preview)
+
+    # 绑定 agent 到 session
+    agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
+    session_with_agent = services.conversation_store.save_session(
+        session["id"],
+        {
+            **session,
+            "agent": agent_metadata,
+        },
+    )
+
+    return JSONResponse({
+        "session": session_with_agent,
+        "messages": [],
+    })
+
+
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,

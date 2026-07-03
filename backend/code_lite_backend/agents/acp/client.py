@@ -78,6 +78,13 @@ class AcpClientHandler:
 
         if kind == "usage_update":
             self.latest_usage = extract_usage(update)
+            # 推送 agent.context.updated 事件（供前端 ContextRing 实时更新）
+            usage_dict = self.latest_usage.to_dict()
+            if usage_dict:
+                await self._put({
+                    "type": "agent.context.updated",
+                    "context": usage_dict,
+                })
             return
 
         event = self.mapper.map_update(update, self.context)

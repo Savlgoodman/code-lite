@@ -367,18 +367,6 @@ function AgentRuntimeSettings() {
     }
   }
 
-  async function activateRuntime(runtime: AgentRuntimeConfig) {
-    setBusyId(`activate-${runtime.id}`);
-    setError(null);
-    try {
-      setSettings(await updateActiveAgentRuntime(runtime.adapter));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   const runtimes = settings?.runtimes ?? [];
   const codex = runtimes.find((runtime) => runtime.id === "codex");
   const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0] ?? null;
@@ -411,7 +399,6 @@ function AgentRuntimeSettings() {
           <div>
             <div className="settings-runtime-title">
               <h1>{selectedRuntime.label}</h1>
-              {selectedRuntime.isActive ? <span>已启用</span> : null}
             </div>
             <p>
               {selectedRuntime.managedPackage?.name ?? selectedRuntime.distribution}
@@ -419,17 +406,6 @@ function AgentRuntimeSettings() {
             </p>
           </div>
           <div className="runtime-title-actions">
-            {selectedRuntime.canActivate ? (
-              <button
-                className="settings-secondary-button"
-                disabled={selectedRuntime.isActive || busyId === `activate-${selectedRuntime.id}`}
-                onClick={() => void activateRuntime(selectedRuntime)}
-                type="button"
-              >
-                <Check size={14} />
-                <span>{selectedRuntime.isActive ? "当前使用" : "启用"}</span>
-              </button>
-            ) : null}
             {selectedRuntime.canInstall ? (
               <button
                 className="settings-secondary-button"

@@ -90,12 +90,13 @@ class AcpRuntimeManager:
     避免每轮 prompt 都重新 spawn 子进程。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, conversation_store: Any = None) -> None:
         self._connections: dict[ConnectionKey, AcpRuntimeConnection] = {}
         self._session_bindings: dict[str, AcpSessionBinding] = {}  # conversation_id -> binding
         self._turn_locks: dict[str, asyncio.Lock] = {}  # conversation_id -> lock
         self._handshake_timeout = 30.0
         self._session_timeout = 30.0
+        self._conversation_store = conversation_store  # ConversationStore (optional)
 
     def get_turn_lock(self, conversation_id: str) -> asyncio.Lock:
         """获取指定 conversation 的 turn lock（串行化同一会话的 prompt）。"""
@@ -174,9 +175,9 @@ class AcpRuntimeManager:
     ) -> AcpSessionBinding:
         """确保存在绑定的 native ACP session。
 
-        如果已有绑定则复用，否则创建新 session。
+        如果已有内存绑定则复用，否则尝试从磁盘恢复或创建新 session。
         """
-        # 已绑定 nativeSessionId 则复用
+        # 内存中已有绑定则复用
         existing = self._session_bindings.get(conversation_id)
         if existing is not None:
             if existing.native_session_id in connection.sessions.values():
@@ -210,6 +211,10 @@ class AcpRuntimeManager:
         )
         connection.sessions[conversation_id] = native_session_id
         self._session_bindings[conversation_id] = binding
+
+        # 持久化到 native-session.json
+        self._persist_binding(binding)
+
         connection.touch()
         logger.info(
             "Created new native session %s for conversation %s",
@@ -237,6 +242,44 @@ class AcpRuntimeManager:
         if binding is not None:
             for conn in self._connections.values():
                 conn.sessions.pop(conversation_id, None)
+
+    def load_binding_from_disk(self, conversation_id: str) -> AcpSessionBinding | None:
+        """从 native-session.json 加载绑定（不创建新 session）。"""
+        if self._conversation_store is None:
+            return None
+        data = self._conversation_store.load_native_session(conversation_id)
+        if data is None:
+            return None
+        return AcpSessionBinding(
+            conversation_id=data.get("conversationId", conversation_id),
+            runtime_id=data.get("runtimeId", ""),
+            native_session_id=data.get("nativeSessionId", ""),
+            workspace=data.get("workspace", ""),
+            config_mode=data.get("configMode", ""),
+            created_at=data.get("createdAt", ""),
+            updated_at=data.get("updatedAt", ""),
+            capabilities=data.get("capabilities"),
+        )
+
+    def _persist_binding(self, binding: AcpSessionBinding) -> None:
+        """持久化绑定到 native-session.json。"""
+        if self._conversation_store is None:
+            return
+        try:
+            self._conversation_store.save_native_session(
+                binding.conversation_id,
+                {
+                    "conversationId": binding.conversation_id,
+                    "runtimeId": binding.runtime_id,
+                    "nativeSessionId": binding.native_session_id,
+                    "workspace": binding.workspace,
+                    "configMode": binding.config_mode,
+                    "createdAt": binding.created_at,
+                    "updatedAt": binding.updated_at,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist native session binding: %s", exc)
 
     # ─── Private helpers ──────────────────────────────────────────────────
 

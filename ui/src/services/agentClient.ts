@@ -54,6 +54,25 @@ export async function initializeSession(conversationId: string): Promise<Session
   return response.json() as Promise<SessionCapabilities>;
 }
 
+export async function createConversation(options: {
+  agentId: string;
+  title?: string;
+  preview?: string;
+}): Promise<{ session: Session; messages: unknown[] }> {
+  const baseUrl = await ensureBackend();
+  const response = await fetch(`${baseUrl}/api/conversations`, {
+    body: JSON.stringify(options),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+
+  return response.json() as Promise<{ session: Session; messages: unknown[] }>;
+}
+
 export async function streamAgentTurn(options: StartTurnOptions): Promise<void> {
   const baseUrl = await ensureBackend();
   const response = await fetch(`${baseUrl}/api/turns/stream`, {

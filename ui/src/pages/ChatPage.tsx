@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatComposer } from "../features/chat/ChatComposer";
 import { ConversationHeader } from "../features/chat/ConversationHeader";
 import { MessageList } from "../features/chat/MessageList";
+import { AgentSelectionPanel } from "../features/chat/AgentSelectionPanel";
 import {
   createEmptySession,
   createId,
@@ -16,7 +17,7 @@ import { formatJson } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
-import { cancelTurn, initializeSession, sendApprovalDecision, streamAgentTurn } from "../services/agentClient";
+import { cancelTurn, createConversation, initializeSession, sendApprovalDecision, streamAgentTurn } from "../services/agentClient";
 import {
   deleteConversation,
   listConversations,
@@ -36,7 +37,8 @@ import type {
   SessionCapabilities,
   SessionConfigOption,
   SessionModel,
-  ToolCallItem
+  ToolCallItem,
+  UsageStats
 } from "../types";
 import "./ChatPage.css";
 
@@ -163,6 +165,8 @@ export function ChatPage() {
   const [sessionCapabilities, setSessionCapabilities] = useState<SessionCapabilities | null>(null);
   const [selectedConfig, setSelectedConfig] = useState<Record<string, string | number | boolean>>({});
   const [selectedModelFamily, setSelectedModelFamily] = useState<string>("");
+  const [contextUsage, setContextUsage] = useState<UsageStats | null>(null);
+  const [showAgentSelection, setShowAgentSelection] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
@@ -385,27 +389,50 @@ export function ChatPage() {
   }
 
   function createSession(nextView: ActiveView = "chat") {
-    const draftSession = createDraftSession();
-    setArchivedSessionIds((current) => {
-      if (!current.has(DRAFT_SESSION_ID)) {
-        return current;
-      }
-      const next = new Set(current);
-      next.delete(DRAFT_SESSION_ID);
-      return next;
-    });
-    setSessions((current) => [
-      draftSession,
-      ...current.filter((session) => !isDraftSessionId(session.id))
-    ]);
-    setMessages((current) => ({
-      ...current,
-      [draftSession.id]: []
-    }));
-    setActiveSessionId(draftSession.id);
-    setActiveView(nextView);
-    setDraft("");
-    setPendingApproval(null);
+    // 显示 Agent 选择面板，让用户选择要使用的 agent
+    setShowAgentSelection(true);
+  }
+
+  async function confirmAgentSelection(agentId: string) {
+    setShowAgentSelection(false);
+    try {
+      const result = await createConversation({ agentId });
+      const session = result.session;
+      setArchivedSessionIds((current) => {
+        if (!current.has(DRAFT_SESSION_ID)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.delete(DRAFT_SESSION_ID);
+        return next;
+      });
+      setSessions((current) => [
+        session,
+        ...current.filter((s) => !isDraftSessionId(s.id))
+      ]);
+      setMessages((current) => ({
+        ...current,
+        [session.id]: []
+      }));
+      setActiveSessionId(session.id);
+      setActiveView("chat");
+      setDraft("");
+      setPendingApproval(null);
+    } catch (error) {
+      console.error("Failed to create conversation:", error);
+      // fallback: 创建本地 draft session
+      const draftSession = createDraftSession();
+      setSessions((current) => [
+        draftSession,
+        ...current.filter((s) => !isDraftSessionId(s.id))
+      ]);
+      setMessages((current) => ({
+        ...current,
+        [draftSession.id]: []
+      }));
+      setActiveSessionId(draftSession.id);
+      setActiveView("chat");
+    }
   }
 
   function selectSession(sessionId: string) {
@@ -675,9 +702,24 @@ export function ChatPage() {
       return;
     }
 
+    if (event.type === "agent.context.updated") {
+      setContextUsage(event.context);
+      return;
+    }
+
     if (event.type === "agent.run.completed") {
       flushQueuedMessageDeltas();
       setSessionRunning(targetSessionId, false);
+      // 从 final usage 更新 context（如果 turn 结束时携带了 context 数据）
+      if (typeof event.usage === "object" && event.usage) {
+        const finalUsage = event.usage as Record<string, unknown>;
+        if (finalUsage.contextUsedTokens != null || finalUsage.contextWindowTokens != null) {
+          setContextUsage({
+            ...contextUsage,
+            ...finalUsage,
+          } as UsageStats);
+        }
+      }
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
@@ -797,6 +839,18 @@ export function ChatPage() {
 
   return (
     <>
+      {showAgentSelection ? (
+        <AgentSelectionPanel
+          availableAgents={[
+            { id: "codex", label: "Codex", glyph: "Cx", status: "available", description: "OpenAI Codex，通过 ACP 协议接入。支持代码生成、工具调用和文件操作。" },
+            { id: "claude_code", label: "Claude Code", glyph: "Cl", status: "experimental", description: "Anthropic Claude Code，通过 ACP 协议接入。支持代码生成和分析。" },
+            { id: "opencode", label: "opencode", glyph: "Op", status: "planned", description: "opencode agent，通过 ACP 协议接入。当前为计划接入状态。" },
+            { id: "nanobot", label: "Nanobot", glyph: "Nb", status: "available", description: "Legacy agent，使用产品级模型配置。适合非代码任务。" },
+          ]}
+          onCancel={() => setShowAgentSelection(false)}
+          onSelect={(agentId) => void confirmAgentSelection(agentId)}
+        />
+      ) : null}
       {activeView === "settings" ? (
         <SettingsPage
           archivedSessions={archivedSessions}
@@ -833,6 +887,7 @@ export function ChatPage() {
               <ChatComposer
                 activeTurnId={isActiveSessionRunning ? activeTurnId : null}
                 configOptions={sessionCapabilities?.configOptions ?? []}
+                contextUsage={contextUsage}
                 draft={draft}
                 accessMode={accessMode}
                 agent={sessionAgent}

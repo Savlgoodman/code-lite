@@ -102,6 +102,9 @@ export interface UsageStats {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  contextUsedTokens?: number;
+  contextWindowTokens?: number;
+  source?: string;
 }
 
 export interface SystemProfileItem {
@@ -379,6 +382,12 @@ export type AgentEvent =
       impact: string;
       risks: string[];
       rollback: string;
+    }
+  | {
+      type: "agent.context.updated";
+      conversationId: string;
+      turnId: string;
+      context: UsageStats;
     }
   | {
       type: "agent.run.completed";

@@ -136,6 +136,14 @@ class ConversationRecorder:
             assistant["content"] = f"{assistant.get('content') or ''}{event.get('delta') or ''}"
         elif event_type == "agent.reasoning.delta":
             assistant["reasoning"] = f"{assistant.get('reasoning') or ''}{event.get('delta') or ''}"
+        elif event_type == "agent.context.updated":
+            # 保存最新的 context usage 到 assistant message
+            context_data = event.get("context")
+            if isinstance(context_data, dict):
+                assistant["usage"] = {
+                    **(assistant.get("usage") or {}),
+                    **context_data,
+                }
         elif event_type == "agent.tool.started":
             self._upsert_tool_call(
                 assistant,
