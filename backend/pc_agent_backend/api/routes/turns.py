@@ -40,6 +40,10 @@ async def stream_turn(
     requested_model_id = str(body.get("modelId") or "").strip() or None
     requested_access_mode = str(body.get("accessMode") or "").strip() or None
     requested_reasoning_effort = str(body.get("reasoningEffort") or "").strip() or None
+    selected_config = body.get("selectedConfig") if isinstance(body.get("selectedConfig"), dict) else None
+    # selectedConfig 中的 reasoning_effort 覆盖旧字段（兼容过渡期）
+    if selected_config and "reasoning_effort" in selected_config:
+        requested_reasoning_effort = str(selected_config["reasoning_effort"] or "").strip() or None
     persisted = None if not conversation_id else services.conversation_store.get_conversation(conversation_id)
     persisted_agent = None
     if persisted and isinstance(persisted.get("session"), dict):
