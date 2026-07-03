@@ -351,6 +351,15 @@ export type AgentEvent =
       risk?: ToolCallItem["risk"];
     }
   | {
+      type: "agent.tool.delta";
+      conversationId: string;
+      turnId: string;
+      toolCallId: string;
+      name: string;
+      status?: string;
+      progress?: unknown;
+    }
+  | {
       type: "agent.tool.completed";
       conversationId: string;
       turnId: string;

@@ -175,9 +175,13 @@ class AcpRuntimeManager:
     ) -> AcpSessionBinding:
         """确保存在绑定的 native ACP session。
 
-        如果已有内存绑定则复用，否则尝试从磁盘恢复或创建新 session。
+        恢复策略（按优先级）：
+        1. 内存中已有绑定 → 复用
+        2. 磁盘上有 native-session.json + runtime 支持 loadSession → 尝试 session/load
+        3. session/load 失败 → fallback 到 session/new
+        4. 无磁盘记录 → session/new
         """
-        # 内存中已有绑定则复用
+        # 1. 内存中已有绑定则复用
         existing = self._session_bindings.get(conversation_id)
         if existing is not None:
             if existing.native_session_id in connection.sessions.values():
@@ -185,7 +189,47 @@ class AcpRuntimeManager:
                 connection.touch()
                 return existing
 
-        # session/new
+        # 2. 尝试从磁盘恢复
+        saved_binding = self.load_binding_from_disk(conversation_id)
+        if saved_binding is not None and self._supports_load_session(connection):
+            try:
+                logger.info(
+                    "Attempting session/load for %s (native: %s)",
+                    conversation_id[:12],
+                    saved_binding.native_session_id[:12],
+                )
+                result = await asyncio.wait_for(
+                    connection.sdk_connection.load_session(
+                        cwd=saved_binding.workspace or str(workspace),
+                        session_id=saved_binding.native_session_id,
+                    ),
+                    timeout=self._session_timeout,
+                )
+                # load 成功 — 复用 saved binding 并更新
+                saved_binding.updated_at = _now_iso()
+                # 尝试从 load result 获取 capabilities
+                from code_lite_backend.agents.acp.mapper import to_jsonable
+                session_data = to_jsonable(result)
+                if session_data:
+                    saved_binding.capabilities = session_data
+                connection.sessions[conversation_id] = saved_binding.native_session_id
+                self._session_bindings[conversation_id] = saved_binding
+                self._persist_binding(saved_binding)
+                connection.touch()
+                logger.info(
+                    "Successfully loaded native session %s for conversation %s",
+                    saved_binding.native_session_id[:12],
+                    conversation_id[:12],
+                )
+                return saved_binding
+            except Exception as exc:
+                logger.warning(
+                    "session/load failed for %s: %s — falling back to session/new",
+                    conversation_id[:12],
+                    exc,
+                )
+
+        # 3/4. session/new
         result = await asyncio.wait_for(
             connection.sdk_connection.new_session(
                 cwd=str(workspace),
@@ -199,13 +243,14 @@ class AcpRuntimeManager:
         from code_lite_backend.agents.acp.mapper import to_jsonable
         session_data = to_jsonable(result)
 
+        created_at = saved_binding.created_at if saved_binding else _now_iso()
         binding = AcpSessionBinding(
             conversation_id=conversation_id,
             runtime_id=connection.descriptor.id,
             native_session_id=native_session_id,
             workspace=str(workspace),
             config_mode=connection.key.config_mode,
-            created_at=_now_iso(),
+            created_at=created_at,
             updated_at=_now_iso(),
             capabilities=session_data,
         )
@@ -222,6 +267,17 @@ class AcpRuntimeManager:
             conversation_id[:12],
         )
         return binding
+
+    @staticmethod
+    def _supports_load_session(connection: AcpRuntimeConnection) -> bool:
+        """检查 runtime 是否支持 session/load。"""
+        init_result = connection.initialize_result
+        if init_result is None:
+            return False
+        agent_capabilities = getattr(init_result, "agent_capabilities", None)
+        if agent_capabilities is None:
+            return False
+        return bool(getattr(agent_capabilities, "load_session", False))
 
     async def close_connection(self, key: ConnectionKey) -> None:
         """关闭指定连接。"""

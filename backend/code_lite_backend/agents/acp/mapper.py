@@ -64,6 +64,30 @@ def _base_event(event_type: str, ctx: EventContext) -> dict[str, Any]:
     }
 
 
+@dataclass
+class TextDedupState:
+    """文本 chunk 去重状态。
+
+    部分 runtime 可能既发送 delta，又发送完整 snapshot。
+    按 channel 维护累计文本，只输出增量。
+    """
+    accumulated: str = ""
+
+    def dedup(self, chunk: str) -> str:
+        """返回实际需要追加的增量文本。"""
+        if not chunk:
+            return ""
+        if chunk == self.accumulated:
+            return ""  # 完整 snapshot 重放，丢弃
+        if self.accumulated and chunk.startswith(self.accumulated):
+            delta = chunk[len(self.accumulated):]
+            self.accumulated = chunk
+            return delta
+        # 正常增量或首次
+        self.accumulated = chunk if not self.accumulated else self.accumulated + chunk
+        return chunk if not self.accumulated.startswith(chunk) else chunk
+
+
 def _map_agent_message_chunk(update: Any, ctx: EventContext) -> dict[str, Any]:
     event = _base_event("agent.text.delta", ctx)
     event["delta"] = _text_from_content(getattr(update, "content", None))
@@ -125,6 +149,20 @@ def _map_tool_call_update(update: Any, ctx: EventContext) -> dict[str, Any] | No
         })
         return event
 
+    # 中间状态 → agent.tool.delta（长命令的中间进度）
+    if status and status not in ("completed", "failed"):
+        event = _base_event("agent.tool.delta", ctx)
+        event.update({
+            "toolCallId": tool_call_id,
+            "name": name,
+            "status": status,
+        })
+        if raw_output is not None:
+            event["progress"] = raw_output
+        elif content is not None:
+            event["progress"] = content
+        return event
+
     return None
 
 
@@ -167,10 +205,17 @@ class AcpEventMapper:
     """声明式 ACP → UnifiedAgentEvent 映射器。
 
     所有 ACP agent 共用，不需要为每个 runtime 写映射逻辑。
+    内置文本去重，处理 runtime 可能的 snapshot 重放。
     """
 
     def __init__(self, runtime: str) -> None:
         self.runtime = runtime
+        self._text_dedup: dict[str, TextDedupState] = {}  # channel -> state
+
+    def _get_dedup(self, channel: str) -> TextDedupState:
+        if channel not in self._text_dedup:
+            self._text_dedup[channel] = TextDedupState()
+        return self._text_dedup[channel]
 
     def map_update(self, update: Any, ctx: EventContext) -> dict[str, Any] | None:
         """将 ACP session/update 映射为 UnifiedAgentEvent。
@@ -180,8 +225,24 @@ class AcpEventMapper:
         kind = str(getattr(update, "session_update", "unknown"))
         handler = ACP_EVENT_MAP.get(kind)
         if handler:
-            return handler(update, ctx)
+            event = handler(update, ctx)
+            if event is None:
+                return None
+            # 对文本事件应用去重
+            if kind in ("agent_message_chunk", "agent_thought_chunk"):
+                channel = f"{ctx.conversation_id}:{ctx.turn_id}:{kind}"
+                dedup = self._get_dedup(channel)
+                raw_delta = event.get("delta", "")
+                deduped = dedup.dedup(raw_delta)
+                if not deduped:
+                    return None  # 重复 snapshot，丢弃
+                event["delta"] = deduped
+            return event
         return None
+
+    def reset_dedup(self) -> None:
+        """重置去重状态（新 turn 时调用）。"""
+        self._text_dedup.clear()
 
     def map_permission_request(
         self,

@@ -639,6 +639,22 @@ export function ChatPage() {
       return;
     }
 
+    if (event.type === "agent.tool.delta") {
+      // 工具中间状态更新（长命令进度）
+      setMessages((current) =>
+        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
+          ...message,
+          toolCalls: upsertToolCall(message.toolCalls, {
+            id: event.toolCallId,
+            name: event.name,
+            status: "running",
+            resultText: event.progress != null ? formatJson(event.progress) : undefined,
+          })
+        }))
+      );
+      return;
+    }
+
     if (event.type === "agent.tool.completed") {
       flushQueuedMessageDeltas();
       setMessages((current) =>

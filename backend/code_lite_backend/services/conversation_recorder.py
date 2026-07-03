@@ -156,6 +156,16 @@ class ConversationRecorder:
                     "status": "running",
                 },
             )
+        elif event_type == "agent.tool.delta":
+            self._upsert_tool_call(
+                assistant,
+                event.get("toolCallId") or create_message_id("tool"),
+                {
+                    "name": str(event.get("name") or ""),
+                    "status": "running",
+                    "resultText": format_json(event.get("progress")) if event.get("progress") is not None else None,
+                },
+            )
         elif event_type == "agent.tool.completed":
             self._upsert_tool_call(
                 assistant,
