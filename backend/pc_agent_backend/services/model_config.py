@@ -33,6 +33,7 @@ class ResolvedModel:
     protocol: str
     context_window_tokens: int
     max_output_tokens: int
+    reasoning_effort: str
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -716,6 +717,7 @@ class ModelConfigStore:
 
     def _resolved_model(self, provider: dict[str, Any], model: dict[str, Any]) -> ResolvedModel:
         limits = model.get("limits") if isinstance(model.get("limits"), dict) else {}
+        generation = model.get("generation") if isinstance(model.get("generation"), dict) else {}
         return ResolvedModel(
             model_id=str(model.get("id") or ""),
             model_preset_id=_model_preset_id(str(model.get("id") or "model")),
@@ -726,6 +728,7 @@ class ModelConfigStore:
             protocol=str(model.get("protocol") or provider.get("protocol") or DEFAULT_PROTOCOL),
             context_window_tokens=_as_int(limits.get("contextWindowTokens"), DEFAULT_CONTEXT_WINDOW_TOKENS),
             max_output_tokens=_as_int(limits.get("maxOutputTokens"), DEFAULT_MAX_OUTPUT_TOKENS),
+            reasoning_effort=str(generation.get("reasoningEffort") or "none"),
         )
 
     def _public_provider(self, provider: dict[str, Any]) -> dict[str, Any]:

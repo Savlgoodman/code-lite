@@ -14,9 +14,13 @@ class AgentRunRequest:
     turn_id: str
     prompt: str
     workspace: Path
+    agent_id: str | None = None
+    agent_label: str | None = None
+    access_mode: str | None = None
     model_id: str | None = None
     model_preset_id: str | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)

@@ -66,14 +66,17 @@ class ConversationRecorder:
         *,
         conversation_id: str,
         prompt: str,
+        agent_metadata: dict[str, Any] | None = None,
         model_metadata: dict[str, Any] | None = None,
     ) -> TurnRecord:
         timestamp = now_ms()
+        agent_metadata = agent_metadata or {}
         model_metadata = model_metadata or {}
         persisted = self._store.get_conversation(conversation_id)
         previous_session = persisted.get("session") if persisted else {}
         session = {
             **previous_session,
+            "agent": previous_session.get("agent") or agent_metadata or None,
             "id": conversation_id,
             "createdAt": previous_session.get("createdAt") or timestamp,
             "preview": prompt or DEFAULT_PREVIEW,
@@ -86,6 +89,7 @@ class ConversationRecorder:
             "role": "user",
             "content": prompt,
             "createdAt": timestamp,
+            "agent": session.get("agent"),
             "model": model_metadata or None,
             "toolCalls": [],
         }
@@ -94,6 +98,7 @@ class ConversationRecorder:
             "role": "assistant",
             "content": "",
             "createdAt": timestamp,
+            "agent": session.get("agent"),
             "model": model_metadata or None,
             "streaming": True,
             "toolCalls": [],

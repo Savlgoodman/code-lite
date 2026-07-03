@@ -9,9 +9,11 @@ interface BackendStatus {
 }
 
 export interface StartTurnOptions {
+  accessMode?: string | null;
   conversationId?: string;
   input: string;
   modelId?: string | null;
+  reasoningEffort?: string | null;
   signal?: AbortSignal;
   turnId: string;
   onEvent: (event: AgentEvent) => void;
@@ -41,8 +43,10 @@ export async function streamAgentTurn(options: StartTurnOptions): Promise<void> 
   const response = await fetch(`${baseUrl}/api/turns/stream`, {
     body: JSON.stringify({
       ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+      ...(options.accessMode ? { accessMode: options.accessMode } : {}),
       input: options.input,
       ...(options.modelId ? { modelId: options.modelId } : {}),
+      ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
       turnId: options.turnId
     }),
     headers: {

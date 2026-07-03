@@ -23,8 +23,8 @@ import {
   loadConversation,
   updateConversationArchiveState
 } from "../services/conversationStore";
-import { loadModelSettings } from "../services/settingsStore";
-import type { AgentEvent, ApprovalRequest, ChatMessage, ConfiguredModel, Session, ToolCallItem } from "../types";
+import { loadAgentRuntimeSettings, loadModelSettings } from "../services/settingsStore";
+import type { AgentEvent, AgentSummary, ApprovalRequest, ChatMessage, ConfiguredModel, Session, ToolCallItem } from "../types";
 import "./ChatPage.css";
 
 const DRAFT_SESSION_ID = "__draft_session__";
@@ -122,6 +122,9 @@ export function ChatPage() {
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
   const [availableModels, setAvailableModels] = useState<ConfiguredModel[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
+  const [accessMode, setAccessMode] = useState("read-only");
+  const [reasoningEffort, setReasoningEffort] = useState("none");
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
@@ -133,6 +136,7 @@ export function ChatPage() {
   const activeMessages = messages[activeSession.id] ?? [];
   const isActiveSessionRunning = runningSessionIds.has(activeSession.id);
   const activePendingApproval = pendingApproval?.conversationId === activeSession.id ? pendingApproval : null;
+  const sessionAgent = activeSession.agent ?? (isDraftSessionId(activeSession.id) ? activeAgent : null);
 
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !archivedSessionIds.has(session.id)),
@@ -208,6 +212,39 @@ export function ChatPage() {
   useEffect(() => {
     let cancelled = false;
 
+    async function loadAgentSettings() {
+      try {
+        const runtimeSettings = await loadAgentRuntimeSettings();
+        if (cancelled) {
+          return;
+        }
+        const runtime = runtimeSettings.runtimes.find((item) => item.adapter === runtimeSettings.activeAdapter);
+        if (runtime) {
+          const nextAgent = {
+            configMode: runtime.configMode,
+            id: runtime.adapter,
+            label: runtime.label,
+            mode: runtime.mode,
+            runtimeId: runtime.id
+          };
+          setActiveAgent(nextAgent);
+          setAccessMode(runtime.mode || "read-only");
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    void loadAgentSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     async function loadModels() {
       try {
         const modelSettings = await loadModelSettings();
@@ -232,6 +269,13 @@ export function ChatPage() {
       cancelled = true;
     };
   }, [activeView]);
+
+  useEffect(() => {
+    const selected = availableModels.find((model) => model.id === selectedModelId);
+    if (selected) {
+      setReasoningEffort(selected.generation.reasoningEffort || "none");
+    }
+  }, [availableModels, selectedModelId]);
 
   useEffect(() => {
     return () => {
@@ -597,11 +641,13 @@ export function ChatPage() {
 
     try {
       await streamAgentTurn({
+        accessMode,
         conversationId,
         input: text,
         modelId: selectedModelId,
         onEvent: (event) => handleAgentEvent(sessionId, event),
         signal: abortController.signal,
+        reasoningEffort,
         turnId
       });
     } catch (error) {
@@ -689,7 +735,7 @@ export function ChatPage() {
             <OverviewPage />
           ) : (
             <main className="main-panel">
-              <ConversationHeader isRunning={isActiveSessionRunning} title={activeSession.title} />
+              <ConversationHeader agent={sessionAgent} isRunning={isActiveSessionRunning} title={activeSession.title} />
               <MessageList
                 messages={activeMessages}
                 session={activeSession}
@@ -698,13 +744,18 @@ export function ChatPage() {
               <ChatComposer
                 activeTurnId={isActiveSessionRunning ? activeTurnId : null}
                 draft={draft}
+                accessMode={accessMode}
+                agent={sessionAgent}
                 models={availableModels}
+                onAccessModeChange={setAccessMode}
                 onDraftChange={setDraft}
                 onModelChange={setSelectedModelId}
+                onReasoningEffortChange={setReasoningEffort}
                 onResolveApproval={(decision) => void resolveApproval(decision)}
                 onSendMessage={() => void sendMessage()}
                 onStopTurn={() => void stopCurrentTurn()}
                 pendingApproval={activePendingApproval}
+                reasoningEffort={reasoningEffort}
                 selectedModelId={selectedModelId}
               />
             </main>

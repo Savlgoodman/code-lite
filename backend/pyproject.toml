@@ -4,6 +4,7 @@ version = "0.1.4"
 description = "PC Repair Agent Python backend powered by nanobot"
 requires-python = ">=3.11"
 dependencies = [
+    "agent-client-protocol>=0.10.1",
     "fastapi>=0.115.0",
     "nanobot-ai>=0.2.2",
     "uvicorn>=0.32.0",

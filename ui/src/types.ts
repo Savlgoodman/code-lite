@@ -1,6 +1,15 @@
 export type SessionStatus = "idle" | "running" | "approval" | "error";
 
+export interface AgentSummary {
+  configMode?: string;
+  id: string;
+  label: string;
+  mode?: string;
+  runtimeId?: string;
+}
+
 export interface Session {
+  agent?: AgentSummary | null;
   archived?: boolean;
   id: string;
   title: string;
@@ -11,6 +20,7 @@ export interface Session {
 }
 
 export interface ChatMessage {
+  agent?: AgentSummary | null;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -175,6 +185,49 @@ export interface AppAboutInfo {
   git: AppAboutGitInfo;
   runtimeEnv: string;
   workspace: string;
+}
+
+export interface AgentRuntimeDetected {
+  command?: string[];
+  detail?: string;
+  ok: boolean;
+  version?: string | null;
+}
+
+export interface AgentRuntimeManagedPackage {
+  installedAt?: number | null;
+  installedVersion?: string | null;
+  name: string;
+  path?: string;
+  requestedVersion?: string;
+}
+
+export interface AgentRuntimeConfig {
+  adapter: string;
+  canActivate?: boolean;
+  canConfigure: boolean;
+  canInstall: boolean;
+  codexPath?: string;
+  command: string[];
+  configMode: string;
+  detected: AgentRuntimeDetected;
+  distribution: string;
+  enabled: boolean;
+  id: "codex" | "claude_code" | "opencode" | "nanobot" | string;
+  isActive: boolean;
+  label: string;
+  managedPackage?: AgentRuntimeManagedPackage;
+  mode: string;
+  status: string;
+}
+
+export interface AgentRuntimeSettingsState {
+  activeAdapter: string;
+  configPath: string;
+  nodeDetected: AgentRuntimeDetected;
+  npmDetected: AgentRuntimeDetected;
+  runtimeRoot: string;
+  runtimes: AgentRuntimeConfig[];
 }
 
 export type AgentEvent =

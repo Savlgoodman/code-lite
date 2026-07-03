@@ -1,6 +1,8 @@
 import { ensureBackend } from "./agentClient";
 import type {
   AppAboutInfo,
+  AgentRuntimeConfig,
+  AgentRuntimeSettingsState,
   ConfiguredModel,
   ConfiguredModelProvider,
   DefaultModelStrategy,
@@ -34,6 +36,35 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadAppAbout(): Promise<AppAboutInfo> {
   return requestJson<AppAboutInfo>("/api/settings/about");
+}
+
+export async function loadAgentRuntimeSettings(): Promise<AgentRuntimeSettingsState> {
+  return requestJson<AgentRuntimeSettingsState>("/api/settings/agent-runtimes");
+}
+
+export async function updateAgentRuntime(
+  runtimeId: string,
+  patch: Partial<Omit<Pick<AgentRuntimeConfig, "codexPath" | "command" | "configMode" | "enabled" | "mode">, "command">> & {
+    command?: string | string[];
+  }
+): Promise<AgentRuntimeConfig> {
+  return requestJson<AgentRuntimeConfig>(`/api/settings/agent-runtimes/${runtimeId}`, {
+    body: JSON.stringify(patch),
+    method: "PATCH"
+  });
+}
+
+export async function installAgentRuntime(runtimeId: string): Promise<AgentRuntimeConfig> {
+  return requestJson<AgentRuntimeConfig>(`/api/settings/agent-runtimes/${runtimeId}/install`, {
+    method: "POST"
+  });
+}
+
+export async function updateActiveAgentRuntime(adapter: string): Promise<AgentRuntimeSettingsState> {
+  return requestJson<AgentRuntimeSettingsState>("/api/settings/agent-runtimes/active", {
+    body: JSON.stringify({ adapter }),
+    method: "PATCH"
+  });
 }
 
 export async function fetchProviderModels(options: {

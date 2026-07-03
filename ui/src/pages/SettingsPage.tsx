@@ -10,6 +10,7 @@ import {
   Database,
   Pencil,
   Info,
+  Package,
   RefreshCw,
   RotateCcw,
   SlidersHorizontal,
@@ -24,15 +25,21 @@ import {
   createModelProvider,
   deleteConfiguredModel,
   deleteModelProvider,
+  installAgentRuntime,
+  loadAgentRuntimeSettings,
   loadAppAbout,
   loadModelSettings,
   refreshModelProviderModels,
+  updateActiveAgentRuntime,
+  updateAgentRuntime,
   updateConfiguredModel,
   updateDefaultModel,
   updateModelProvider
 } from "../services/settingsStore";
 import type {
   AppAboutInfo,
+  AgentRuntimeConfig,
+  AgentRuntimeSettingsState,
   ConfiguredModel,
   ConfiguredModelProvider,
   ModelCapabilities,
@@ -42,7 +49,7 @@ import type {
 } from "../types";
 import "./SettingsPage.css";
 
-type SettingsSection = "providers" | "archive" | "about";
+type SettingsSection = "agents" | "providers" | "archive" | "about";
 
 interface SettingsPageProps {
   archivedSessions: Session[];
@@ -52,6 +59,7 @@ interface SettingsPageProps {
 }
 
 const settingsMenu = [
+  { id: "agents", icon: Package, label: "Agent Runtime" },
   { id: "providers", icon: Bot, label: "模型提供商配置" },
   { id: "archive", icon: ArchiveRestore, label: "归档会话" },
   { id: "about", icon: Info, label: "关于" }
@@ -191,6 +199,325 @@ function modelEditDraft(model: ConfiguredModel): ModelEditDraft {
     reasoningEffort: model.generation.reasoningEffort,
     temperature: String(model.generation.temperature)
   };
+}
+
+const codexModeOptions = [
+  { label: "read-only", value: "read-only" },
+  { label: "agent", value: "agent" },
+  { label: "agent-full-access", value: "agent-full-access" }
+] satisfies Array<SettingsSelectOption<string>>;
+
+const codexConfigModeOptions = [
+  { label: "使用本机配置", value: "user-native" },
+  { label: "使用 code-lite 隔离配置", value: "isolated" }
+] satisfies Array<SettingsSelectOption<string>>;
+
+function runtimeStatusLabel(runtime: AgentRuntimeConfig) {
+  if (runtime.detected.ok) {
+    return "可用";
+  }
+  if (runtime.status === "planned") {
+    return "待接入";
+  }
+  return "需配置";
+}
+
+function commandText(runtime: AgentRuntimeConfig) {
+  return runtime.command.length > 0 ? runtime.command.join(" ") : "默认使用托管包或 npx";
+}
+
+function runtimeGlyph(runtimeId: string) {
+  if (runtimeId === "codex") {
+    return "Cx";
+  }
+  if (runtimeId === "claude_code") {
+    return "Cl";
+  }
+  if (runtimeId === "opencode") {
+    return "Op";
+  }
+  if (runtimeId === "nanobot") {
+    return "Nb";
+  }
+  return "Ag";
+}
+
+function runtimeChecks(
+  runtime: AgentRuntimeConfig,
+  settings: AgentRuntimeSettingsState | null,
+): Array<{ detail: string; label: string; ok: boolean; value: string }> {
+  const nodeOk = Boolean(settings?.nodeDetected.ok);
+  const npmOk = Boolean(settings?.npmDetected.ok);
+  const packageVersion = runtime.managedPackage?.installedVersion;
+  return [
+    {
+      detail: runtime.detected.detail ?? commandText(runtime),
+      label: "运行状态",
+      ok: runtime.detected.ok,
+      value: runtime.detected.ok ? "可用" : "需配置"
+    },
+    {
+      detail: runtime.id === "opencode" ? "opencode 使用 system command。" : "ACP npm 包需要 Node/npm。",
+      label: "Node/npm prerequisite",
+      ok: runtime.id === "opencode" || runtime.id === "nanobot" || (nodeOk && npmOk),
+      value: runtime.id === "opencode" || runtime.id === "nanobot" || (nodeOk && npmOk) ? "pass" : "fail"
+    },
+    {
+      detail: commandText(runtime),
+      label: "Runtime launcher",
+      ok: runtime.detected.ok,
+      value: runtime.distribution
+    },
+    {
+      detail: runtime.managedPackage
+        ? `${runtime.managedPackage.name}${packageVersion ? `@${packageVersion}` : ""}`
+        : "无需 ACP npm 包。",
+      label: "ACP adapter package",
+      ok: !runtime.managedPackage || Boolean(packageVersion) || runtime.detected.ok,
+      value: packageVersion ?? (runtime.managedPackage ? "未安装" : "pass")
+    },
+    {
+      detail: runtime.configMode === "isolated" ? "使用 code-lite 隔离配置目录。" : "使用 runtime 本机配置和登录态。",
+      label: "Authentication",
+      ok: true,
+      value: runtime.configMode
+    }
+  ];
+}
+
+function AgentRuntimeSettings() {
+  const [settings, setSettings] = useState<AgentRuntimeSettingsState | null>(null);
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState("codex");
+  const [codexCommand, setCodexCommand] = useState("");
+  const [codexPath, setCodexPath] = useState("");
+  const [codexMode, setCodexMode] = useState("read-only");
+  const [codexConfigMode, setCodexConfigMode] = useState("user-native");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  async function refreshSettings() {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const next = await loadAgentRuntimeSettings();
+      setSettings(next);
+      const codex = next.runtimes.find((runtime) => runtime.id === "codex");
+      const selected = next.runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? next.runtimes[0];
+      if (selected) {
+        setSelectedRuntimeId(selected.id);
+      }
+      if (codex) {
+        setCodexCommand(codex.command.join(" "));
+        setCodexPath(codex.codexPath ?? "");
+        setCodexMode(codex.mode || "read-only");
+        setCodexConfigMode(codex.configMode || "user-native");
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshSettings();
+  }, []);
+
+  async function saveCodexRuntime() {
+    setBusyId("codex");
+    setError(null);
+    try {
+      await updateAgentRuntime("codex", {
+        codexPath: codexPath.trim(),
+        command: codexCommand.trim(),
+        configMode: codexConfigMode,
+        mode: codexMode
+      });
+      await refreshSettings();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function installRuntime(runtime: AgentRuntimeConfig) {
+    setBusyId(`${runtime.id}-install`);
+    setError(null);
+    try {
+      await installAgentRuntime(runtime.id);
+      await refreshSettings();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function activateRuntime(runtime: AgentRuntimeConfig) {
+    setBusyId(`activate-${runtime.id}`);
+    setError(null);
+    try {
+      setSettings(await updateActiveAgentRuntime(runtime.adapter));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const runtimes = settings?.runtimes ?? [];
+  const codex = runtimes.find((runtime) => runtime.id === "codex");
+  const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0] ?? null;
+  const checks = selectedRuntime ? runtimeChecks(selectedRuntime, settings) : [];
+  const selectedIsCodex = selectedRuntime?.id === "codex";
+
+  return (
+    <section className="settings-content-column">
+      <div className="settings-runtime-switcher">
+        {runtimes.map((runtime) => (
+          <button
+            className={`runtime-tab ${runtime.id === selectedRuntime?.id ? "active" : ""}`}
+            key={runtime.id}
+            onClick={() => setSelectedRuntimeId(runtime.id)}
+            title={runtime.label}
+            type="button"
+          >
+            <span>{runtimeGlyph(runtime.id)}</span>
+            <i className={runtime.detected.ok ? "ok" : ""} />
+          </button>
+        ))}
+        <button className="runtime-refresh" disabled={isLoading} onClick={() => void refreshSettings()} title="刷新" type="button">
+          <RefreshCw className={isLoading ? "spin-icon" : ""} size={16} />
+        </button>
+      </div>
+
+      {selectedRuntime ? (
+        <div className="settings-runtime-title-row">
+          <div className="runtime-large-icon">{runtimeGlyph(selectedRuntime.id)}</div>
+          <div>
+            <div className="settings-runtime-title">
+              <h1>{selectedRuntime.label}</h1>
+              {selectedRuntime.isActive ? <span>已启用</span> : null}
+            </div>
+            <p>
+              {selectedRuntime.managedPackage?.name ?? selectedRuntime.distribution}
+              {selectedRuntime.managedPackage?.requestedVersion ? ` @ ${selectedRuntime.managedPackage.requestedVersion}` : ""}
+            </p>
+          </div>
+          <div className="runtime-title-actions">
+            {selectedRuntime.canActivate ? (
+              <button
+                className="settings-secondary-button"
+                disabled={selectedRuntime.isActive || busyId === `activate-${selectedRuntime.id}`}
+                onClick={() => void activateRuntime(selectedRuntime)}
+                type="button"
+              >
+                <Check size={14} />
+                <span>{selectedRuntime.isActive ? "当前使用" : "启用"}</span>
+              </button>
+            ) : null}
+            {selectedRuntime.canInstall ? (
+              <button
+                className="settings-secondary-button"
+                disabled={busyId === `${selectedRuntime.id}-install`}
+                onClick={() => void installRuntime(selectedRuntime)}
+                type="button"
+              >
+                <Package size={14} />
+                <span>{busyId === `${selectedRuntime.id}-install` ? "安装中" : "安装 ACP 包"}</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="settings-card runtime-check-card">
+        <div className="settings-runtime-section-head">
+          <div>
+            <span>预检查</span>
+            <strong>{selectedRuntime?.detected.detail ?? "等待检测"}</strong>
+          </div>
+          <button className="settings-secondary-button" disabled={isLoading} onClick={() => void refreshSettings()} type="button">
+            <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />
+            <span>立即检查</span>
+          </button>
+        </div>
+        <div className="runtime-check-list">
+          {checks.map((item) => (
+            <div className="runtime-check-row" key={item.label}>
+              <span className={item.ok ? "pass" : "fail"}>{item.ok ? "✓" : "!"}</span>
+              <div>
+                <strong>{item.label}</strong>
+                <p>{item.detail}</p>
+              </div>
+              <i className={item.ok ? "pass" : "fail"}>{item.value}</i>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {selectedIsCodex && codex ? (
+        <div className="settings-card">
+          <div className="settings-runtime-section-head">
+            <div>
+              <span>配置管理</span>
+              <strong>Codex ACP</strong>
+            </div>
+            <button className="settings-primary-button" disabled={busyId === "codex"} onClick={() => void saveCodexRuntime()} type="button">
+              <Check size={14} />
+              <span>保存</span>
+            </button>
+          </div>
+          <div className="settings-form-grid runtime-form-grid">
+            <label className="settings-field">
+              <span>Codex 模式</span>
+              <SettingsSelect onChange={setCodexMode} options={codexModeOptions} value={codexMode} />
+            </label>
+            <label className="settings-field">
+              <span>配置来源</span>
+              <SettingsSelect onChange={setCodexConfigMode} options={codexConfigModeOptions} value={codexConfigMode} />
+            </label>
+            <label className="settings-field settings-field-wide">
+              <span>ACP 命令</span>
+              <input
+                autoComplete="off"
+                onChange={(event) => setCodexCommand(event.target.value)}
+                placeholder="留空则使用托管 codex-acp 或 npx -y @agentclientprotocol/codex-acp"
+                value={codexCommand}
+              />
+            </label>
+            <label className="settings-field settings-field-wide">
+              <span>Codex binary 路径</span>
+              <input
+                autoComplete="off"
+                onChange={(event) => setCodexPath(event.target.value)}
+                placeholder="高级配置，可留空使用 codex-acp 默认依赖"
+                value={codexPath}
+              />
+            </label>
+          </div>
+
+          <div className="settings-runtime-detail">
+            <div>
+              <span>当前命令</span>
+              <strong>{commandText(codex)}</strong>
+            </div>
+            <div>
+              <span>ACP 包</span>
+              <strong>
+                {codex.managedPackage?.name ?? "@agentclientprotocol/codex-acp"}
+                {codex.managedPackage?.installedVersion ? ` / ${codex.managedPackage.installedVersion}` : ""}
+              </strong>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {error ? <div className="settings-inline-error">{error}</div> : null}
+    </section>
+  );
 }
 
 function ModelProvidersSettings() {
@@ -1107,7 +1434,7 @@ export function SettingsPage({
   onDeleteArchivedSession,
   onRestoreArchivedSession
 }: SettingsPageProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("providers");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("agents");
 
   return (
     <div className="settings-shell">
@@ -1136,6 +1463,7 @@ export function SettingsPage({
       </aside>
 
       <main className="settings-main">
+        {activeSection === "agents" ? <AgentRuntimeSettings /> : null}
         {activeSection === "providers" ? <ModelProvidersSettings /> : null}
         {activeSection === "archive" ? (
           <ArchivedSessionsSettings

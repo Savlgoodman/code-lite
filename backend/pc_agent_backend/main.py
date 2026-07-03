@@ -26,8 +26,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--agent-adapter",
         default=None,
-        choices=["nanobot", "codex", "claude_code"],
-        help="Agent adapter to use. Defaults to REPAIR_AGENT_ADAPTER or nanobot.",
+        choices=["router", "nanobot", "codex", "claude_code"],
+        help="Agent adapter to use. Defaults to REPAIR_AGENT_ADAPTER or router.",
     )
     return parser.parse_args()
 

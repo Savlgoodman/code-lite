@@ -41,7 +41,8 @@
 
 .outline-action,
 .text-action,
-.model-chip {
+.model-chip,
+.composer-select-control {
   height: 32px;
   display: inline-flex;
   align-items: center;
@@ -55,8 +56,20 @@
 
 .outline-action:hover,
 .text-action:hover,
-.model-chip:hover {
+.model-chip:hover,
+.composer-select-control:hover {
   background: #f5f5f3;
+}
+
+.outline-action {
+  max-width: 220px;
+}
+
+.outline-action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-scroll {
@@ -702,6 +715,25 @@
   border-color: transparent;
   background: transparent;
   color: var(--orange);
+}
+
+.composer-select-control {
+  border-color: transparent;
+  background: transparent;
+  color: var(--orange);
+}
+
+.composer-select-control select {
+  max-width: 126px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: 0;
+}
+
+.composer-select-control select:disabled {
+  opacity: 0.55;
 }
 
 .model-chip {

@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from pc_agent_backend.api.dependencies import get_services
 from pc_agent_backend.core.process_utils import run_hidden
 from pc_agent_backend.core.paths import REPO_ROOT
+from pc_agent_backend.services.agent_runtime_config import AgentRuntimeConfigError
 from pc_agent_backend.services.model_config import ModelConfigError
 from pc_agent_backend.services.runtime import AppServices
 from pc_agent_backend.version import APP_VERSION, BACKEND_VERSION
@@ -260,6 +261,58 @@ async def probe_model_provider_models(payload: dict[str, Any]) -> JSONResponse:
 @router.get("/settings/model-providers")
 async def list_model_providers(services: AppServices = Depends(get_services)) -> dict[str, Any]:
     return await asyncio.to_thread(services.model_config_store.list_settings)
+
+
+@router.get("/settings/agent-runtimes")
+async def list_agent_runtimes(services: AppServices = Depends(get_services)) -> dict[str, Any]:
+    return await asyncio.to_thread(services.agent_runtime_config_store.list_settings)
+
+
+@router.patch("/settings/agent-runtimes/active")
+async def update_active_agent_runtime(
+    payload: dict[str, Any],
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    try:
+        settings = await asyncio.to_thread(
+            services.agent_runtime_config_store.update_active_adapter,
+            str(payload.get("adapter") or ""),
+        )
+    except AgentRuntimeConfigError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    return JSONResponse(settings)
+
+
+@router.patch("/settings/agent-runtimes/{runtime_id}")
+async def update_agent_runtime(
+    runtime_id: str,
+    payload: dict[str, Any],
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    try:
+        runtime = await asyncio.to_thread(
+            services.agent_runtime_config_store.update_runtime,
+            runtime_id,
+            payload,
+        )
+    except AgentRuntimeConfigError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    return JSONResponse(runtime)
+
+
+@router.post("/settings/agent-runtimes/{runtime_id}/install")
+async def install_agent_runtime(
+    runtime_id: str,
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    try:
+        runtime = await asyncio.to_thread(
+            services.agent_runtime_config_store.install_runtime,
+            runtime_id,
+        )
+    except AgentRuntimeConfigError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    return JSONResponse(runtime)
 
 
 @router.post("/settings/model-providers")

@@ -2,32 +2,42 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Check, ChevronDown, ChevronRight, Paperclip, Send, ShieldCheck, Square } from "lucide-react";
 
-import type { ApprovalRequest, ConfiguredModel } from "../../types";
+import type { AgentSummary, ApprovalRequest, ConfiguredModel } from "../../types";
 import { ApprovalCard } from "./ApprovalCard";
 
 interface ChatComposerProps {
+  accessMode: string;
   activeTurnId: string | null;
+  agent?: AgentSummary | null;
   draft: string;
   models: ConfiguredModel[];
+  onAccessModeChange: (value: string) => void;
   onDraftChange: (value: string) => void;
   onModelChange: (modelId: string) => void;
+  onReasoningEffortChange: (value: string) => void;
   onResolveApproval: (decision: "allow" | "deny") => void;
   onSendMessage: () => void;
   onStopTurn: () => void;
   pendingApproval: ApprovalRequest | null;
+  reasoningEffort: string;
   selectedModelId: string | null;
 }
 
 export function ChatComposer({
+  accessMode,
   activeTurnId,
+  agent,
   draft,
   models,
+  onAccessModeChange,
   onDraftChange,
   onModelChange,
+  onReasoningEffortChange,
   onResolveApproval,
   onSendMessage,
   onStopTurn,
   pendingApproval,
+  reasoningEffort,
   selectedModelId
 }: ChatComposerProps) {
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
@@ -78,6 +88,8 @@ export function ChatComposer({
     setIsModelMenuOpen(false);
   }
 
+  const isCodex = agent?.id === "codex";
+
   return (
     <div className="composer-wrap">
       <div className="composer-stack">
@@ -101,13 +113,35 @@ export function ChatComposer({
               <button className="icon-button" aria-label="添加附件">
                 <Paperclip size={17} />
               </button>
-              <button className="text-action">
+              <label className="composer-select-control">
                 <ShieldCheck size={15} />
-                完全访问
-                <ChevronDown size={14} />
-              </button>
+                <select
+                  disabled={!isCodex}
+                  onChange={(event) => onAccessModeChange(event.target.value)}
+                  title={isCodex ? "Codex 访问权限" : "当前 agent 暂不支持这里切换权限"}
+                  value={accessMode}
+                >
+                  <option value="read-only">只读</option>
+                  <option value="agent">Agent</option>
+                  <option value="agent-full-access">完全访问</option>
+                </select>
+              </label>
             </div>
             <div className="composer-right">
+              <label className="composer-select-control">
+                <select
+                  disabled={!isCodex}
+                  onChange={(event) => onReasoningEffortChange(event.target.value)}
+                  title={isCodex ? "Codex 思考强度" : "当前 agent 暂不支持这里切换思考强度"}
+                  value={reasoningEffort}
+                >
+                  <option value="none">无思考</option>
+                  <option value="low">低思考</option>
+                  <option value="medium">中思考</option>
+                  <option value="high">高思考</option>
+                  <option value="xhigh">超高思考</option>
+                </select>
+              </label>
               <div className="model-picker" ref={modelMenuRef}>
                 <button
                   aria-expanded={isModelMenuOpen}

@@ -38,6 +38,16 @@ async def stream_turn(
     turn_id = str(body.get("turnId") or f"turn-{uuid.uuid4().hex}")
     prompt = str(body.get("input") or "").strip()
     requested_model_id = str(body.get("modelId") or "").strip() or None
+    requested_access_mode = str(body.get("accessMode") or "").strip() or None
+    requested_reasoning_effort = str(body.get("reasoningEffort") or "").strip() or None
+    persisted = None if not conversation_id else services.conversation_store.get_conversation(conversation_id)
+    persisted_agent = None
+    if persisted and isinstance(persisted.get("session"), dict):
+        raw_agent = persisted["session"].get("agent")
+        if isinstance(raw_agent, dict):
+            persisted_agent = str(raw_agent.get("id") or "").strip() or None
+    agent_id = services.agent_runtime_config_store.resolve_adapter(persisted_agent)
+    agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
     try:
         if requested_model_id:
             resolved_model = services.model_config_store.resolve_model(requested_model_id)
@@ -69,6 +79,7 @@ async def stream_turn(
             "protocol": resolved_model.protocol,
             "contextWindowTokens": resolved_model.context_window_tokens,
             "maxOutputTokens": resolved_model.max_output_tokens,
+            "reasoningEffort": resolved_model.reasoning_effort,
         }
         if resolved_model is not None
         else {}
@@ -80,7 +91,11 @@ async def stream_turn(
         workspace=services.workspace,
         model_id=resolved_model.model_id if resolved_model else None,
         model_preset_id=resolved_model.model_preset_id if resolved_model else None,
+        agent_id=agent_id,
+        agent_label=str(agent_metadata.get("label") or agent_id),
+        access_mode=requested_access_mode,
         model_metadata=model_metadata,
+        reasoning_effort=requested_reasoning_effort,
     )
 
     async def event_stream():
@@ -89,6 +104,7 @@ async def stream_turn(
             turn_record = services.conversation_recorder.start_turn(
                 conversation_id=conversation_id,
                 prompt=prompt,
+                agent_metadata=agent_metadata,
                 model_metadata=model_metadata,
             )
             if resolved_model:

@@ -9,6 +9,7 @@ from pc_agent_backend.agents import create_agent_adapter
 from pc_agent_backend.api.router import api_router
 from pc_agent_backend.core.config import RuntimeConfig
 from pc_agent_backend.services.approvals import ApprovalBroker
+from pc_agent_backend.services.agent_runtime_config import AgentRuntimeConfigStore
 from pc_agent_backend.services.conversation_recorder import ConversationRecorder
 from pc_agent_backend.services.model_config import ModelConfigStore
 from pc_agent_backend.services.runtime import AppServices
@@ -21,6 +22,7 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     approvals = ApprovalBroker()
     conversation_store = ConversationStore(runtime_config.record_dir)
     model_config_store = ModelConfigStore(runtime_config)
+    agent_runtime_config_store = AgentRuntimeConfigStore(runtime_config)
     services = AppServices(
         runtime_config=runtime_config,
         workspace=workspace,
@@ -28,7 +30,12 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
         conversation_store=conversation_store,
         conversation_recorder=ConversationRecorder(conversation_store),
         model_config_store=model_config_store,
-        agent_adapter=create_agent_adapter(runtime_config=runtime_config, approvals=approvals),
+        agent_runtime_config_store=agent_runtime_config_store,
+        agent_adapter=create_agent_adapter(
+            runtime_config=runtime_config,
+            approvals=approvals,
+            agent_runtime_config_store=agent_runtime_config_store,
+        ),
     )
     app.state.services = services
 

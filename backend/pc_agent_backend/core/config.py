@@ -11,6 +11,7 @@ DEV_ENV_VALUE = "DEV"
 ENV_NAME = "REPAIR_AGENTS_ENV"
 NANOBOT_CONFIG_NAME = "nanobot_config.json"
 APP_CONFIG_NAME = "app_config.json"
+AGENT_RUNTIME_CONFIG_NAME = "agent_runtimes.json"
 
 
 MINIMAL_NANOBOT_CONFIG: dict[str, Any] = {
@@ -68,6 +69,7 @@ class RuntimeConfig:
     logs_dir: Path
     cache_dir: Path
     app_config_path: Path
+    agent_runtime_config_path: Path
     nanobot_config_path: Path
     agent_adapter: str
 
@@ -126,13 +128,14 @@ def resolve_runtime_config(
         else config_dir / NANOBOT_CONFIG_NAME
     )
     app_config_path = config_dir / APP_CONFIG_NAME
+    agent_runtime_config_path = config_dir / AGENT_RUNTIME_CONFIG_NAME
     write_json_if_missing(nanobot_config_path, MINIMAL_NANOBOT_CONFIG)
     normalize_json_encoding(nanobot_config_path)
 
     agent_adapter = (
         agent_adapter_override
         or os.environ.get("REPAIR_AGENT_ADAPTER")
-        or "nanobot"
+        or "router"
     ).strip().lower()
 
     return RuntimeConfig(
@@ -143,6 +146,7 @@ def resolve_runtime_config(
         logs_dir=logs_dir,
         cache_dir=cache_dir,
         app_config_path=app_config_path,
+        agent_runtime_config_path=agent_runtime_config_path,
         nanobot_config_path=nanobot_config_path,
         agent_adapter=agent_adapter,
     )
