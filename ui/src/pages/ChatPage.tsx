@@ -300,7 +300,7 @@ export function ChatPage() {
       } catch (error) {
         console.error("Failed to load session capabilities:", error);
         if (!cancelled) {
-          // Fallback: 使用旧的加载逻辑
+          // Fallback: 从旧的 runtime settings 构建 SessionCapabilities
           try {
             const runtimeSettings = await loadAgentRuntimeSettings();
             if (cancelled) return;
@@ -314,10 +314,52 @@ export function ChatPage() {
                 runtimeId: runtime.id
               });
               setAccessMode(runtime.mode || "read-only");
+
+              // 从 runtime settings 构建 fallback SessionCapabilities
+              const fallbackModes = runtime.id === "codex"
+                ? [
+                    { id: "read-only", label: "只读", isDefault: runtime.mode === "read-only" },
+                    { id: "agent", label: "Agent", isDefault: runtime.mode === "agent" },
+                    { id: "agent-full-access", label: "完全访问", isDefault: runtime.mode === "agent-full-access" },
+                  ]
+                : [{ id: runtime.mode || "workspace", label: runtime.mode || "工作区", isDefault: true }];
+
+              const fallbackConfigOptions = runtime.id === "codex"
+                ? [{
+                    id: "reasoning_effort",
+                    label: "思考强度",
+                    type: "enum" as const,
+                    values: ["none", "low", "medium", "high", "xhigh"],
+                    currentValue: "none",
+                    valueLabels: { none: "无思考", low: "低思考", medium: "中思考", high: "高思考", xhigh: "超高思考" },
+                  }]
+                : [];
+
+              setSessionCapabilities({
+                agent: {
+                  id: runtime.adapter,
+                  label: runtime.label,
+                  adapterKind: "acp" as const,
+                  status: runtime.status || "available",
+                },
+                modes: fallbackModes,
+                models: [],
+                configOptions: fallbackConfigOptions,
+              });
             }
-            if (sessionAgent?.id === "codex") {
-              const runtimeModels = await loadAgentRuntimeModels(sessionAgent.runtimeId ?? "codex");
-              const modelOptions = runtimeModelOptions(sessionAgent!, runtimeModels.models);
+
+            // 加载模型（保持旧路径兼容）
+            const agentId = runtime?.adapter ?? runtimeSettings.activeAdapter;
+            if (agentId === "codex") {
+              const agentForModels: AgentSummary = {
+                configMode: runtime?.configMode,
+                id: agentId,
+                label: runtime?.label ?? "Codex",
+                mode: runtime?.mode,
+                runtimeId: runtime?.id ?? "codex"
+              };
+              const runtimeModels = await loadAgentRuntimeModels(runtime?.id ?? "codex");
+              const modelOptions = runtimeModelOptions(agentForModels, runtimeModels.models);
               if (cancelled) return;
               setAvailableModels(modelOptions);
               setSelectedModelId((current) => {
@@ -325,6 +367,17 @@ export function ChatPage() {
                 if (runtimeModels.currentModelId && modelOptions.some((model) => model.id === runtimeModels.currentModelId)) return runtimeModels.currentModelId;
                 return modelOptions[0]?.id ?? null;
               });
+
+              // 补充 fallback capabilities 中的 models
+              setSessionCapabilities((prev) => prev ? {
+                ...prev,
+                models: runtimeModels.models.map((m) => ({
+                  id: m.id,
+                  label: m.label,
+                  description: m.description,
+                  isCurrent: m.id === runtimeModels.currentModelId,
+                })),
+              } : prev);
             } else {
               const modelSettings = await loadModelSettings();
               if (cancelled) return;
