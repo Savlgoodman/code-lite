@@ -1,6 +1,6 @@
 # 运行时数据与聊天 UI 优化设计
 
-> 历史资料：本文记录早期运行时数据目录、聊天 UI 和审批卡片优化方案。code-lite 后续应保留其中关于会话持久化和事件驱动 UI 的有效结论，但产品命名、推荐入口和运行时目录以当前 `docs/PRD.md`、`docs/ARCHITECTURE.md` 和 `docs/PROJECT_STRUCTURE.md` 为准。
+> 历史资料：本文记录早期运行时数据目录、聊天 UI 和审批卡片优化方案。code-lite 后续应保留其中关于会话持久化和事件驱动 UI 的有效结论，但产品命名、ACP 主线、推荐入口和运行时目录以当前 `docs/README.md`、`docs/PRD.md`、`docs/ARCHITECTURE.md` 和 `docs/PROJECT_STRUCTURE.md` 为准。
 
 本文记录权限确认卡片、工具调用卡片、运行时配置目录和消息持久化的优化方案，以及当前已落地的后端拆分结构。
 
@@ -31,7 +31,7 @@
 3. 工具调用在等待审批时必须展示输入参数，避免用户在缺少上下文的情况下确认。
 4. 工具完成后默认折叠，展开时同时展示入参和输出结果。
 5. 连续工具调用形成工具组，组本身可折叠，降低长任务视觉复杂度。
-6. 配置读取以 `REPAIR_AGENTS_ENV` 为第一入口。
+6. 配置读取以 `CODE_LITE_ENV` 为第一入口。
 7. 开发环境和正式环境使用不同 data 根目录。
 8. 缺失配置时自动创建最小配置，保证首次启动可解释、可继续配置。
 9. 消息记录以 JSON 文件存储到 data 目录，不再写入浏览器 storage。
@@ -40,7 +40,7 @@
 
 1. 本文不设计真实驱动下载、安装器执行或系统修复命令。
 2. 本文不引入数据库。MVP 使用 JSON 文件即可。
-3. 本文不改变 nanobot SDK 本身的审批机制。
+3. 本文不改变 ACP runtime 或 legacy nanobot 的原生审批机制。
 4. 本文不要求本轮立即实现多端同步或云端备份。
 
 ## 3. 运行时数据目录
@@ -50,7 +50,7 @@
 运行时首先读取：
 
 ```text
-REPAIR_AGENTS_ENV
+CODE_LITE_ENV
 ```
 
 取值约定：
@@ -58,19 +58,19 @@ REPAIR_AGENTS_ENV
 | 值 | 含义 | data 根目录 |
 | --- | --- | --- |
 | `DEV` | 开发环境 | 当前项目根目录下的 `data/` |
-| 其他或未设置 | 普通本机环境 | 当前用户家目录下的 `.repair-agent/` |
+| 其他或未设置 | 普通本机环境 | 当前用户家目录下的 `.code-lite/` |
 
 Windows 示例：
 
 ```text
-REPAIR_AGENTS_ENV=DEV
-H:\code-lite-agent\data
+CODE_LITE_ENV=DEV
+H:\codex-lite\data
 ```
 
 普通环境示例：
 
 ```text
-C:\Users\kevin\.repair-agent
+C:\Users\kevin\.code-lite
 ```
 
 建议 data 根目录由 Python backend 作为最终来源解析。Tauri 只负责把必要的环境变量、工作目录和可选命令行参数传给 backend，避免 Rust 和 Python 各自实现一套不一致的路径规则。
@@ -82,38 +82,48 @@ C:\Users\kevin\.repair-agent
 ```text
 data/
   config/
-    nanobot_config.json
     app_config.json
-  record/
+    agent_runtimes.json
+    nanobot_config.json        # legacy 兼容
+  record/                      # 当前会话 JSON 存储
     20260629-203012-8f4c0f6d9b8b4c6a/
       session.json
       messages.json
-      events.ndjson
     20260629-204455-4fb196dfd86d4f0e/
       session.json
       messages.json
-      events.ndjson
+  events/                      # 后续远程同步和回放目标
+  runtimes/
+    acp/
   logs/
   cache/
 ```
 
-普通环境下同构到：
+普通环境下目标目录为：
 
 ```text
-~/.repair-agent/
+~/.code-lite/
   config/
   record/
+  events/
+  runtimes/
   logs/
   cache/
 ```
+
+如需要迁移更早期实验数据，可以从旧 `~/.repair-agent/` 或旧 `data/config/nanobot_config.json` 做一次性兼容读取；新设计不应再把它们作为主路径。
 
 说明：
 
-1. `config/` 保存非敏感 Agent 配置，例如模型供应商、模型预设、工具开关。
-2. `record/` 保存对话记录。
-3. `logs/` 保存 backend 或运行时日志。
-4. `cache/` 保存运行时缓存，不保存真实 API Key。
-5. API Key 仍只通过环境变量或后续系统凭据存储读取。
+1. `config/app_config.json` 当前保存产品级模型供应商和模型预设。
+2. `config/agent_runtimes.json` 保存 Codex、Claude Code、opencode 和 legacy nanobot 的运行时设置。
+3. `config/nanobot_config.json` 是 legacy nanobot 派生配置。
+4. `record/` 当前保存对话记录。
+5. `events/` 是后续远程同步、审计和回放的事件日志目标。
+6. `runtimes/acp/` 保存 code-lite 托管安装的 ACP npm 包。
+7. `logs/` 保存 backend 或运行时日志。
+8. `cache/` 保存运行时缓存，不保存真实 API Key。
+9. API Key 仍只通过环境变量或后续系统凭据存储读取。
 
 ### 3.3 最小配置自动创建
 
@@ -125,7 +135,7 @@ ensure_data_layout()
 ensure_minimal_config()
 ```
 
-当 `config/nanobot_config.json` 不存在时，自动创建最小配置：
+兼容期当 `config/nanobot_config.json` 不存在时，可以自动创建最小 legacy 配置：
 
 ```json
 {
@@ -287,7 +297,7 @@ POST /api/turns/stream
 原因：
 
 1. 浏览器环境不适合直接管理本地文件。
-2. Tauri/Rust 也可以做存储，但当前消息流和 nanobot session 已经在 backend 侧，backend 更容易保证 `conversationId` 与 nanobot `session_key` 一致。
+2. Tauri/Rust 也可以做存储，但当前消息流、ACP session 绑定和 legacy nanobot session 都在 backend 侧，backend 更容易保证 `conversationId` 与 native session id 的一致关系。
 3. 后续打包为 sidecar 后，backend 可以继续使用同一套 data 目录。
 4. 流式运行过程中只有 backend 能完整看到 user message、assistant message、工具调用、审批和最终状态，因此保存逻辑应集中在 backend。
 
@@ -519,8 +529,8 @@ ToolCallGroup.anchorOffset = firstTool.anchorOffset
 {
   "ok": true,
   "env": "DEV",
-  "dataDir": "H:\\code-lite-agent\\data",
-  "configPath": "H:\\code-lite-agent\\data\\config\\nanobot_config.json",
+  "dataDir": "H:\\codex-lite\\data",
+  "configPath": "H:\\codex-lite\\data\\config\\agent_runtimes.json",
   "configExists": true,
   "apiKeyPresent": false
 }
@@ -574,10 +584,10 @@ UI POST /api/turns/stream
 
 优先级：
 
-1. 显式 `--config`。
-2. 显式 `--data-dir` 下的 `config/nanobot_config.json`。
-3. `REPAIR_AGENTS_ENV=DEV` 时的 `<repo>/data/config/nanobot_config.json`。
-4. 默认 `~/.repair-agent/config/nanobot_config.json`。
+1. 显式 `--config`，仅用于 legacy nanobot 配置调试。
+2. 显式 `--data-dir` 下的 `config/agent_runtimes.json`、`config/app_config.json` 和 legacy `config/nanobot_config.json`。
+3. `CODE_LITE_ENV=DEV` 时的 `<repo>/data/`。
+4. 默认 `~/.code-lite/`。
 
 缺失时自动创建最小配置。
 
@@ -637,12 +647,17 @@ backend/code_lite_backend/
   agents/
     registry.py           # adapter 选择
     risk.py               # 工具风险分级
+    acp/
+      adapter.py          # 通用 ACP adapter
+      client.py           # ACP SDK client handler
+      mapper.py           # ACP 事件映射
+      approvals.py        # ACP permission 映射
+    runtimes/
+      descriptors.py      # Codex / Claude Code / opencode runtime descriptor
     nanobot/
-      adapter.py          # nanobot run_streamed 适配
-      events.py           # nanobot 事件映射
+      adapter.py          # legacy nanobot run_streamed 适配
+      events.py           # legacy nanobot 事件映射
       hooks.py            # UI 审批 hook
-    codex/                # 预留 Codex adapter
-    claude_code/          # 预留 Claude Code adapter
   core/
     config.py             # data 目录、环境变量和最小配置
     encoding.py
@@ -660,11 +675,12 @@ backend/code_lite_backend/
 
 Agent adapter 边界：
 
-1. API 层只依赖 `AgentAdapter.stream_turn()` 和 `cancel_turn()`，不直接依赖 nanobot SDK。
-2. `nanobot` adapter 负责 `Nanobot.from_config(...)`、流式事件转换、工具审批 hook、会话 key 和运行取消。
-3. `codex` 与 `claude_code` adapter 当前为占位实现，后续接入 SDK 时应保持相同事件协议。
-4. 工具注册、权限审批、工具入参/出参映射应放在对应 adapter 内，通用风险文案放在 `agents/risk.py`。
-5. 配置不再读取仓库 `backend/config`，而是读取运行时 data 目录，并在缺失时自动创建 `config/nanobot_config.json`。
+1. API 层只依赖 `AgentAdapter.stream_turn()` 和 `cancel_turn()`，不直接依赖具体 ACP wrapper 或 nanobot SDK。
+2. `AcpAgentAdapter` 负责启动 ACP server、绑定 native session、映射 ACP events、桥接审批和取消。
+3. Codex、Claude Code、opencode 的差异放入 runtime descriptor、环境变量、安装预检和 caveats。
+4. `nanobot` adapter 只作为 legacy 兼容路径，负责 `Nanobot.from_config(...)`、流式事件转换、工具审批 hook、会话 key 和运行取消。
+5. 工具注册、权限审批、工具入参/出参映射应放在对应 adapter 内，通用风险文案放在 `agents/risk.py`。
+6. 配置不再读取仓库 `backend/config`，而是读取运行时 data 目录，并在缺失时创建目标配置；legacy nanobot 配置只在兼容路径生成。
 
 ## 10. 迁移策略
 
@@ -697,9 +713,9 @@ Agent adapter 边界：
 
 ### 配置与数据目录
 
-1. `REPAIR_AGENTS_ENV=DEV` 时，backend 使用 `<repo>/data`。
-2. 未设置 `REPAIR_AGENTS_ENV` 时，backend 使用 `~/.repair-agent`。
-3. 缺少配置文件时自动创建 `config/nanobot_config.json`。
+1. `CODE_LITE_ENV=DEV` 时，backend 使用 `<repo>/data`。
+2. 未设置 `CODE_LITE_ENV` 时，backend 使用 `~/.code-lite`。
+3. 缺少配置文件时自动创建目标 runtime 配置；legacy nanobot 路径才创建 `config/nanobot_config.json`。
 4. 自动创建的配置不包含真实 API Key。
 5. `GET /api/health` 能返回 dataDir 和 configPath。
 
@@ -728,8 +744,8 @@ Agent adapter 边界：
 
 ## 12. 待确认问题
 
-1. 自动创建的最小配置文件名是否确定为 `config/nanobot_config.json`，还是沿用 `nanobot_config.local.json`。
-2. 普通环境目录名是否固定为 `~/.repair-agent`，还是后续需要和应用名称保持一致，例如 `~/.code-lite-agent`。
+1. legacy `config/nanobot_config.json` 的保留期限和迁移策略。
+2. 是否需要为更早期 `~/.repair-agent` 数据提供一次性迁移。
 3. `events.ndjson` 是否第一阶段就要实现，还是先只实现 `session.json` 和 `messages.json`。
 4. 旧 `localStorage` 会话是否需要一次性迁移，还是可以在开发阶段直接丢弃。
 5. 工具组折叠状态是否需要持久化到 `messages.json`，还是每次加载后根据工具状态重新计算。

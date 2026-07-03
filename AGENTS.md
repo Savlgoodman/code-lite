@@ -50,26 +50,28 @@ Path("docs/PRD.md").write_text(content, encoding="utf-8")
 
 | 路径 | 用途 |
 |------|------|
+| `docs/README.md` | 文档索引，说明当前主线、保留文档和已清理旧路线 |
 | `docs/PRD.md` | 产品需求文档，记录 code-lite 的产品定位、核心功能、MVP 范围和路线规划 |
 | `docs/ARCHITECTURE.md` | 架构设计文档，记录 Tauri、Python Agent Hub、多 Agent Adapter、远程同步和权限边界 |
 | `docs/PROJECT_STRUCTURE.md` | 项目目录结构规划，记录目标代码目录、职责边界和命名迁移策略 |
 | `docs/UI_DEVELOPMENT.md` | UI 与 Tauri 桌面壳开发文档，记录环境依赖、启动流程、目录职责和常见问题 |
 | `docs/DEVELOPMENT_WORKFLOW.md` | 开发流程规范，记录 dev 集成、分支命名、master 使用范围、变基合并和版本升级要求 |
-| `docs/AGENT_ADAPTER_REDESIGN.md` | 多 Agent Adapter 设计与 Codex SDK 探针结论，后续需扩展 Claude Code 和 opencode |
+| `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` | ACP Agent Adapter 实施设计，记录 Codex、Claude Code、opencode 的主线接入方案 |
+| `docs/UNIFIED_ACP_ADAPTER_DESIGN.md` | 统一前端交互协议设计，记录 session capabilities、模型、模式和事件映射 |
 | `docs/REMOTE_SYNC_DESIGN.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
 | `docs/MODEL_PROVIDER_CONFIGURATION_DESIGN.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
-| `docs/NANOBOT_SDK_RESEARCH.md` | nanobot SDK 调研记录，作为兼容 adapter 和原型资料保留 |
-| `demo/README.md` | SDK 探针和命令行 demo 使用说明 |
+| `docs/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
+| `demo/acp-demo/README.md` | ACP mock、Python SDK probe 和 Codex ACP smoke 使用说明 |
 
 阅读建议：
 
-1. 做产品需求相关任务，先读 `docs/PRD.md`。
+1. 做产品需求相关任务，先读 `docs/README.md` 和 `docs/PRD.md`。
 2. 做架构、模块边界相关任务，先读 `docs/ARCHITECTURE.md` 和 `docs/PROJECT_STRUCTURE.md`。
 3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/UI_DEVELOPMENT.md`。
-4. 做 Codex、Claude Code、opencode、adapter 能力模型和 runtime 事件相关任务，先读 `docs/AGENT_ADAPTER_REDESIGN.md`。
+4. 做 Codex、Claude Code、opencode、ACP adapter 和 runtime 事件相关任务，先读 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` 和 `docs/UNIFIED_ACP_ADAPTER_DESIGN.md`。
 5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/REMOTE_SYNC_DESIGN.md`。
 6. 做模型供应商、模型选择和 runtime 配置相关任务，先读 `docs/MODEL_PROVIDER_CONFIGURATION_DESIGN.md`。
-7. 做 nanobot 兼容 adapter 或旧 demo 相关任务，先读 `docs/NANOBOT_SDK_RESEARCH.md` 和 `demo/README.md`。
+7. 做 legacy nanobot demo 相关任务，只参考 `demo/nanobot-demo/README.md` 和当前代码，不把 nanobot 作为新功能主线。
 8. 做功能开发、Bug 修复、性能优化、重构或发布合并前，先读 `docs/DEVELOPMENT_WORKFLOW.md`。
 
 ## 开发与启动入口
@@ -78,7 +80,7 @@ Path("docs/PRD.md").write_text(content, encoding="utf-8")
 
 1. `ui/`：React + Vite 前端 UI，使用 `streamdown` 渲染 assistant Markdown，当前由 backend 流式事件驱动消息。
 2. `src-tauri/`：Tauri 2 桌面壳，默认窗口为 `1200x756`，最小窗口为 `900x620`。
-3. `backend/`：Python Agent Hub 原型，使用 uv 管理依赖，提供本地 NDJSON 流式接口；当前仍包含 nanobot adapter、Codex adapter 占位和 Claude Code adapter 占位。
+3. `backend/`：Python Agent Hub 原型，使用 uv 管理依赖，提供本地 NDJSON 流式接口；当前主线是通用 ACP adapter 与 Codex / Claude Code / opencode runtime descriptor，nanobot 仅作 legacy 兼容 adapter。
 4. `scripts/dev-tauri.ps1`：Windows 本地开发启动脚本，会临时设置 VS Build Tools、Cargo PATH 和代理环境。
 
 常用命令：

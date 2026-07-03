@@ -107,4 +107,4 @@ uv run python .\codex_adapter_probe.py --smoke --permission-mode ask --approval-
 
 注意：`ask` smoke 可能在 `demo/` 工作区内创建或修改测试文件。不要在未隔离目录中用写入类 prompt 做验证。
 
-探针结论和 adapter 重设计见 `docs/AGENT_ADAPTER_REDESIGN.md`。
+当前主线已迁移到 ACP adapter。nanobot demo 仅作为 legacy 兼容资料保留；新的 adapter 设计入口见 `docs/README.md` 和 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md`。

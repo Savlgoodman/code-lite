@@ -1,6 +1,6 @@
 # Agent SDK 调研验证
 
-本目录用于验证 code-lite 计划接入的 Python SDK 能力：Codex、Claude Agent SDK 和 nanobot。
+本目录用于保留 code-lite 早期 Python SDK 能力探针：Codex、Claude Agent SDK 和 nanobot。当前 coding agent 主线已转向 ACP，新的实现与调研入口见 `docs/README.md` 和 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md`。
 
 默认探针只做本地反射和安全清点：
 

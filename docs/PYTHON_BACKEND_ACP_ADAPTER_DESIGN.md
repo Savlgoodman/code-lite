@@ -597,7 +597,7 @@ ACP 不统一各 runtime 的配置文件。Python adapter 需要显式支持两�
 建议配置文件：
 
 ```text
-data/config/acp_runtime_config.json
+data/config/agent_runtimes.json
 ```
 
 示例：

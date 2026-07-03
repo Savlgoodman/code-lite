@@ -2,12 +2,12 @@
 
 ## 1. 架构目标
 
-code-lite 采用桌面优先、远程可观看的多 Agent 架构。应用需要把 Codex、Claude Code、opencode 等 runtime 接入到统一工作台，并对会话、事件、权限、审批、远程同步和审计形成稳定边界。
+code-lite 采用桌面优先、远程可观看的多 Agent 架构。应用需要把 Codex、Claude Code、opencode 等 runtime 通过 ACP 接入到统一工作台，并对会话、事件、权限、审批、远程同步和审计形成稳定边界。
 
 架构目标：
 
 1. UI 保持轻量、清晰，用户打开后即可选择 workspace 和 agent 开始任务。
-2. 不把业务层绑定到某一个 SDK 或 CLI，所有 runtime 通过 Agent Adapter 接入。
+2. 不把业务层绑定到某一个 SDK 或 CLI，coding agent 统一通过 `AcpAgentAdapter` 和 runtime descriptor 接入。
 3. 流式事件协议统一，支持消息、工具调用、命令、文件变更、审批、错误和 token usage。
 4. 远程观看依赖同一套事件流，避免为远端另建一套状态模型。
 5. 本地敏感信息默认不上传；远程连接默认只读、可撤销、可审计。
@@ -50,10 +50,10 @@ Python Backend Sidecar
   - 为远程连接提供同步入口。
 
 Agent Runtime
-  - Codex SDK / CLI runtime。
-  - Claude Code CLI 或后续 SDK。
-  - opencode CLI / server runtime。
-  - nanobot 兼容原型 adapter。
+  - codex-acp -> Codex runtime。
+  - claude-agent-acp -> Claude Code runtime。
+  - opencode acp -> opencode runtime。
+  - nanobot legacy 兼容 adapter。
 
 Remote Client
   - 通过连接码或令牌连接本机。
@@ -112,7 +112,7 @@ Backend 应避免把某个 runtime 的私有概念直接扩散到 UI 和协议�
 
 ### 3.4 Agent Adapter 层
 
-位置：`backend/code_lite_backend/agents/`，后续可逐步改名为 `backend/code_lite_backend/agents/`。
+位置：`backend/code_lite_backend/agents/`。
 
 目标接口：
 
@@ -134,14 +134,17 @@ Adapter 负责：
 5. 暴露 runtime 能力边界。
 6. 把依赖缺失、配置缺失、权限受限等问题转成统一错误。
 
-初始 adapter：
+当前 adapter 策略：
 
 | Adapter | 状态 | 说明 |
 | --- | --- | --- |
-| `codex` | 优先原型 | 面向本地代码仓库任务，接入 Codex SDK / runtime |
-| `claude_code` | 占位调研 | 初期通过 CLI wrapper 或后续 SDK 接入 |
-| `opencode` | 占位调研 | 接入 opencode CLI / server，用于开源和自定义模型工作流 |
-| `nanobot` | 兼容原型 | 保留现有流式和审批验证资产，后续按价值决定是否继续 |
+| `acp` | 主线 | 通用 ACP adapter，使用官方 Python SDK 作为 ACP client |
+| `codex` | 优先原型 | 通过 `codex-acp` 和 Codex descriptor 运行 |
+| `claude_code` | 实验入口 | 通过 `claude-agent-acp` 和 Claude Code descriptor 运行 |
+| `opencode` | 规划入口 | 通过 `opencode acp` 和 opencode descriptor 运行 |
+| `nanobot` | legacy | 仅保留早期原型兼容，不再作为 coding agent 主线 |
+
+新的 coding agent runtime 不应再新增完整独立 adapter 类；优先新增 `RuntimeDescriptor`、安装/预检逻辑和必要的 mapper caveat。只有 runtime 不支持 ACP 且有明确产品价值时，才考虑 legacy adapter。
 
 ### 3.5 远程同步层
 
@@ -285,10 +288,12 @@ MVP 默认只开放 `viewer`。其他权限必须由主设备显式授权。
 data/
   config/
     app_config.json
-    model_config.json
-    runtime_config.json
-  conversations/
+    agent_runtimes.json
+    nanobot_config.json       # legacy 兼容
+  record/                     # 当前会话 JSON 存储
   events/
+  runtimes/
+    acp/
   logs/
   remote/
   cache/
@@ -302,7 +307,7 @@ data/
 4. 导出记录应默认脱敏。
 5. 大型日志和缓存不提交到 git。
 
-当前代码仍存在 `nanobot_config.json`、`code_lite_backend` 等历史命名。它们属于原型遗留，后续应在不破坏功能的前提下逐步迁移。
+当前会话目录仍使用 `record/`，后续如迁移到 `conversations/` 需要兼容读取。`nanobot_config.json` 和 legacy adapter 只作为早期原型兼容路径，不再承载新功能主配置。
 
 ## 7. 通信协议
 
@@ -323,10 +328,10 @@ data/
 
 | Runtime | 连接方式 | 说明 |
 | --- | --- | --- |
-| Codex | Python SDK / JSON-RPC runtime | 优先使用可获得流式事件和审批回调的路径 |
-| Claude Code | CLI wrapper / SDK | 先调研稳定输出和取消方式 |
-| opencode | CLI / server API | 视 opencode 能力选择 |
-| nanobot | Python SDK | 保留现有验证资产 |
+| Codex | `codex-acp` + ACP stdio | 当前第一优先级，已开始接入通用 ACP adapter |
+| Claude Code | `claude-agent-acp` + ACP stdio | 实验接入，重点验证 session/new、权限和 skills 加载行为 |
+| opencode | `opencode acp` + ACP stdio | 规划接入，优先验证 system command 模式 |
+| nanobot | Python SDK | legacy 兼容路径，不再扩展主线能力 |
 
 ### 7.3 远程客户端
 
@@ -342,13 +347,14 @@ MVP 应优先打通端到端链路：
 
 1. 统一 Agent Adapter descriptor。
 2. 统一 `AgentEvent` schema。
-3. Codex adapter 原型。
-4. Claude Code 和 opencode adapter 占位与依赖检查。
-5. 会话事件持久化。
-6. 本地 UI 订阅同一事件流。
-7. 远程只读同步原型。
-8. 运行时配置和模型配置入口。
-9. 审批事件展示和记录。
+3. 通用 ACP adapter。
+4. Codex ACP 原型。
+5. Claude Code 和 opencode descriptor、预检与实验入口。
+6. 会话事件持久化。
+7. 本地 UI 订阅同一事件流。
+8. 远程只读同步原型。
+9. 运行时配置和模型配置入口。
+10. 审批事件展示和记录。
 
 ## 9. 迁移策略
 
@@ -363,9 +369,9 @@ MVP 应优先打通端到端链路：
 ## 10. 待确认架构决策
 
 1. 远程同步 MVP 使用 SSE、WebSocket，还是同时保留二者？
-2. 首个可用 runtime 是 Codex，还是继续用 nanobot 打底并并行接 Codex？
-3. Claude Code 接入优先 CLI wrapper 还是等待更稳定 SDK？
-4. opencode 采用 CLI 模式还是 server 模式？
-5. 是否将 Python 包从 `code_lite_backend` 改为 `code_lite_backend`，以及何时改？
-6. 远程连接是否只做局域网，还是立即预留中继协议？
-7. 产品级审批边界由 backend 承载，还是未来下沉到 Tauri/Rust 网关？
+2. Claude Code ACP 和 opencode ACP 的首轮 smoke 范围。
+3. code-lite 托管 Node 与 ACP npm 包的安装、升级和回滚策略。
+4. opencode 先支持 system command，还是同时探索托管分发。
+5. 远程连接是否只做局域网，还是立即预留中继协议？
+6. 产品级审批边界由 backend 承载，还是未来下沉到 Tauri/Rust 网关？
+7. nanobot legacy adapter 何时冻结、隐藏或移除。

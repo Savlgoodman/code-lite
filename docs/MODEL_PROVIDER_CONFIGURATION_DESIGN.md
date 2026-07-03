@@ -1,14 +1,14 @@
 # code-lite 模型提供商配置调研与设计
 
-本文记录 code-lite 模型提供商配置修复与完善的调研结论、目标数据模型、后端接口、前端交互和各 Agent Runtime 的接入策略。本文是后续开发工作的设计依据，当前不包含实现代码。
+本文记录 code-lite 模型提供商配置修复与完善的调研结论、目标数据模型、后端接口、前端交互和各 Agent Runtime 的接入策略。当前 coding agent 主线已经收敛到 ACP，Codex、Claude Code 和 opencode 的模型、模式、思考强度优先来自 runtime 原生配置与 ACP `session/new` 返回；本文的 LLM provider 配置主要服务 legacy nanobot、通用模型供应商管理和后续非 ACP 工作流。
 
 ## 1. 背景
 
 当前项目已经形成以下运行时边界：
 
-1. 应用运行配置落在运行时 data 目录，目标配置文件包括 `app_config.json`、`model_config.json` 和 `runtime_config.json`；兼容期仍会读取 `data/config/nanobot_config.json` 和 `~/.repair-agent/config/nanobot_config.json`。
+1. 应用运行配置落在运行时 data 目录，当前配置文件包括 `app_config.json`、`agent_runtimes.json` 和 legacy `nanobot_config.json`；正式用户目录为 `~/.code-lite/`。
 2. UI 通过 Tauri `ensure_backend` 拉起或连接 Python backend。
-3. Python backend 通过 FastAPI 提供 `/api/turns/stream` NDJSON 流式接口，并在 nanobot adapter 中调用 `Nanobot.from_config(...)` 与 `run_streamed(...)`。
+3. Python backend 通过 FastAPI 提供 `/api/turns/stream` NDJSON 流式接口；coding agent 通过通用 ACP adapter 接入，legacy nanobot adapter 仍调用 `Nanobot.from_config(...)` 与 `run_streamed(...)`。
 4. 设置页已有“模型提供商配置”原型，但目前只覆盖“输入 URL/API Key，获取模型列表，写入一个默认模型”的最短链路。
 
 本轮要修复的核心问题是：模型配置应从“LLM 供应商”开始，再到“供应商下的模型”，用户可以选择添加哪些模型，并为每个模型配置协议方式、能力、上下文长度和默认使用策略。
@@ -25,14 +25,15 @@
 6. 支持删除模型、删除供应商，并处理默认模型被删除后的降级规则。
 7. 支持新会话默认模型策略：沿用上次使用模型，或固定使用指定模型。
 8. 支持对话中为下一轮切换模型，用于横向对比不同模型效果。
-9. 将产品配置安全同步给需要派生配置的 runtime，例如 nanobot 的 `providers`、`modelPresets`、`agents.defaults.modelPreset`。
+9. 将产品配置安全同步给需要派生配置的 legacy runtime，例如 nanobot 的 `providers`、`modelPresets`、`agents.defaults.modelPreset`。
+10. 对 ACP runtime 只保存 code-lite 管理所需的安装、命令、配置模式和展示偏好，不试图覆盖 runtime 原生模型系统。
 
 非目标：
 
 1. 本文不实现系统凭据存储，只定义后续应迁移方向。
 2. 本文不实现各家非标准模型列表接口的完整适配，只定义可扩展接口。
 3. 本文不改变 nanobot SDK 源码。
-4. 本文不完整实现 Codex、Claude Code、opencode adapter 的模型切换，仅要求统一协议预留字段，并区分产品级模型配置和 runtime 原生配置。
+4. 本文不覆盖 Codex、Claude Code、opencode 的原生模型管理。ACP runtime 的可选模型应优先从 `session/new.models` 获取，再由 descriptor 提供 fallback。
 
 ## 3. 当前实现现状
 
@@ -41,18 +42,25 @@
 当前 backend 默认通过 `backend/code_lite_backend/core/config.py` 解析配置：
 
 ```text
-REPAIR_AGENTS_ENV=DEV -> <repo>/data/config/nanobot_config.json
-其他环境              -> ~/.repair-agent/config/nanobot_config.json
+CODE_LITE_ENV=DEV -> <repo>/data/
+其他环境          -> ~/.code-lite/
 ```
 
-这些是早期 nanobot 原型路径。code-lite 目标路径应迁移为：
+产品级模型配置当前落在：
 
 ```text
-开发环境 -> <repo>/data/config/model_config.json
-普通环境 -> ~/.code-lite/config/model_config.json
+开发环境 -> <repo>/data/config/app_config.json
+普通环境 -> ~/.code-lite/config/app_config.json
 ```
 
-兼容期缺失时会创建最小 nanobot 配置，主要字段为：
+ACP runtime 配置当前落在：
+
+```text
+开发环境 -> <repo>/data/config/agent_runtimes.json
+普通环境 -> ~/.code-lite/config/agent_runtimes.json
+```
+
+legacy nanobot 配置缺失时仍会创建最小配置，主要字段为：
 
 ```json
 {
@@ -204,7 +212,7 @@ data/config/app_config.json
 
 1. nanobot 原生 schema 不包含“供应商模型发现缓存”“模型是否启用”“默认策略”“能力标签”等 UI 信息。
 2. 产品级配置可以稳定演进，不必完全受 nanobot 字段命名约束。
-3. 后续 Codex/Claude Code adapter 可以复用同一产品级模型配置。
+3. ACP runtime 不应被产品级模型配置覆盖；可复用的只是 UI 展示偏好、最近选择记录和 fallback 元数据。
 
 ### 5.1 产品级配置草案
 
@@ -539,6 +547,8 @@ PATCH /api/settings/models/default
 4. backend 同步 nanobot `agents.defaults.modelPreset` 为当前有效默认模型。
 
 ## 8. Agent 请求协议设计
+
+ACP 主线下，请求协议应逐步从 `modelId`、`accessMode`、`reasoningEffort` 等单独字段演进为 `selectedModel`、`selectedMode` 和 `selectedConfig`。这些字段直接对应 ACP `session/new` 返回的 models、modes 和 configOptions。旧字段在兼容期继续保留，供当前 UI 和 legacy nanobot 使用。
 
 ### 8.1 AgentRunRequest 扩展
 

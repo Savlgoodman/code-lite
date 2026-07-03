@@ -73,7 +73,7 @@ code-lite 现在的定位是 coding agent 工作台
 
 这两套定位需要一次正式的协议切换：
   - ACP 成为 agent 接入的正式协议
-  - nanobot 如果后续还想接入，必须适配 ACP
+  - nanobot 只作为 legacy 兼容层，不再进入 coding agent 主线
   - 前端只理解一套统一的交互格式
 ```
 
@@ -745,15 +745,15 @@ CODEX_DESCRIPTOR = RuntimeDescriptor(
 
 **总计**：当前 ~1300 行散落代码 → 重构后 ~1400 行结构化代码。代码量基本持平，但结构清晰、扩展容易。
 
-## 7. nanobot 的定位与迁移路径
+## 7. nanobot 的定位与处置
 
 ### 7.1 当前定位
 
-nanobot 是 code-lite 的原生 LLM agent 框架，直接通过 Python SDK 调用 LLM API。它不支持 ACP 协议。
+nanobot 是早期原型使用的 Python LLM agent 框架，直接通过 Python SDK 调用 LLM API。它不支持 ACP 协议，也不是当前 Codex / Claude Code / opencode coding agent 路线的一部分。
 
 ### 7.2 迁移策略
 
-**短期（MVP）**：保留 nanobot adapter 作为兼容层，但不增加新功能。
+**短期（MVP）**：保留 nanobot adapter 作为兼容层，但不增加新功能，不作为默认 runtime。
 
 ```text
 AgentRouterAdapter
@@ -761,39 +761,23 @@ AgentRouterAdapter
   └── NanobotAgentAdapter (兼容层，输出 AgentEvent)
 ```
 
-**中期**：如果 nanobot 需要继续接入，有两种路线：
+**中期**：默认冻结或隐藏 nanobot 入口。只有出现明确的非 coding agent 产品场景时，才重新评估是否保留。
 
 | 路线 | 描述 | 工作量 |
 | --- | --- | --- |
-| A. nanobot 包装为 ACP server | 为 nanobot 写一个 ACP server wrapper，把 nanobot 的 tool call、text streaming 映射为 ACP 事件 | 中等 |
-| B. nanobot 保持独立 adapter | nanobot 继续使用原生 SDK，但输出统一的 `UnifiedAgentEvent`；`initialize_session()` 返回从 nanobot config 构建的 `SessionCapabilities` | 较小 |
+| A. 删除或隐藏 legacy 入口 | 保留代码兼容期，UI 默认不展示 | 小 |
+| B. 保持独立 legacy adapter | 继续输出统一事件，但不参与 ACP capabilities 主线 | 小 |
+| C. 包装为 ACP server | 仅在确有需要时，把 nanobot 包装成 ACP server | 中等 |
 
-**推荐路线 B**：nanobot 保持独立 adapter 但适配统一接口。理由：
+**推荐路线 A/B**：先冻结新功能，保留必要兼容。理由：
 
-1. nanobot 不是 coding agent，不需要 ACP 的 fs/terminal gateway
-2. nanobot 的 session 模型和 ACP 不同
-3. 只要输出统一的 `UnifiedAgentEvent` + `SessionCapabilities`，前端就能无差别渲染
+1. 当前产品主线是 Codex、Claude Code、opencode ACP。
+2. nanobot 不是 coding agent，不需要占用主线 UI 和设置复杂度。
+3. legacy 兼容只需继续输出统一事件，不应反向影响 ACP session capabilities 设计。
 
-### 7.3 nanobot 的 SessionCapabilities 构建
+### 7.3 legacy 能力边界
 
-```python
-# nanobot adapter 也需要实现 initialize_session
-class NanobotAgentAdapter:
-    async def initialize_session(self, conversation_id, workspace):
-        config = self._load_nanobot_config()
-        models = self._extract_models(config)  # 从 nanobot config 提取可用模型
-        return SessionCapabilities(
-            agent=AgentInfo(id="nanobot", label="nanobot", adapter_kind="nanobot"),
-            modes=[
-                SessionMode(id="workspace", label="工作区模式", is_default=True),
-            ],
-            models=[
-                SessionModel(id=m.id, label=m.label, is_current=m.is_default)
-                for m in models
-            ],
-            config_options=[],  # nanobot 暂不支持 ACP-style configOptions
-        )
-```
+legacy nanobot adapter 可以继续实现 `stream_turn()`、`cancel_turn()` 和基础 `AgentEvent` 输出。不要为了 nanobot 反向扩展 ACP mode、model、configOptions 的主线协议。
 
 ## 8. 实施阶段
 
@@ -838,18 +822,13 @@ class NanobotAgentAdapter:
 2. 验证 opencode acp 的 ACP 兼容性
 3. 前端自动渲染
 
-### 阶段 6：nanobot 适配统一接口（1 天）
-
-1. 为 `NanobotAgentAdapter` 实现 `initialize_session()`
-2. 从 nanobot config 构建 `SessionCapabilities`
-3. 验证前端无差别渲染 nanobot 对话
-
-### 阶段 7：清理与文档（0.5 天）
+### 阶段 6：清理 legacy 与文档（0.5 天）
 
 1. 删除旧的 `agents/codex/adapter.py`
 2. 删除旧的 `agents/claude_code/adapter.py` placeholder
-3. 更新 API 文档
-4. 更新前端类型定义
+3. 冻结或隐藏 legacy nanobot 入口
+4. 更新 API 文档
+5. 更新前端类型定义
 
 ## 9. 风险与决策
 
@@ -857,7 +836,7 @@ class NanobotAgentAdapter:
 | --- | --- | --- |
 | ACP `session/new` 不一定返回完整 configOptions | 各 descriptor 提供 fallback 默认值 | descriptor 定义 `default_modes`, `default_config_options` |
 | 不同 runtime 的 mode 语义不完全相同 | descriptor 注明 caveats | UI 展示 runtime-specific 提示 |
-| nanobot 无法提供 ACP-style modes | 返回单元素 modes 列表 | 前端不渲染模式选择器 |
+| legacy nanobot 与 ACP capabilities 不一致 | 不纳入主线能力协议 | UI 将其标记为 legacy 或隐藏 |
 | 前端改造影响面 | 分阶段实施 | 阶段 1-2 只改内部结构，不改前端交互 |
 | ACP 协议升级 | descriptor 标注 protocol version | 跟踪 ACP changelog |
 
@@ -873,7 +852,7 @@ class NanobotAgentAdapter:
 
 5. **ACP adapter 统一，runtime 差异通过 descriptor 隔离**。所有 ACP agent 共用 `AcpAgentAdapter`，差异只在 descriptor（command、env、defaults、caveats）。
 
-6. **nanobot 后续接入需要适配统一接口**。要么包装为 ACP server（工作量大），要么直接实现 `SessionCapabilities` + `UnifiedAgentEvent` 接口（推荐）。
+6. **nanobot 只保留 legacy 兼容**。不要让 legacy adapter 反向决定 ACP 主线协议。
 
 7. **前端零分支**。所有 UI 控件由 `SessionCapabilities` 驱动渲染。新增 agent 不需要改前端代码。
 
@@ -881,7 +860,6 @@ class NanobotAgentAdapter:
 
 1. `docs/ACP_ADAPTER_DESIGN.md` — ACP 协议调研
 2. `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` — 当前 ACP 实现设计
-3. `docs/AGENT_ADAPTER_REDESIGN.md` — 多 adapter 重设计
-4. `docs/AGENT_SDK_CAPABILITY_RESEARCH.md` — SDK 能力矩阵
-5. ACP protocol v1: https://agentclientprotocol.com/protocol/v1/
-6. ACP session config options: https://agentclientprotocol.com/protocol/v1/session-config-options.md
+3. `docs/README.md` — 当前文档索引和主线说明
+4. ACP protocol v1: https://agentclientprotocol.com/protocol/v1/
+5. ACP session config options: https://agentclientprotocol.com/protocol/v1/session-config-options.md

@@ -34,7 +34,7 @@ Agent Runtime
           -> Remote Viewer
 ```
 
-这保证 Codex、Claude Code、opencode、nanobot 的输出都能走同一套远程观看链路。
+这保证 Codex、Claude Code、opencode 等 ACP runtime 的输出都能走同一套远程观看链路。legacy nanobot 如果继续输出统一 `AgentEvent`，也可以复用该链路，但不再作为远程同步设计的主线对象。
 
 ## 4. 连接权限
 

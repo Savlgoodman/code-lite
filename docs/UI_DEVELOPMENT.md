@@ -1,6 +1,6 @@
 # UI 与 Tauri 桌面壳开发文档
 
-本文记录 code-lite 当前 UI 原型、Tauri 桌面壳和 Python Agent Hub 的开发方式。当前阶段 UI 通过 Tauri 启动本地 Python backend，并以流式事件展示 agent 输出；后续重点是接入 Codex、Claude Code、opencode，并加入远程同步观看。
+本文记录 code-lite 当前 UI 原型、Tauri 桌面壳和 Python Agent Hub 的开发方式。当前阶段 UI 通过 Tauri 启动本地 Python backend，并以流式事件展示 agent 输出；后续重点是沿 ACP 路线接入 Codex、Claude Code、opencode，并加入远程同步观看。
 
 ## 当前状态
 
@@ -11,7 +11,7 @@
 3. 主区域聊天界面、工具调用卡片、审批面板、底部输入框。
 4. 新建会话、搜索会话、发送消息和 backend JSON 会话持久化。
 5. `streamdown` Markdown 渲染，用于 assistant 流式消息。
-6. Python backend 提供本地 HTTP NDJSON 流式接口，当前保留 nanobot 原型 adapter，并预留 Codex、Claude Code 等 adapter。
+6. Python backend 提供本地 HTTP NDJSON 流式接口，当前主线为通用 ACP adapter，并保留 nanobot legacy adapter。
 7. Tauri 2 桌面壳，默认窗口 `1200x756`，最小窗口 `900x620`，支持拉伸。
 8. Windows 本地开发启动脚本，自动进入 VS Build Tools 环境并设置代理。
 
@@ -42,7 +42,7 @@
 │       ├── main.py           # CLI/uvicorn 启动入口
 │       ├── app.py            # FastAPI app 工厂
 │       ├── api/              # health、conversation、turn、approval、settings 路由
-│       ├── agents/           # nanobot/codex/claude_code/opencode adapter 层
+│       ├── agents/           # acp runtime descriptor 和 legacy nanobot adapter 层
 │       ├── core/             # 配置、路径、编码、JSON 工具
 │       ├── schemas/          # 后端内部协议类型
 │       ├── services/         # 运行态服务、审批 broker、模型配置
@@ -162,13 +162,13 @@ http://127.0.0.1:8765
 npm run backend:dev
 ```
 
-默认开发环境由 `start-dev.ps1` 设置 `REPAIR_AGENTS_ENV=DEV`，backend 会读取或自动创建：
+默认开发环境由 `start-dev.ps1` 设置 `CODE_LITE_ENV=DEV`。兼容期 backend 仍会读取或自动创建早期 nanobot 配置：
 
 ```text
 data/config/nanobot_config.json
 ```
 
-这是早期原型命名。后续应迁移为 code-lite 的统一 runtime 配置，同时保持兼容读取。
+这是早期原型命名。当前 ACP 主线会读取 `data/config/agent_runtimes.json` 等 runtime 配置；后续应逐步减少 legacy 配置依赖，同时保持兼容读取。
 
 如果需要指定配置或切换 adapter：
 
@@ -176,7 +176,7 @@ data/config/nanobot_config.json
 uv run --project backend python -m code_lite_backend.main --config .\demo\nanobot_config.local.json --workspace . --agent-adapter nanobot
 ```
 
-adapter 目标值包括 `nanobot`、`codex`、`claude_code`，后续会加入 `opencode`。
+adapter 目标值包括 `auto` / `router`、`codex`、`claude_code`、`opencode` 和 legacy `nanobot`。coding agent 新接入优先使用 ACP runtime descriptor，而不是新增独立前端分支。
 
 ## 前端单独调试
 
@@ -217,10 +217,10 @@ Tauri 启动 backend 时会把控制台输出写入运行时 data 目录：
 
 ```text
 开发环境：data/logs/backend-*.log
-安装环境：%USERPROFILE%\.repair-agent\logs\backend-*.log
+安装环境：%USERPROFILE%\.code-lite\logs\backend-*.log
 ```
 
-安装环境目录仍是早期原型命名。迁移为 `%USERPROFILE%\.code-lite` 前需要先设计兼容迁移。
+如用户曾运行更早期原型，旧 `%USERPROFILE%\.repair-agent` 数据需要通过兼容迁移处理，不能直接删除。
 
 关闭桌面窗口或退出应用时，Tauri 会停止本次由它启动的 backend 进程树。若端口上已有手动启动的 backend，Tauri 会复用该服务，但不会在退出时杀掉外部进程。
 
@@ -279,11 +279,11 @@ UI 与 backend 集成时建议优先拆分以下边界：
 
 1. 会话读取接口：读取会话列表、读取消息和事件快照。
 2. Agent 运行接口：发送用户输入，接收流式文本、工具调用、命令输出、文件变更和 token usage；无 `conversationId` 时由 backend 创建新会话。
-3. Runtime 接口：展示 Codex、Claude Code、opencode、nanobot 的可用状态、能力边界和配置入口。
+3. Runtime 接口：展示 Codex、Claude Code、opencode 的 ACP 可用状态、能力边界和配置入口；nanobot 仅作为 legacy 入口展示。
 4. 审批接口：展示风险说明、操作范围、runtime 来源和确认结果。
 5. 远程同步接口：展示连接码、观看者列表、连接状态、撤销入口和后续授权入口。
 
-建议先让 UI 只依赖统一 `AgentEvent` 和 runtime descriptor，再由 adapter 适配各 SDK 或 CLI，避免组件直接绑定某个 runtime。
+建议先让 UI 只依赖统一 `AgentEvent`、`SessionCapabilities` 和 runtime descriptor，再由 ACP adapter 适配各 runtime，避免组件直接绑定某个 runtime。
 
 ## 常见问题
 
@@ -356,11 +356,13 @@ http://127.0.0.1:7899
 backend 默认读取运行时 data 目录中的配置，并在文件不存在时自动创建最小配置：
 
 ```text
-REPAIR_AGENTS_ENV=DEV  ->  <repo>/data/config/nanobot_config.json
-其他环境              ->  ~/.repair-agent/config/nanobot_config.json
+CODE_LITE_ENV=DEV  ->  <repo>/data/config/agent_runtimes.json
+其他环境           ->  ~/.code-lite/config/agent_runtimes.json
 ```
 
-这是历史兼容路径。仓库内不维护真实本地配置，后续会迁移到 code-lite 的统一配置文件。需要临时调试其他配置时，可以使用 `--config` 指定显式路径。
+legacy nanobot 兼容配置仍位于同一 data 目录下的 `config/nanobot_config.json`。仓库内不维护真实本地配置，需要临时调试 nanobot 配置时，可以使用 `--config` 指定显式路径。
+
+ACP runtime 配置应通过运行时设置和 descriptor 管理，例如 Codex 使用 `codex-acp` 命令、`NO_BROWSER=1`、可选 `CODEX_PATH` 或隔离 `CODEX_HOME`。不要把真实账号凭据写进仓库配置。
 
 API Key 使用环境变量：
 

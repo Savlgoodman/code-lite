@@ -29,20 +29,23 @@ code-lite/
 
 ```text
 docs/
+  README.md
   PRD.md
   ARCHITECTURE.md
   PROJECT_STRUCTURE.md
   UI_DEVELOPMENT.md
   DEVELOPMENT_WORKFLOW.md
-  AGENT_ADAPTER_REDESIGN.md
+  ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md
+  UNIFIED_ACP_ADAPTER_DESIGN.md
+  ACP_ADAPTER_DESIGN.md
   MODEL_PROVIDER_CONFIGURATION_DESIGN.md
-  REMOTE_SYNC_DESIGN.md        # 规划中
+  REMOTE_SYNC_DESIGN.md
   ADR/
 ```
 
 `ADR/` 用于保存架构决策记录。当某个技术选择足够重要，例如“远程同步采用 WebSocket 还是 SSE”，就可以写一篇 ADR。
 
-历史维修或 nanobot 专项文档只作为原型资料保留，不再作为产品主方向入口。新增文档应优先围绕多 Agent、远程同步、权限审批、会话事件和运行时配置展开。
+历史维修、nanobot 专项和 native SDK 直连文档不再作为产品主方向入口。新增文档应优先围绕 ACP runtime、远程同步、权限审批、会话事件和运行时配置展开。
 
 ### `ui/`
 
@@ -171,20 +174,16 @@ backend/
         runtimes.py
     agents/
       registry.py
-      descriptors.py
       base.py
-      codex/
+      router.py
+      acp/
         adapter.py
-        events.py
-        permissions.py
-      claude_code/
-        adapter.py
-        cli.py
-        events.py
-      opencode/
-        adapter.py
-        cli.py
-        events.py
+        client.py
+        mapper.py
+        approvals.py
+        capabilities.py
+      runtimes/
+        descriptors.py
       nanobot/
         adapter.py
         events.py
@@ -219,7 +218,7 @@ backend/
 职责：
 
 1. 提供本地 backend API 和流式事件接口。
-2. 通过统一 Agent Adapter 协议隔离 Codex、Claude Code、opencode 和 nanobot。
+2. 通过通用 ACP adapter 和 runtime descriptor 隔离 Codex、Claude Code、opencode。
 3. 将 runtime 私有事件映射为统一 `AgentEvent`。
 4. 管理会话、事件序号、审计日志和运行时配置。
 5. 为远程同步提供快照、增量事件和权限控制。
@@ -257,15 +256,16 @@ packages/
 
 现有内容：
 
-1. nanobot CLI 审批 demo。
-2. Codex adapter probe。
+1. `acp-demo/`：ACP mock、Python SDK probe 和 Codex ACP smoke。
+2. `nanobot-demo/`：早期 legacy adapter 和审批 demo，保留作兼容资料。
+3. `agent-sdk-research/`：旧 native SDK 调研脚本，保留作历史探针，不作为主路线。
 
 后续可新增：
 
 ```text
 demo/
-  claude_code_adapter_probe.py
-  opencode_adapter_probe.py
+  claude_code_acp_probe.py
+  opencode_acp_probe.py
   remote_sync_probe.py
 ```
 
@@ -336,10 +336,11 @@ assets/
 data/
   config/
     app_config.json
-    model_config.json
-    runtime_config.json
-  conversations/
+    agent_runtimes.json
+  record/
   events/
+  runtimes/
+    acp/
   logs/
   remote/
   cache/
@@ -351,21 +352,21 @@ data/
 data/
   config/
     nanobot_config.json
-  record/
 ```
 
-这些属于早期原型命名，迁移时应提供兼容读取和一次性迁移，避免破坏已有用户数据。
+`record/` 是当前已落地的会话 JSON 目录名，后续如迁移到 `conversations/`，应提供兼容读取和一次性迁移。`nanobot_config.json` 属于 legacy 兼容配置，不能再作为新功能主配置。
 
 ## 初始目录创建策略
 
 推荐第一阶段按这个顺序推进：
 
-1. 固化 `AgentEvent`、`AgentAdapterDescriptor` 和审批对象 schema。
-2. 在现有 backend 包名下补齐 Codex、Claude Code、opencode descriptor。
-3. 完成 Codex adapter 原型。
-4. 建立 `remote` API 和只读事件订阅。
-5. 将 UI 增加 runtime 状态和远程观看入口。
-6. 验证链路稳定后，再规划包名和产物名迁移。
+1. 固化 `AgentEvent`、`SessionCapabilities`、`RuntimeDescriptor` 和审批对象 schema。
+2. 在现有 backend 包名下完善通用 `agents/acp/`。
+3. 完成 Codex ACP 原型。
+4. 补齐 Claude Code、opencode descriptor、preflight 和 smoke demo。
+5. 建立 `remote` API 和只读事件订阅。
+6. 将 UI 增加 runtime 状态和远程观看入口。
+7. 验证链路稳定后，再规划包名和产物名迁移。
 
 ## 命名迁移建议
 
@@ -374,7 +375,7 @@ data/
 1. 文档和 UI 文案。
 2. package name、Tauri product name、窗口标题和发布产物名。
 3. Python 包名和 Rust crate 名。
-4. 运行时目录名，例如从 `~/.repair-agent` 迁移到 `~/.code-lite`。
+4. 运行时目录名和旧数据迁移，例如从早期 `~/.repair-agent` 迁移到 `~/.code-lite`。
 5. 旧配置自动迁移和兼容读取。
 
 每批迁移都应单独验证，避免把产品改名和业务功能变更混在一起。

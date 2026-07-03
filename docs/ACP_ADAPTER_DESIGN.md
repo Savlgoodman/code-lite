@@ -2,7 +2,7 @@
 
 验证日期：2026-07-02
 
-本文记录 code-lite 使用 ACP 作为 Claude Code、Codex、opencode 统一 adapter 路线的调研结论和落地建议。本文不替代 `docs/AGENT_SDK_CAPABILITY_RESEARCH.md`，而是补充一条新的接入路线：当 runtime 提供 ACP server 时，code-lite 可以作为 ACP client 统一控制 agent。
+本文记录 code-lite 使用 ACP 作为 Claude Code、Codex、opencode 统一 adapter 路线的调研结论和落地建议。后续实现以 ACP 主线为准：当 runtime 提供 ACP server 时，code-lite 作为 ACP client 统一控制 agent。
 
 后续实现以 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` 为主入口。本文保留为 ACP 协议、runtime 分发、权限和配置疑虑的调研记录。
 
@@ -37,21 +37,18 @@ ACP Agent Server
 | --- | --- | --- |
 | ACP | 工作台和 agent runtime 之间的控制协议 | code-lite 作为 client，agent 作为 server |
 | MCP | agent 调用外部工具和数据源的协议 | code-lite 可把自有工具作为 MCP server 提供给 agent |
-| Native SDK | 某个 runtime 的语言 SDK | Codex SDK、Claude Agent SDK、nanobot SDK 的直接 adapter 路线 |
+| Native SDK | 某个 runtime 的语言 SDK | 作为 ACP wrapper 的底层实现或特殊补充，不作为 code-lite coding agent 主线 |
 | ACP wrapper | 把某个 runtime 包装成 ACP server 的程序 | `codex-acp`、`claude-agent-acp`、`opencode acp` |
 
-建议保留两条 adapter 路线：
+当前建议：
 
 ```text
-Native SDK Adapter
-  codex SDK / Claude Agent SDK / nanobot SDK
-
 ACP Adapter
   通用 acp client
   通过配置启动不同 ACP server 命令
 ```
 
-短期可以优先做 ACP adapter，因为它同时覆盖 Codex、Claude Code、opencode，且 opencode 已经直接提供 `opencode acp` 命令。
+短期和中期都优先做 ACP adapter，因为它同时覆盖 Codex、Claude Code、opencode，且 opencode 已经直接提供 `opencode acp` 命令。legacy nanobot adapter 只保留兼容，不再扩展为并列主线。
 
 ## 3. ACP 的基本流程
 

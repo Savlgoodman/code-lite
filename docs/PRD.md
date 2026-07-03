@@ -9,7 +9,7 @@
 | 文档状态 | 草案 |
 | 创建日期 | 2026-07-01 |
 | 目标平台 | Windows 优先，预留 macOS / Linux 跨平台能力 |
-| 推荐技术栈 | Tauri + React + Python backend + 多 Agent Runtime Adapter |
+| 推荐技术栈 | Tauri + React + Python backend + ACP Agent Runtime Adapter |
 
 ## 2. 产品概述
 
@@ -23,7 +23,7 @@ code-lite 还需要支持远程连接和远程同步观看：用户可以从另�
 
 ### 3.1 核心目标
 
-1. 建立统一的多 Agent 接入层，优先接入 Codex、Claude Code 和 opencode。
+1. 建立以 ACP 为主线的多 Agent 接入层，优先接入 Codex、Claude Code 和 opencode。
 2. 为编码任务提供稳定的对话、上下文、文件变更、命令执行和审批体验。
 3. 支持非编码任务，例如文档生成、日志分析、数据整理、方案规划和本地自动化。
 4. 支持远程连接，让用户可以在另一台设备上同步观看任务进展。
@@ -70,7 +70,7 @@ code-lite 还需要支持远程连接和远程同步观看：用户可以从另�
 | Claude Code | 长上下文代码分析、方案推演、审阅和复杂重构协助 |
 | opencode | 开源 agent 工作流、自定义模型、本地或私有化部署探索 |
 
-不同 runtime 的私有配置不得污染统一业务协议。UI、会话存储、远程同步和审批系统只依赖统一的 Agent Adapter 接口。
+不同 runtime 的私有配置不得污染统一业务协议。UI、会话存储、远程同步和审批系统只依赖统一的 Agent Adapter 接口。当前 coding agent 主线为 `AcpAgentAdapter + RuntimeDescriptor`，Codex、Claude Code 和 opencode 的差异应沉到 descriptor、命令、环境变量、预检和能力说明中。
 
 ### 5.3 远程同步观看
 
@@ -114,7 +114,7 @@ code-lite 不局限于写代码，也支持：
 
 ### 6.2 多 Agent Adapter
 
-后端需要提供统一 adapter 协议，隔离不同 SDK 或 CLI 的差异。
+后端需要提供统一 adapter 协议，隔离不同 runtime 的差异。coding agent 优先走 ACP 路线：code-lite 作为 ACP client，通过 `codex-acp`、`claude-agent-acp`、`opencode acp` 等 server wrapper 启动或连接具体 runtime。
 
 统一能力至少包含：
 
@@ -126,32 +126,33 @@ code-lite 不局限于写代码，也支持：
 6. 命令执行和文件变更事件映射。
 7. 审批请求映射。
 8. 中断和取消。
-9. 模型配置或 runtime 原生配置引用。
+9. 模型、模式、思考强度等会话能力。
+10. runtime 原生配置引用和 code-lite 托管配置边界。
 
 ### 6.3 Codex 接入
 
-Codex 是 MVP 优先接入对象之一，定位为代码仓库任务 runtime。
+Codex 是 MVP 第一优先级 runtime，定位为代码仓库任务和真实 ACP 链路验证对象。
 
 需求：
 
-1. 支持启动 Codex turn 并流式返回事件。
-2. 支持读取 Codex runtime 的模型列表或使用配置模型。
-3. 支持将 Codex 命令、文件修改和 token usage 映射为统一事件。
+1. 通过 `codex-acp` 和通用 `AcpAgentAdapter` 启动 Codex turn 并流式返回事件。
+2. 支持从 ACP `session/new` 读取 modes、models 和 configOptions。
+3. 支持将 Codex 文本、工具、命令、文件修改和 token usage 映射为统一事件。
 4. 支持中断 turn。
 5. 支持把 Codex 原生审批请求映射到 UI。
 6. 明确标注 Codex 原生审批不等于产品级完整审批边界。
 
 ### 6.4 Claude Code 接入
 
-Claude Code 初期可通过 CLI wrapper 或后续 SDK 方式接入。
+Claude Code 初期通过 `claude-agent-acp` 接入；如后续需要 native SDK，只能作为补充能力，不作为主线协议。
 
 需求：
 
-1. 调研可用的本地调用方式。
-2. 将流式输出、工具调用、文件变更和错误映射为统一事件。
-3. 支持 workspace 参数和会话上下文。
+1. 通过 runtime descriptor 描述 `claude-agent-acp` 命令、版本、安装状态和 caveats。
+2. 将 ACP session updates、permission requests、工具调用、文件变更和错误映射为统一事件。
+3. 支持 workspace 参数、会话上下文和 Claude Code 原生配置。
 4. 支持取消运行中的任务。
-5. 对不稳定能力标记为实验性。
+5. 对 skills、commands、settings source 等尚未 smoke 的能力标记为实验性。
 
 ### 6.5 opencode 接入
 
@@ -159,10 +160,10 @@ opencode 作为开源 agent runtime 接入方向。
 
 需求：
 
-1. 调研 opencode 的 CLI、服务模式、配置方式和事件输出。
-2. 支持通过 adapter 启动任务。
+1. 优先通过 `opencode acp` 接入。
+2. 支持通过通用 ACP adapter 和 opencode descriptor 启动任务。
 3. 支持映射消息流、工具调用、文件变更和命令输出。
-4. 支持与统一模型配置或 runtime 原生配置并存。
+4. 支持与 opencode 原生模型/provider 配置并存。
 5. 预留本地模型、私有模型和自定义 provider 场景。
 
 ### 6.6 远程连接
@@ -247,11 +248,11 @@ MVP 可以先实现“事件观察 + 用户确认 + runtime 原生审批接入�
 1. Tauri 桌面应用骨架。
 2. React 工作台 UI。
 3. Python backend 流式事件接口。
-4. 统一 Agent Adapter 协议。
-5. nanobot 原型保留为兼容 adapter。
-6. Codex adapter 原型。
-7. Claude Code adapter 占位和调研文档。
-8. opencode adapter 占位和调研文档。
+4. 通用 `AcpAgentAdapter` 与 runtime descriptor。
+5. Codex ACP 可运行原型。
+6. Claude Code ACP descriptor、预检和实验入口。
+7. opencode ACP descriptor、预检和实验入口。
+8. nanobot 原型降级为 legacy 兼容 adapter，不再新增主线能力。
 9. 会话存储。
 10. 基础审批事件。
 11. 远程只读同步观看原型。
@@ -281,7 +282,7 @@ MVP 可以先实现“事件观察 + 用户确认 + runtime 原生审批接入�
 | 本地会话启动成功率 | >= 95% |
 | 流式事件展示延迟 | <= 500ms |
 | 会话恢复成功率 | >= 95% |
-| Codex adapter 基础任务成功率 | >= 80% |
+| Codex ACP adapter 基础任务成功率 | >= 80% |
 | 远程只读同步延迟 | <= 1s |
 | 远程连接撤销生效时间 | <= 3s |
 | 高风险审批事件记录覆盖率 | 100% |
@@ -290,8 +291,8 @@ MVP 可以先实现“事件观察 + 用户确认 + runtime 原生审批接入�
 
 ### 10.1 技术风险
 
-1. 不同 agent 的事件模型差异很大，统一协议需要持续演进。
-2. Codex、Claude Code、opencode 的 SDK 或 CLI 可能频繁变化。
+1. ACP 仍在演进，不同 runtime 的实现完整度和扩展字段可能不同。
+2. Codex、Claude Code、opencode 的 ACP wrapper、SDK 或 CLI 可能频繁变化。
 3. 某些 runtime 的原生审批无法覆盖所有文件写入或命令执行。
 4. 远程同步需要处理断线重连、事件补偿和权限撤销。
 5. Windows 下进程管理、终止任务和编码问题需要额外验证。
@@ -314,10 +315,10 @@ MVP 可以先实现“事件观察 + 用户确认 + runtime 原生审批接入�
 
 ### Phase 1：多 Agent 工作台
 
-1. 完成产品文档和架构改名。
-2. 完成统一 Agent Adapter 描述模型。
-3. 保留 nanobot 原型，接入 Codex adapter 原型。
-4. 完成会话存储和流式事件展示。
+1. 完成产品文档和 ACP 技术路线收口。
+2. 完成通用 ACP adapter 与 runtime descriptor。
+3. 接入 Codex ACP 原型，并保留 nanobot legacy adapter 作为兼容路径。
+4. 完成会话存储、流式事件展示和基础审批桥接。
 
 ### Phase 2：远程只读同步
 
@@ -328,9 +329,9 @@ MVP 可以先实现“事件观察 + 用户确认 + runtime 原生审批接入�
 
 ### Phase 3：Claude Code 与 opencode
 
-1. 完成 Claude Code 调研和 adapter 原型。
-2. 完成 opencode 调研和 adapter 原型。
-3. 统一 runtime 能力描述和 UI 选择体验。
+1. 完成 Claude Code ACP smoke 和 descriptor 完善。
+2. 完成 opencode ACP smoke 和 descriptor 完善。
+3. 统一 runtime session capabilities 和 UI 选择体验。
 4. 增加任务级 runtime 推荐。
 
 ### Phase 4：协作控制与安全增强
@@ -344,8 +345,8 @@ MVP 可以先实现“事件观察 + 用户确认 + runtime 原生审批接入�
 
 1. MVP 远程同步优先走局域网直连，还是直接设计中继服务？
 2. 远端只读观看是否需要登录，还是使用一次性连接码即可？
-3. Codex、Claude Code、opencode 的首个默认 runtime 选择哪一个？
-4. 是否继续保留 nanobot 作为实验 adapter，还是后续迁移为内部工作流 runtime？
-5. 模型配置是统一管理为主，还是尊重各 runtime 原生配置为主？
+3. Claude Code 和 opencode 的首个 smoke 验证范围分别到 initialize、session/new，还是真实 turn？
+4. nanobot legacy adapter 的保留期限和删除条件是什么？
+5. 模型配置是只作为 legacy LLM provider 管理，还是也提供 runtime 原生配置的索引入口？
 6. 会话记录默认保存多久，是否需要用户手动清理？
 7. 远程控制是否进入 MVP，还是只做只读观看？
