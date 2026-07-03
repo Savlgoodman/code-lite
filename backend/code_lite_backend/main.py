@@ -18,7 +18,7 @@ _LOG_FILE_HANDLE = None
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Code Lite backend")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", default=8765, type=int)
+    parser.add_argument("--port", default=18765, type=int)
     parser.add_argument("--config", default=None)
     parser.add_argument("--data-dir", default=None)
     parser.add_argument("--log-file", default=None)

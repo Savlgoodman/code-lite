@@ -44,7 +44,7 @@ use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 use std::os::windows::process::CommandExt;
 
 const BACKEND_HOST: &str = "127.0.0.1";
-const BACKEND_PORT: u16 = 8765;
+const BACKEND_PORT: u16 = 18765;
 const BACKEND_SIDECAR: &str = "code-lite-backend";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CREATE_NO_WINDOW: u32 = 0x08000000;

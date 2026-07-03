@@ -20,7 +20,7 @@ export interface StartTurnOptions {
   onEvent: (event: AgentEvent) => void;
 }
 
-const FALLBACK_BACKEND_URL = "http://127.0.0.1:8765";
+const FALLBACK_BACKEND_URL = "http://127.0.0.1:18765";
 
 function hasTauri() {
   return "__TAURI_INTERNALS__" in window;
