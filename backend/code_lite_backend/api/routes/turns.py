@@ -74,13 +74,15 @@ async def stream_turn(
             else:
                 resolved_model = services.model_config_store.effective_default_model()
         except ModelConfigError as error:
+            error_message = str(error)
+
             async def error_stream():
                 yield encode_ndjson_event(
                     {
                         "type": "agent.run.failed",
                         "conversationId": conversation_id,
                         "turnId": turn_id,
-                        "error": str(error),
+                        "error": error_message,
                     }
                 )
 
