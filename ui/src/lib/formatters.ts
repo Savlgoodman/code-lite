@@ -18,6 +18,28 @@ export function formatTimeLabel(value: number) {
   return `${Math.floor(diff / day)} 天`;
 }
 
+export function formatConversationBoundaryTime(value: number) {
+  const date = new Date(value);
+  const now = new Date();
+  const time = new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(date);
+
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  if (isToday) {
+    return time;
+  }
+
+  const weekday = new Intl.DateTimeFormat("zh-CN", { weekday: "short" }).format(date);
+  return `${weekday} ${time}`;
+}
+
 export function titleFromInput(input: string) {
   const text = input.trim().replace(/\s+/g, " ");
   if (!text) {

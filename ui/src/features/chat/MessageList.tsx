@@ -2,6 +2,7 @@ import { ArrowDown } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { MessageRenderer } from "../../components/MessageRenderer";
+import { formatConversationBoundaryTime } from "../../lib/formatters";
 import type { ChatMessage } from "../../types";
 import { buildAssistantInlineEntries } from "./messageTools";
 import { ToolCallGroup } from "./ToolCallViews";
@@ -78,11 +79,13 @@ const MessageItem = memo(function MessageItem({ message }: { message: ChatMessag
 });
 
 interface MessageListProps {
+  isRunning: boolean;
   messages: ChatMessage[];
   sessionId: string;
+  updatedAt: number;
 }
 
-export function MessageList({ messages, sessionId }: MessageListProps) {
+export function MessageList({ isRunning, messages, sessionId, updatedAt }: MessageListProps) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -165,6 +168,11 @@ export function MessageList({ messages, sessionId }: MessageListProps) {
           {messages.map((message) => (
             <MessageItem key={`${sessionId}-${message.id}`} message={message} />
           ))}
+          {messages.length > 0 && !isRunning ? (
+            <div className="conversation-boundary-time">
+              {formatConversationBoundaryTime(updatedAt)}
+            </div>
+          ) : null}
         </div>
       </section>
       {scrollbarState.visible ? (

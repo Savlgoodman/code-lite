@@ -825,8 +825,10 @@ export function ChatPage() {
             <main className="main-panel">
               <ConversationHeader agent={sessionAgent} isRunning={isActiveSessionRunning} title={activeSession.title} />
               <MessageList
+                isRunning={isActiveSessionRunning}
                 messages={activeMessages}
                 sessionId={activeSession.id}
+                updatedAt={activeSession.updatedAt}
               />
               <ChatComposer
                 activeTurnId={isActiveSessionRunning ? activeTurnId : null}

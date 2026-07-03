@@ -473,6 +473,15 @@
   line-height: 1.6;
 }
 
+.conversation-boundary-time {
+  margin: 18px 0 0;
+  color: #9aa0a8;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  user-select: none;
+}
+
 .scroll-bottom-button {
   position: absolute;
   bottom: 154px;
