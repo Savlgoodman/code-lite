@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from pc_agent_backend.agents.claude_code import ClaudeCodeAgentAdapter
-from pc_agent_backend.agents.codex import CodexAgentAdapter
-from pc_agent_backend.agents.errors import UnsupportedAgentAdapterError
+from pc_agent_backend.agents.acp import AcpAgentAdapter
 from pc_agent_backend.agents.nanobot import NanobotAgentAdapter
+from pc_agent_backend.agents.runtimes import CODEX_DESCRIPTOR, get_descriptor
 from pc_agent_backend.agents.router import AgentRouterAdapter
 from pc_agent_backend.core.config import RuntimeConfig
 from pc_agent_backend.schemas.agent import AgentAdapter
@@ -27,11 +26,22 @@ def create_agent_adapter(
     if name == "nanobot":
         return NanobotAgentAdapter(runtime_config=runtime_config, approvals=approvals)
     if name == "codex":
-        return CodexAgentAdapter(
+        return AcpAgentAdapter(
+            runtime="codex",
+            descriptor=CODEX_DESCRIPTOR,
             runtime_config=runtime_config,
             approvals=approvals,
             agent_runtime_config_store=agent_runtime_config_store,
         )
-    if name in {"claude", "claude_code", "claudecode"}:
-        return ClaudeCodeAgentAdapter()
-    raise UnsupportedAgentAdapterError(f"unsupported agent adapter: {name}")
+    # 通用 ACP adapter：通过 descriptor 支持任意 runtime
+    descriptor = get_descriptor(name)
+    if descriptor is not None:
+        return AcpAgentAdapter(
+            runtime=name,
+            descriptor=descriptor,
+            runtime_config=runtime_config,
+            approvals=approvals,
+            agent_runtime_config_store=agent_runtime_config_store,
+        )
+    from pc_agent_backend.agents.placeholders import PlaceholderAgentAdapter
+    return PlaceholderAgentAdapter(name)

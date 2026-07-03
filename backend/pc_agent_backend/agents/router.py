@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import AsyncIterator
 
-from pc_agent_backend.agents.codex import CodexAgentAdapter
+from pc_agent_backend.agents.acp import AcpAgentAdapter
 from pc_agent_backend.agents.nanobot import NanobotAgentAdapter
+from pc_agent_backend.agents.runtimes import CODEX_DESCRIPTOR
 from pc_agent_backend.core.config import RuntimeConfig
 from pc_agent_backend.schemas.agent import AgentAdapterCapabilities, AgentEvent, AgentRunRequest
 from pc_agent_backend.services.agent_runtime_config import AgentRuntimeConfigStore
@@ -18,7 +19,7 @@ class AgentRouterAdapter:
         tool_registration=True,
         tool_approval=True,
         session_state=True,
-        notes=["根据 Agent Runtime 设置动态路由到 Codex 或 nanobot adapter。"],
+        notes=["根据 Agent Runtime 设置动态路由到 ACP 或 nanobot adapter。"],
     )
 
     def __init__(
@@ -30,7 +31,9 @@ class AgentRouterAdapter:
     ) -> None:
         self._agent_runtime_config_store = agent_runtime_config_store
         self._adapters = {
-            "codex": CodexAgentAdapter(
+            "codex": AcpAgentAdapter(
+                runtime="codex",
+                descriptor=CODEX_DESCRIPTOR,
                 runtime_config=runtime_config,
                 approvals=approvals,
                 agent_runtime_config_store=agent_runtime_config_store,
