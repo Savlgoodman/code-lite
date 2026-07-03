@@ -1,6 +1,6 @@
 param(
   [string]$Proxy = "http://127.0.0.1:7899",
-  [int]$BackendPort = 8765,
+  [int]$BackendPort = 18765,
   [switch]$NoProxy
 )
 
