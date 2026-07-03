@@ -19,6 +19,47 @@ export interface Session {
   status: SessionStatus;
 }
 
+/** 进入对话时加载的 agent 信息 */
+export interface SessionAgentInfo {
+  id: string;
+  label: string;
+  adapterKind: "acp" | "nanobot";
+  status: "available" | "experimental" | "missing_dependency" | string;
+}
+
+/** 可选的权限/访问模式 —— 来自 ACP session/new.modes */
+export interface SessionMode {
+  id: string;
+  label: string;
+  isDefault: boolean;
+}
+
+/** 可选的模型 —— 来自 ACP session/new.models */
+export interface SessionModel {
+  id: string;
+  label: string;
+  description?: string | null;
+  isCurrent: boolean;
+}
+
+/** 可选的配置选项 —— 来自 ACP session/new.configOptions */
+export interface SessionConfigOption {
+  id: string;
+  label: string;
+  type: "enum" | "boolean" | "number";
+  values?: string[] | null;
+  currentValue?: string | number | boolean | null;
+  valueLabels?: Record<string, string> | null;
+}
+
+/** 进入对话时加载的完整能力描述 */
+export interface SessionCapabilities {
+  agent: SessionAgentInfo;
+  modes: SessionMode[];
+  models: SessionModel[];
+  configOptions: SessionConfigOption[];
+}
+
 export interface ChatMessage {
   agent?: AgentSummary | null;
   id: string;

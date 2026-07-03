@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from pc_agent_backend.api.routes import approvals, conversations, health, settings, system, turns
+from pc_agent_backend.api.routes import approvals, conversations, health, sessions, settings, system, turns
 
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router)
+api_router.include_router(sessions.router)
 api_router.include_router(settings.router)
 api_router.include_router(system.router)
 api_router.include_router(approvals.router)

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AgentEvent, Session } from "../types";
+import type { AgentEvent, Session, SessionCapabilities } from "../types";
 
 interface BackendStatus {
   base_url?: string;
@@ -14,6 +14,7 @@ export interface StartTurnOptions {
   input: string;
   modelId?: string | null;
   reasoningEffort?: string | null;
+  selectedConfig?: Record<string, string | number | boolean>;
   signal?: AbortSignal;
   turnId: string;
   onEvent: (event: AgentEvent) => void;
@@ -38,6 +39,21 @@ export async function ensureBackend(): Promise<string> {
   return backendUrlFromStatus(status);
 }
 
+/** 进入对话时调用，初始化 ACP session 并返回 SessionCapabilities。 */
+export async function initializeSession(conversationId: string): Promise<SessionCapabilities> {
+  const baseUrl = await ensureBackend();
+  const response = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(conversationId)}/initialize`, {
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+
+  return response.json() as Promise<SessionCapabilities>;
+}
+
 export async function streamAgentTurn(options: StartTurnOptions): Promise<void> {
   const baseUrl = await ensureBackend();
   const response = await fetch(`${baseUrl}/api/turns/stream`, {
@@ -47,6 +63,7 @@ export async function streamAgentTurn(options: StartTurnOptions): Promise<void> 
       input: options.input,
       ...(options.modelId ? { modelId: options.modelId } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+      ...(options.selectedConfig ? { selectedConfig: options.selectedConfig } : {}),
       turnId: options.turnId
     }),
     headers: {

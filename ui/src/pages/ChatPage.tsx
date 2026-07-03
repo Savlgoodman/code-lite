@@ -16,7 +16,7 @@ import { formatJson, formatSessionStatus } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
-import { cancelTurn, sendApprovalDecision, streamAgentTurn } from "../services/agentClient";
+import { cancelTurn, initializeSession, sendApprovalDecision, streamAgentTurn } from "../services/agentClient";
 import {
   deleteConversation,
   listConversations,
@@ -33,6 +33,8 @@ import type {
   ChatModelOption,
   ConfiguredModel,
   Session,
+  SessionCapabilities,
+  SessionConfigOption,
   ToolCallItem
 } from "../types";
 import "./ChatPage.css";
@@ -159,6 +161,8 @@ export function ChatPage() {
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
   const [accessMode, setAccessMode] = useState("read-only");
   const [reasoningEffort, setReasoningEffort] = useState("none");
+  const [sessionCapabilities, setSessionCapabilities] = useState<SessionCapabilities | null>(null);
+  const [selectedConfig, setSelectedConfig] = useState<Record<string, string | number | boolean>>({});
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
@@ -246,87 +250,104 @@ export function ChatPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadAgentSettings() {
+    async function loadCapabilities() {
       try {
-        const runtimeSettings = await loadAgentRuntimeSettings();
+        // 统一通过 SessionCapabilities 加载所有 agent 元数据
+        const probeId = activeSession.id && !isDraftSessionId(activeSession.id)
+          ? activeSession.id
+          : "__probe__";
+        const caps = await initializeSession(probeId);
         if (cancelled) {
           return;
         }
-        const runtime = runtimeSettings.runtimes.find((item) => item.adapter === runtimeSettings.activeAdapter);
-        if (runtime) {
-          const nextAgent = {
-            configMode: runtime.configMode,
-            id: runtime.adapter,
-            label: runtime.label,
-            mode: runtime.mode,
-            runtimeId: runtime.id
-          };
-          setActiveAgent(nextAgent);
-          setAccessMode(runtime.mode || "read-only");
-        }
-      } catch (error) {
-        console.error(error);
-        if (!cancelled) {
-          setAvailableModels([]);
-          setSelectedModelId(null);
-        }
-      }
-    }
+        setSessionCapabilities(caps);
 
-    void loadAgentSettings();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeView]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadModels() {
-      try {
-        if (sessionAgent?.id === "codex") {
-          const runtimeModels = await loadAgentRuntimeModels(sessionAgent.runtimeId ?? "codex");
-          const modelOptions = runtimeModelOptions(sessionAgent, runtimeModels.models);
-          if (cancelled) {
-            return;
-          }
-          setAvailableModels(modelOptions);
-          setSelectedModelId((current) => {
-            if (current && modelOptions.some((model) => model.id === current)) {
-              return current;
-            }
-            if (runtimeModels.currentModelId && modelOptions.some((model) => model.id === runtimeModels.currentModelId)) {
-              return runtimeModels.currentModelId;
-            }
-            return modelOptions[0]?.id ?? null;
-          });
-          return;
-        }
-
-        const modelSettings = await loadModelSettings();
-        if (cancelled) {
-          return;
-        }
-        const modelOptions = configuredModelOptions(modelSettings.models);
+        // 从 capabilities 构建模型列表（兼容 agent-runtime 和 product-config 来源）
+        const modelOptions: ChatModelOption[] = caps.models.map((m) => ({
+          id: m.id,
+          label: m.label,
+          model: m.id,
+          providerId: caps.agent.id,
+          providerName: caps.agent.label,
+          source: caps.agent.adapterKind === "acp" ? "agent-runtime" as const : "product-config" as const,
+        }));
         setAvailableModels(modelOptions);
         setSelectedModelId((current) => {
           if (current && modelOptions.some((model) => model.id === current)) {
             return current;
           }
-          return modelSettings.effectiveDefaultModelId ?? modelOptions[0]?.id ?? null;
+          const currentModel = caps.models.find((m) => m.isCurrent);
+          if (currentModel && modelOptions.some((model) => model.id === currentModel.id)) {
+            return currentModel.id;
+          }
+          return modelOptions[0]?.id ?? null;
         });
+
+        // 从 capabilities 初始化选中值
+        const defaultMode = caps.modes.find((m) => m.isDefault);
+        if (defaultMode) {
+          setAccessMode(defaultMode.id);
+        }
+        const configDefaults: Record<string, string | number | boolean> = {};
+        for (const opt of caps.configOptions) {
+          if (opt.currentValue != null) {
+            configDefaults[opt.id] = opt.currentValue;
+          }
+        }
+        if (Object.keys(configDefaults).length > 0) {
+          setSelectedConfig(configDefaults);
+        }
       } catch (error) {
-        console.error(error);
+        console.error("Failed to load session capabilities:", error);
+        if (!cancelled) {
+          // Fallback: 使用旧的加载逻辑
+          try {
+            const runtimeSettings = await loadAgentRuntimeSettings();
+            if (cancelled) return;
+            const runtime = runtimeSettings.runtimes.find((item) => item.adapter === runtimeSettings.activeAdapter);
+            if (runtime) {
+              setActiveAgent({
+                configMode: runtime.configMode,
+                id: runtime.adapter,
+                label: runtime.label,
+                mode: runtime.mode,
+                runtimeId: runtime.id
+              });
+              setAccessMode(runtime.mode || "read-only");
+            }
+            if (sessionAgent?.id === "codex") {
+              const runtimeModels = await loadAgentRuntimeModels(sessionAgent.runtimeId ?? "codex");
+              const modelOptions = runtimeModelOptions(sessionAgent!, runtimeModels.models);
+              if (cancelled) return;
+              setAvailableModels(modelOptions);
+              setSelectedModelId((current) => {
+                if (current && modelOptions.some((model) => model.id === current)) return current;
+                if (runtimeModels.currentModelId && modelOptions.some((model) => model.id === runtimeModels.currentModelId)) return runtimeModels.currentModelId;
+                return modelOptions[0]?.id ?? null;
+              });
+            } else {
+              const modelSettings = await loadModelSettings();
+              if (cancelled) return;
+              const modelOptions = configuredModelOptions(modelSettings.models);
+              setAvailableModels(modelOptions);
+              setSelectedModelId((current) => {
+                if (current && modelOptions.some((model) => model.id === current)) return current;
+                return modelSettings.effectiveDefaultModelId ?? modelOptions[0]?.id ?? null;
+              });
+            }
+          } catch (fallbackError) {
+            console.error("Fallback model loading also failed:", fallbackError);
+          }
+        }
       }
     }
 
-    void loadModels();
+    void loadCapabilities();
 
     return () => {
       cancelled = true;
     };
-  }, [activeView, sessionAgent?.id, sessionAgent?.runtimeId]);
+  }, [activeView, activeSession.id, sessionAgent?.id, sessionAgent?.runtimeId]);
 
   useEffect(() => {
     const selected = availableModels.find((model) => model.id === selectedModelId);
@@ -706,6 +727,7 @@ export function ChatPage() {
         onEvent: (event) => handleAgentEvent(sessionId, event),
         signal: abortController.signal,
         reasoningEffort,
+        selectedConfig,
         turnId
       });
     } catch (error) {
@@ -801,11 +823,14 @@ export function ChatPage() {
               />
               <ChatComposer
                 activeTurnId={isActiveSessionRunning ? activeTurnId : null}
+                configOptions={sessionCapabilities?.configOptions ?? []}
                 draft={draft}
                 accessMode={accessMode}
                 agent={sessionAgent}
+                modes={sessionCapabilities?.modes ?? []}
                 models={availableModels}
                 onAccessModeChange={setAccessMode}
+                onConfigChange={(optionId, value) => setSelectedConfig((prev) => ({ ...prev, [optionId]: value }))}
                 onDraftChange={setDraft}
                 onModelChange={setSelectedModelId}
                 onReasoningEffortChange={setReasoningEffort}
@@ -814,6 +839,7 @@ export function ChatPage() {
                 onStopTurn={() => void stopCurrentTurn()}
                 pendingApproval={activePendingApproval}
                 reasoningEffort={reasoningEffort}
+                selectedConfig={selectedConfig}
                 selectedModelId={selectedModelId}
               />
             </main>
