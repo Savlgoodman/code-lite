@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 
 
 def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
-    runtime_manager = AcpRuntimeManager(conversation_store=conversation_store)
     approvals = ApprovalBroker()
     conversation_store = ConversationStore(runtime_config.record_dir)
     model_config_store = ModelConfigStore(runtime_config)
     agent_runtime_config_store = AgentRuntimeConfigStore(runtime_config)
+    runtime_manager = AcpRuntimeManager(conversation_store=conversation_store)
     services = AppServices(
         runtime_config=runtime_config,
         workspace=workspace,
