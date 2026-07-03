@@ -104,7 +104,7 @@ export function Sidebar({
                 <span className={`status-dot ${session.status}`} />
                 <span className="session-copy">
                   <span className="session-title">{session.title}</span>
-                  <span className="session-preview">{session.preview}</span>
+                  {session.preview.trim() ? <span className="session-preview">{session.preview}</span> : null}
                 </span>
                 <button
                   className="session-time"

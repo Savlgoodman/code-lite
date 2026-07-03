@@ -1,17 +1,4 @@
-import type { Session, ToolCallItem } from "../types";
-
-export function formatSessionStatus(status: Session["status"]) {
-  if (status === "running") {
-    return "运行中";
-  }
-  if (status === "approval") {
-    return "待审批";
-  }
-  if (status === "error") {
-    return "异常";
-  }
-  return "空闲";
-}
+import type { ToolCallItem } from "../types";
 
 export function formatTimeLabel(value: number) {
   const diff = Date.now() - value;

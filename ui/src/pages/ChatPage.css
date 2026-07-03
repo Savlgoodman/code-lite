@@ -129,38 +129,10 @@
   margin: 0 auto;
 }
 
-.session-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin: 8px 0 22px;
-  padding: 0 0 14px;
-  border-bottom: 1px solid #efede9;
-}
-
-.session-banner div {
-  min-width: 150px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .eyebrow,
 .message-meta {
   color: var(--subtle);
   font-size: 12px;
-}
-
-.session-banner strong {
-  color: #20242b;
-  font-size: 16px;
-}
-
-.session-banner p {
-  margin: 0;
-  color: #697079;
-  line-height: 1.7;
 }
 
 .message {
@@ -521,26 +493,6 @@
 
 .scroll-bottom-button:hover {
   background: rgba(255, 255, 255, 0.82);
-}
-
-.empty-state {
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  padding: 74px 20px 44px;
-  color: #737982;
-  text-align: center;
-}
-
-.empty-state strong {
-  color: #20242b;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.empty-state span {
-  max-width: 520px;
-  line-height: 1.7;
 }
 
 .approval-panel {
@@ -951,11 +903,6 @@
   .chat-scroll {
     padding-right: 16px;
     padding-left: 16px;
-  }
-
-  .session-banner {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .model-picker {

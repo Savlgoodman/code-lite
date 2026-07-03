@@ -1315,7 +1315,7 @@ function ArchivedSessionsSettings({
             <article className="settings-archive-row" key={session.id}>
               <div>
                 <strong>{session.title}</strong>
-                <span>{session.preview}</span>
+                {session.preview.trim() ? <span>{session.preview}</span> : null}
               </div>
               <time>{formatTimeLabel(session.updatedAt)}</time>
               <div className="settings-row-actions">

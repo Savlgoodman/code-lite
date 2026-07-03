@@ -12,7 +12,7 @@ import {
   type StoredState,
   updateMessage
 } from "../lib/chatState";
-import { formatJson, formatSessionStatus } from "../lib/formatters";
+import { formatJson } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
@@ -826,8 +826,7 @@ export function ChatPage() {
               <ConversationHeader agent={sessionAgent} isRunning={isActiveSessionRunning} title={activeSession.title} />
               <MessageList
                 messages={activeMessages}
-                session={activeSession}
-                statusLabel={formatSessionStatus(activeSession.status)}
+                sessionId={activeSession.id}
               />
               <ChatComposer
                 activeTurnId={isActiveSessionRunning ? activeTurnId : null}

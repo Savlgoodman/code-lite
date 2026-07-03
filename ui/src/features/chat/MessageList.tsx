@@ -1,8 +1,8 @@
-import { ArrowDown, Bot } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { MessageRenderer } from "../../components/MessageRenderer";
-import type { ChatMessage, Session } from "../../types";
+import type { ChatMessage } from "../../types";
 import { buildAssistantInlineEntries } from "./messageTools";
 import { ToolCallGroup } from "./ToolCallViews";
 
@@ -79,11 +79,10 @@ const MessageItem = memo(function MessageItem({ message }: { message: ChatMessag
 
 interface MessageListProps {
   messages: ChatMessage[];
-  session: Session;
-  statusLabel: string;
+  sessionId: string;
 }
 
-export function MessageList({ messages, session, statusLabel }: MessageListProps) {
+export function MessageList({ messages, sessionId }: MessageListProps) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -141,7 +140,7 @@ export function MessageList({ messages, session, statusLabel }: MessageListProps
       element.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", handleScroll);
     };
-  }, [session.id]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (isPinnedToBottom) {
@@ -157,30 +156,14 @@ export function MessageList({ messages, session, statusLabel }: MessageListProps
 
   useEffect(() => {
     requestAnimationFrame(() => scrollToBottom("auto"));
-  }, [session.id]);
+  }, [sessionId]);
 
   return (
     <>
       <section className="chat-scroll" ref={scrollRef}>
         <div className="chat-content">
-          <div className="session-banner">
-            <div>
-              <span className="eyebrow">当前会话</span>
-              <strong>{statusLabel}</strong>
-            </div>
-            <p>所有命令执行、下载、安装和系统修改都会先经过风险说明与用户确认。</p>
-          </div>
-
-          {messages.length === 0 ? (
-            <section className="empty-state">
-              <Bot size={22} />
-              <strong>描述电脑问题，Agent 会先生成只读检查计划。</strong>
-              <span>涉及下载、安装、删除、移动、环境变量或注册表修改时，会先说明用途和风险，再等待确认。</span>
-            </section>
-          ) : null}
-
           {messages.map((message) => (
-            <MessageItem key={`${session.id}-${message.id}`} message={message} />
+            <MessageItem key={`${sessionId}-${message.id}`} message={message} />
           ))}
         </div>
       </section>

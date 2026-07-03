@@ -25,7 +25,7 @@ export function createEmptySession(): Session {
   return {
     id: createId("session"),
     title: "新的维修会话",
-    preview: "描述电脑问题，Agent 会先生成只读检查计划",
+    preview: "",
     createdAt: now,
     updatedAt: now,
     status: "idle",

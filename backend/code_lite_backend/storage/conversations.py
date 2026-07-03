@@ -11,7 +11,7 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 DEFAULT_TITLE = "新的维修会话"
-DEFAULT_PREVIEW = "描述电脑问题，Agent 会先生成只读检查计划"
+DEFAULT_PREVIEW = ""
 
 
 def now_ms() -> int:
