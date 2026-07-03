@@ -194,6 +194,10 @@ class AcpRuntimeManager:
         )
         native_session_id = str(result.session_id)
 
+        # 序列化 session_result 供后续构建 capabilities 使用
+        from code_lite_backend.agents.acp.mapper import to_jsonable
+        session_data = to_jsonable(result)
+
         binding = AcpSessionBinding(
             conversation_id=conversation_id,
             runtime_id=connection.descriptor.id,
@@ -202,7 +206,7 @@ class AcpRuntimeManager:
             config_mode=connection.key.config_mode,
             created_at=_now_iso(),
             updated_at=_now_iso(),
-            capabilities=None,
+            capabilities=session_data,
         )
         connection.sessions[conversation_id] = native_session_id
         self._session_bindings[conversation_id] = binding

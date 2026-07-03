@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from code_lite_backend.agents.acp.client import AcpClientHandler
-from code_lite_backend.agents.acp.mapper import to_jsonable
 from code_lite_backend.agents.runtimes import CODEX_DESCRIPTOR
 from code_lite_backend.api.dependencies import get_services
 from code_lite_backend.services.agent_runtime_config import _string_list
@@ -130,54 +129,37 @@ async def _initialize_acp_session(
         workspace=services.workspace,
     )
 
-    # 从 session/new 结果构建 capabilities（如果还没有缓存）
-    if binding.capabilities is None:
-        # 需要 session/new 的原始结果来构建 capabilities
-        # 但 binding 只保存了 native_session_id，没有保存原始 session_result
-        # 这里用 list_models 的方式重新获取 session 信息
-        # 或者直接从 connection 的 capabilities_cache 获取
-        pass
-
-    # 构建 SessionCapabilities
-    # 对于 reuse 的 session，我们需要从已有的 connection 获取能力信息
-    # 简单做法：如果是新创建的 session，我们在 ensure_session 时已经拿到了 session_result
-    # 如果是复用的，我们可以从 capabilities_cache 获取
+    # 使用 binding 中保存的 session/new 原始数据构建 SessionCapabilities
     return build_session_capabilities(
         agent_id=agent_id,
         agent_label=agent_label,
         adapter_kind="acp",
         status=descriptor.status,
-        session_result=_get_or_create_session_result(connection, binding),
+        session_result=_SessionDataWrapper(binding.capabilities),
         default_mode=default_mode,
         runtime=descriptor.id,
     )
 
 
-def _get_or_create_session_result(connection: Any, binding: Any) -> Any:
-    """从 connection 获取缓存的 session result，或构建一个最小可用的。"""
-    if connection.capabilities_cache is not None:
-        return connection.capabilities_cache
+class _SessionDataWrapper:
+    """包装序列化的 session result dict，使其兼容 to_jsonable() 的期望。
 
-    # 如果没有缓存，返回一个空的 session result 供 build_session_capabilities 处理
-    # build_session_capabilities 会优雅处理空数据
-    return _EmptySessionResult(binding.native_session_id)
+    to_jsonable() 对 dict 直接递归序列化，所以这里只需要让对象
+    能被 to_jsonable 正确处理即可。由于 binding.capabilities 已经是 dict，
+    而 build_session_capabilities 内部用 to_jsonable(session_result) 转换，
+    dict 会被 to_jsonable 直接透传。
+    """
 
+    def __init__(self, data: dict[str, Any] | None) -> None:
+        self._data = data or {}
 
-class _EmptySessionResult:
-    """最小 session result 对象，提供 session_id 但不提供 modes/models/configOptions。"""
-
-    def __init__(self, session_id: str) -> None:
-        self.session_id = session_id
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        return self._data
 
     def __getattr__(self, name: str) -> Any:
-        # 返回空值让 build_session_capabilities 优雅降级
-        if name == "modes":
-            return []
-        if name == "models":
-            return {"availableModels": [], "currentModelId": None}
-        if name == "configOptions":
-            return {}
-        raise AttributeError(name)
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self._data.get(name)
 
 
 async def _initialize_acp_session_legacy(
