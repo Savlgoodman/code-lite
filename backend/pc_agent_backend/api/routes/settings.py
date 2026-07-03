@@ -283,6 +283,32 @@ async def update_active_agent_runtime(
     return JSONResponse(settings)
 
 
+@router.get("/settings/agent-runtimes/{runtime_id}/models")
+async def list_agent_runtime_models(
+    runtime_id: str,
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    runtime_settings = services.agent_runtime_config_store.load()["agentRuntimes"]
+    runtime = runtime_settings.get(runtime_id)
+    if runtime is None:
+        return JSONResponse({"error": "Agent runtime 不存在"}, status_code=404)
+    adapter = str(runtime.get("adapter") or runtime_id)
+    try:
+        if not hasattr(services.agent_adapter, "list_models"):
+            return JSONResponse({
+                "adapter": adapter,
+                "currentModelId": None,
+                "models": [],
+            })
+        if getattr(services.agent_adapter, "name", "") == "router":
+            result = await services.agent_adapter.list_models(adapter, services.workspace)  # type: ignore[attr-defined]
+        else:
+            result = await services.agent_adapter.list_models(services.workspace)  # type: ignore[attr-defined]
+    except Exception as error:
+        return JSONResponse({"error": f"获取 Agent 模型失败：{type(error).__name__}: {error}"}, status_code=502)
+    return JSONResponse(result)
+
+
 @router.patch("/settings/agent-runtimes/{runtime_id}")
 async def update_agent_runtime(
     runtime_id: str,

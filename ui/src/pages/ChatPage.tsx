@@ -23,8 +23,18 @@ import {
   loadConversation,
   updateConversationArchiveState
 } from "../services/conversationStore";
-import { loadAgentRuntimeSettings, loadModelSettings } from "../services/settingsStore";
-import type { AgentEvent, AgentSummary, ApprovalRequest, ChatMessage, ConfiguredModel, Session, ToolCallItem } from "../types";
+import { loadAgentRuntimeModels, loadAgentRuntimeSettings, loadModelSettings } from "../services/settingsStore";
+import type {
+  AgentEvent,
+  AgentRuntimeModel,
+  AgentSummary,
+  ApprovalRequest,
+  ChatMessage,
+  ChatModelOption,
+  ConfiguredModel,
+  Session,
+  ToolCallItem
+} from "../types";
 import "./ChatPage.css";
 
 const DRAFT_SESSION_ID = "__draft_session__";
@@ -99,6 +109,30 @@ function mergeLoadedSession(loadedSession: Session, cachedSession: Session | und
   };
 }
 
+function configuredModelOptions(models: ConfiguredModel[]): ChatModelOption[] {
+  return models.map((model) => ({
+    id: model.id,
+    label: model.label,
+    model: model.model,
+    providerId: model.providerId,
+    providerName: model.providerName,
+    reasoningEffort: model.generation.reasoningEffort,
+    source: "product-config"
+  }));
+}
+
+function runtimeModelOptions(agent: AgentSummary, models: AgentRuntimeModel[]): ChatModelOption[] {
+  return models.map((model) => ({
+    id: model.id,
+    label: model.label || model.id,
+    model: model.id,
+    providerId: agent.runtimeId ?? agent.id,
+    providerName: agent.label,
+    reasoningEffort: model.id.match(/\[(.*?)\]$/)?.[1] ?? undefined,
+    source: "agent-runtime"
+  }));
+}
+
 export function ChatPage() {
   const initialState = useMemo<StoredState>(() => {
     const session = createDraftSession();
@@ -120,7 +154,7 @@ export function ChatPage() {
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
-  const [availableModels, setAvailableModels] = useState<ConfiguredModel[]>([]);
+  const [availableModels, setAvailableModels] = useState<ChatModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
   const [accessMode, setAccessMode] = useState("read-only");
@@ -232,6 +266,10 @@ export function ChatPage() {
         }
       } catch (error) {
         console.error(error);
+        if (!cancelled) {
+          setAvailableModels([]);
+          setSelectedModelId(null);
+        }
       }
     }
 
@@ -247,16 +285,36 @@ export function ChatPage() {
 
     async function loadModels() {
       try {
+        if (sessionAgent?.id === "codex") {
+          const runtimeModels = await loadAgentRuntimeModels(sessionAgent.runtimeId ?? "codex");
+          const modelOptions = runtimeModelOptions(sessionAgent, runtimeModels.models);
+          if (cancelled) {
+            return;
+          }
+          setAvailableModels(modelOptions);
+          setSelectedModelId((current) => {
+            if (current && modelOptions.some((model) => model.id === current)) {
+              return current;
+            }
+            if (runtimeModels.currentModelId && modelOptions.some((model) => model.id === runtimeModels.currentModelId)) {
+              return runtimeModels.currentModelId;
+            }
+            return modelOptions[0]?.id ?? null;
+          });
+          return;
+        }
+
         const modelSettings = await loadModelSettings();
         if (cancelled) {
           return;
         }
-        setAvailableModels(modelSettings.models);
+        const modelOptions = configuredModelOptions(modelSettings.models);
+        setAvailableModels(modelOptions);
         setSelectedModelId((current) => {
-          if (current && modelSettings.models.some((model) => model.id === current)) {
+          if (current && modelOptions.some((model) => model.id === current)) {
             return current;
           }
-          return modelSettings.effectiveDefaultModelId ?? modelSettings.models[0]?.id ?? null;
+          return modelSettings.effectiveDefaultModelId ?? modelOptions[0]?.id ?? null;
         });
       } catch (error) {
         console.error(error);
@@ -268,12 +326,12 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeView]);
+  }, [activeView, sessionAgent?.id, sessionAgent?.runtimeId]);
 
   useEffect(() => {
     const selected = availableModels.find((model) => model.id === selectedModelId);
     if (selected) {
-      setReasoningEffort(selected.generation.reasoningEffort || "none");
+      setReasoningEffort(selected.reasoningEffort || "none");
     }
   }, [availableModels, selectedModelId]);
 

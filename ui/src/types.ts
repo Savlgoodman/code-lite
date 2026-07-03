@@ -127,6 +127,31 @@ export interface ConfiguredModel {
   providerName?: string;
 }
 
+export interface ChatModelOption {
+  id: string;
+  label: string;
+  model: string;
+  providerId: string;
+  providerName?: string;
+  reasoningEffort?: string;
+  source: "agent-runtime" | "product-config";
+}
+
+export interface AgentRuntimeModel {
+  description?: string | null;
+  id: string;
+  label: string;
+  source?: string;
+}
+
+export interface AgentRuntimeModelsResult {
+  adapter: string;
+  agentInfo?: Record<string, unknown> | null;
+  command?: string[];
+  currentModelId?: string | null;
+  models: AgentRuntimeModel[];
+}
+
 export interface ConfiguredModelProvider {
   apiKeyPreview: string;
   baseUrl: string;
@@ -190,7 +215,9 @@ export interface AppAboutInfo {
 export interface AgentRuntimeDetected {
   command?: string[];
   detail?: string;
+  missingCommand?: string[] | null;
   ok: boolean;
+  source?: string;
   version?: string | null;
 }
 

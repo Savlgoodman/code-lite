@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Check, ChevronDown, ChevronRight, Paperclip, Send, ShieldCheck, Square } from "lucide-react";
 
-import type { AgentSummary, ApprovalRequest, ConfiguredModel } from "../../types";
+import type { AgentSummary, ApprovalRequest, ChatModelOption } from "../../types";
 import { ApprovalCard } from "./ApprovalCard";
 
 interface ChatComposerProps {
@@ -10,7 +10,7 @@ interface ChatComposerProps {
   activeTurnId: string | null;
   agent?: AgentSummary | null;
   draft: string;
-  models: ConfiguredModel[];
+  models: ChatModelOption[];
   onAccessModeChange: (value: string) => void;
   onDraftChange: (value: string) => void;
   onModelChange: (modelId: string) => void;
@@ -45,7 +45,7 @@ export function ChatComposer({
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedModel = models.find((model) => model.id === selectedModelId) ?? null;
   const providerGroups = useMemo(() => {
-    const groups: Array<{ id: string; name: string; models: ConfiguredModel[] }> = [];
+    const groups: Array<{ id: string; name: string; models: ChatModelOption[] }> = [];
     const indexes = new Map<string, number>();
     for (const model of models) {
       const providerId = model.providerId || "unknown";

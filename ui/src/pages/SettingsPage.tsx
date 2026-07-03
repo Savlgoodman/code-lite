@@ -226,6 +226,18 @@ function commandText(runtime: AgentRuntimeConfig) {
   return runtime.command.length > 0 ? runtime.command.join(" ") : "默认使用托管包或 npx";
 }
 
+function effectiveCommandText(runtime: AgentRuntimeConfig) {
+  return runtime.detected.command?.length ? runtime.detected.command.join(" ") : commandText(runtime);
+}
+
+function configuredCommandDetail(runtime: AgentRuntimeConfig) {
+  const missing = runtime.detected.missingCommand;
+  if (missing?.length) {
+    return `配置命令不可用，已回退：${missing.join(" ")}`;
+  }
+  return commandText(runtime);
+}
+
 function runtimeGlyph(runtimeId: string) {
   if (runtimeId === "codex") {
     return "Cx";
@@ -263,10 +275,10 @@ function runtimeChecks(
       value: runtime.id === "opencode" || runtime.id === "nanobot" || (nodeOk && npmOk) ? "pass" : "fail"
     },
     {
-      detail: commandText(runtime),
+      detail: effectiveCommandText(runtime),
       label: "Runtime launcher",
       ok: runtime.detected.ok,
-      value: runtime.distribution
+      value: runtime.detected.source ?? runtime.distribution
     },
     {
       detail: runtime.managedPackage
@@ -501,8 +513,12 @@ function AgentRuntimeSettings() {
 
           <div className="settings-runtime-detail">
             <div>
-              <span>当前命令</span>
-              <strong>{commandText(codex)}</strong>
+              <span>实际启动命令</span>
+              <strong>{effectiveCommandText(codex)}</strong>
+            </div>
+            <div>
+              <span>配置命令</span>
+              <strong>{configuredCommandDetail(codex)}</strong>
             </div>
             <div>
               <span>ACP 包</span>

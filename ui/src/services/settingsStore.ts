@@ -1,6 +1,7 @@
 import { ensureBackend } from "./agentClient";
 import type {
   AppAboutInfo,
+  AgentRuntimeModelsResult,
   AgentRuntimeConfig,
   AgentRuntimeSettingsState,
   ConfiguredModel,
@@ -65,6 +66,10 @@ export async function updateActiveAgentRuntime(adapter: string): Promise<AgentRu
     body: JSON.stringify({ adapter }),
     method: "PATCH"
   });
+}
+
+export async function loadAgentRuntimeModels(runtimeId: string): Promise<AgentRuntimeModelsResult> {
+  return requestJson<AgentRuntimeModelsResult>(`/api/settings/agent-runtimes/${runtimeId}/models`);
 }
 
 export async function fetchProviderModels(options: {

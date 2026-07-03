@@ -19,6 +19,7 @@ class AgentRunRequest:
     access_mode: str | None = None
     model_id: str | None = None
     model_preset_id: str | None = None
+    runtime_model: str | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
     reasoning_effort: str | None = None
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import AsyncIterator
 
 from pc_agent_backend.agents.codex import CodexAgentAdapter
@@ -57,3 +58,18 @@ class AgentRouterAdapter:
         for adapter in self._adapters.values():
             cancelled = await adapter.cancel_turn(turn_id) or cancelled
         return cancelled
+
+    async def list_models(self, adapter_id: str, workspace: Path) -> dict[str, object]:
+        adapter_name = self._agent_runtime_config_store.resolve_adapter(adapter_id)
+        adapter = self._adapters.get(adapter_name)
+        if adapter is None or not hasattr(adapter, "list_models"):
+            return {
+                "adapter": adapter_name,
+                "currentModelId": None,
+                "models": [],
+            }
+        result = await adapter.list_models(workspace)  # type: ignore[attr-defined]
+        return {
+            "adapter": adapter_name,
+            **result,
+        }

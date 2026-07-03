@@ -5,6 +5,7 @@ import contextlib
 import json
 import uuid
 from collections import deque
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 import acp
@@ -84,6 +85,34 @@ def _usage_event_payload(update: Any) -> dict[str, Any]:
         "source": "acp.usage_update",
     }
     return {key: value for key, value in usage.items() if value is not None}
+
+
+def _models_payload(session_result: Any) -> dict[str, Any]:
+    raw = _to_jsonable(session_result)
+    models = raw.get("models") if isinstance(raw, dict) else None
+    if not isinstance(models, dict):
+        return {
+            "currentModelId": None,
+            "models": [],
+        }
+    available = models.get("availableModels") if isinstance(models.get("availableModels"), list) else []
+    parsed = []
+    for item in available:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("modelId") or item.get("id") or "").strip()
+        if not model_id:
+            continue
+        parsed.append({
+            "id": model_id,
+            "label": str(item.get("name") or model_id),
+            "description": item.get("description"),
+            "source": "codex-acp",
+        })
+    return {
+        "currentModelId": models.get("currentModelId"),
+        "models": parsed,
+    }
 
 
 class CodexAcpClient:
@@ -335,6 +364,65 @@ class CodexAgentAdapter:
         await self._approvals.reject_all()
         return True
 
+    async def list_models(self, workspace: Path) -> dict[str, Any]:
+        command = self._agent_runtime_config_store.codex_command()
+        env = self._agent_runtime_config_store.codex_env()
+        client = CodexAcpClient(
+            conversation_id="model-probe",
+            output_queue=asyncio.Queue(),
+            approvals=self._approvals,
+            turn_id="model-probe",
+        )
+        stderr_task: asyncio.Task[None] | None = None
+        process: Any | None = None
+        try:
+            async with acp.spawn_agent_process(
+                client,
+                command[0],
+                *command[1:],
+                env=env,
+                cwd=str(workspace),
+                observers=[client.observe_stream],
+                use_unstable_protocol=True,
+            ) as (conn, process):
+                stderr_task = asyncio.create_task(self._drain_stderr(process, client))
+                initialize_result = await asyncio.wait_for(
+                    conn.initialize(
+                        protocol_version=acp.PROTOCOL_VERSION,
+                        client_capabilities=acp_schema.ClientCapabilities(
+                            fs=acp_schema.FileSystemCapabilities(
+                                read_text_file=False,
+                                write_text_file=False,
+                            ),
+                            terminal=False,
+                        ),
+                        client_info=acp_schema.Implementation(
+                            name="code-lite",
+                            title="code-lite",
+                            version="0.1.4",
+                        ),
+                    ),
+                    timeout=30,
+                )
+                session_result = await asyncio.wait_for(
+                    conn.new_session(cwd=str(workspace), mcp_servers=[]),
+                    timeout=30,
+                )
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(conn.close_session(session_result.session_id), timeout=5)
+                payload = _models_payload(session_result)
+                payload["agentInfo"] = _to_jsonable(getattr(initialize_result, "agent_info", None))
+                payload["command"] = command
+                return payload
+        finally:
+            if stderr_task is not None:
+                stderr_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await stderr_task
+            if process is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(process.wait(), timeout=5)
+
     async def _run_codex_turn(
         self,
         request: AgentRunRequest,
@@ -465,7 +553,7 @@ class CodexAgentAdapter:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(conn.set_session_mode(session_id=session_id, mode_id=mode), timeout=10)
 
-        model = str(request.model_metadata.get("model") or "").strip()
+        model = str(request.runtime_model or request.model_metadata.get("model") or "").strip()
         available_model_ids = self._available_model_ids(session_result)
         if model and model in available_model_ids:
             with contextlib.suppress(Exception):
