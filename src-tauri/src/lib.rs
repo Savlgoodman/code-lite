@@ -12,7 +12,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while running PC Repair Agent");
+        .expect("error while running Code Lite");
 
     app.run(|app_handle, event| {
         if matches!(
@@ -45,7 +45,7 @@ use std::os::windows::process::CommandExt;
 
 const BACKEND_HOST: &str = "127.0.0.1";
 const BACKEND_PORT: u16 = 8765;
-const BACKEND_SIDECAR: &str = "pc-agent-backend";
+const BACKEND_SIDECAR: &str = "code-lite-backend";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -132,7 +132,7 @@ fn ensure_backend(
         });
     }
 
-    if std::env::var("PC_AGENT_SKIP_BACKEND_AUTOSTART").is_ok() {
+    if std::env::var("CODE_LITE_SKIP_BACKEND_AUTOSTART").is_ok() {
         return Err(format!(
             "backend is not listening at {base_url}; autostart is disabled"
         ));
@@ -186,7 +186,7 @@ fn start_backend(app: &tauri::AppHandle) -> Result<BackendChild, String> {
 }
 
 fn should_try_sidecar() -> bool {
-    !cfg!(debug_assertions) || std::env::var("PC_AGENT_USE_BACKEND_SIDECAR").is_ok()
+    !cfg!(debug_assertions) || std::env::var("CODE_LITE_USE_BACKEND_SIDECAR").is_ok()
 }
 
 fn start_sidecar_backend(app: &tauri::AppHandle) -> Result<BackendChild, String> {
@@ -208,8 +208,8 @@ fn start_sidecar_backend(app: &tauri::AppHandle) -> Result<BackendChild, String>
         .arg("--log-file")
         .arg(log_path.as_os_str())
         .env("PYTHONUTF8", "1")
-        .env("REPAIR_AGENT_APP_VERSION", APP_VERSION)
-        .env("REPAIR_AGENT_BACKEND_VERSION", APP_VERSION)
+        .env("CODE_LITE_APP_VERSION", APP_VERSION)
+        .env("CODE_LITE_BACKEND_VERSION", APP_VERSION)
         .spawn()
         .map_err(|error| format!("failed to spawn backend sidecar: {error}"))?;
 
@@ -258,7 +258,7 @@ fn start_dev_backend() -> Result<BackendChild, String> {
         .arg("run")
         .arg("python")
         .arg("-m")
-        .arg("pc_agent_backend.main")
+        .arg("code_lite_backend.main")
         .arg("--host")
         .arg(BACKEND_HOST)
         .arg("--port")
@@ -271,8 +271,8 @@ fn start_dev_backend() -> Result<BackendChild, String> {
         .arg(&log_path)
         .current_dir(&backend_dir)
         .env("PYTHONUTF8", "1")
-        .env("REPAIR_AGENT_APP_VERSION", APP_VERSION)
-        .env("REPAIR_AGENT_BACKEND_VERSION", APP_VERSION)
+        .env("CODE_LITE_APP_VERSION", APP_VERSION)
+        .env("CODE_LITE_BACKEND_VERSION", APP_VERSION)
         .stdin(Stdio::null())
         .stdout(
             open_append_log(&log_path)
@@ -321,12 +321,12 @@ fn repo_root() -> Result<PathBuf, String> {
 
 fn production_data_dir() -> Result<PathBuf, String> {
     let home = user_home_dir()?;
-    Ok(home.join(".repair-agent"))
+    Ok(home.join(".code-lite"))
 }
 
 fn production_workspace() -> Result<PathBuf, String> {
     let home = user_home_dir()?;
-    let workspace = home.join(".repair-agent").join("workspace");
+    let workspace = home.join(".code-lite").join("workspace");
     std::fs::create_dir_all(&workspace)
         .map_err(|error| format!("failed to create backend workspace: {error}"))?;
     Ok(workspace)

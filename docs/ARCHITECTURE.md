@@ -112,7 +112,7 @@ Backend 应避免把某个 runtime 的私有概念直接扩散到 UI 和协议�
 
 ### 3.4 Agent Adapter 层
 
-位置：`backend/pc_agent_backend/agents/`，后续可逐步改名为 `backend/code_lite_backend/agents/`。
+位置：`backend/code_lite_backend/agents/`，后续可逐步改名为 `backend/code_lite_backend/agents/`。
 
 目标接口：
 
@@ -302,7 +302,7 @@ data/
 4. 导出记录应默认脱敏。
 5. 大型日志和缓存不提交到 git。
 
-当前代码仍存在 `nanobot_config.json`、`pc_agent_backend` 等历史命名。它们属于原型遗留，后续应在不破坏功能的前提下逐步迁移。
+当前代码仍存在 `nanobot_config.json`、`code_lite_backend` 等历史命名。它们属于原型遗留，后续应在不破坏功能的前提下逐步迁移。
 
 ## 7. 通信协议
 
@@ -366,6 +366,6 @@ MVP 应优先打通端到端链路：
 2. 首个可用 runtime 是 Codex，还是继续用 nanobot 打底并并行接 Codex？
 3. Claude Code 接入优先 CLI wrapper 还是等待更稳定 SDK？
 4. opencode 采用 CLI 模式还是 server 模式？
-5. 是否将 Python 包从 `pc_agent_backend` 改为 `code_lite_backend`，以及何时改？
+5. 是否将 Python 包从 `code_lite_backend` 改为 `code_lite_backend`，以及何时改？
 6. 远程连接是否只做局域网，还是立即预留中继协议？
 7. 产品级审批边界由 backend 承载，还是未来下沉到 Tauri/Rust 网关？

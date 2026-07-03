@@ -146,7 +146,7 @@ code-lite 的产品策略：
 新增目录建议：
 
 ```text
-backend/pc_agent_backend/agents/acp/
+backend/code_lite_backend/agents/acp/
   __init__.py
   adapter.py
   sdk_client.py

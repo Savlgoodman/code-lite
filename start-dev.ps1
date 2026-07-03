@@ -34,20 +34,20 @@ if (-not $NoProxy) {
 $backendLines = @(
   "@echo off",
   "chcp 65001 > nul",
-  "set `"REPAIR_AGENTS_ENV=DEV`""
+  "set `"CODE_LITE_ENV=DEV`""
 ) + $proxyLines + @(
   "cd /d `"$repoRoot`"",
-  "echo PC Agent Backend - $backendUrl",
-  "uv run --project backend python -m pc_agent_backend.main --host 127.0.0.1 --port $BackendPort"
+  "echo Code Lite Backend - $backendUrl",
+  "uv run --project backend python -m code_lite_backend.main --host 127.0.0.1 --port $BackendPort"
 )
 
 $tauriLines = @(
   "@echo off",
   "chcp 65001 > nul",
-  "set `"REPAIR_AGENTS_ENV=DEV`""
+  "set `"CODE_LITE_ENV=DEV`""
 ) + $proxyLines + @(
   "cd /d `"$repoRoot`"",
-  "echo PC Agent Tauri Desktop",
+  "echo Code Lite Tauri Desktop",
   "powershell.exe -ExecutionPolicy Bypass -File .\scripts\dev-tauri.ps1 -Proxy `"$Proxy`" -SkipBackend"
 )
 

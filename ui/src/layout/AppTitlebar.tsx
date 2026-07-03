@@ -41,7 +41,7 @@ export function AppTitlebar() {
           <button>帮助</button>
         </nav>
       </div>
-      <div className="titlebar-center">PC Repair Agent</div>
+      <div className="titlebar-center">Code Lite</div>
       <div className="window-controls">
         <button aria-label="最小化" onClick={() => void handleWindowAction("minimize")}>
           <Minus size={15} />

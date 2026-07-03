@@ -41,7 +41,8 @@
 
 .outline-action,
 .text-action,
-.model-chip {
+.model-chip,
+.composer-select-control {
   height: 32px;
   display: inline-flex;
   align-items: center;
@@ -55,8 +56,20 @@
 
 .outline-action:hover,
 .text-action:hover,
-.model-chip:hover {
+.model-chip:hover,
+.composer-select-control:hover {
   background: #f5f5f3;
+}
+
+.outline-action {
+  max-width: 220px;
+}
+
+.outline-action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-scroll {
@@ -704,6 +717,25 @@
   color: var(--orange);
 }
 
+.composer-select-control {
+  border-color: transparent;
+  background: transparent;
+  color: var(--orange);
+}
+
+.composer-select-control select {
+  max-width: 126px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: 0;
+}
+
+.composer-select-control select:disabled {
+  opacity: 0.55;
+}
+
 .model-chip {
   min-width: 0;
   max-width: 172px;
@@ -862,5 +894,99 @@
   .model-picker {
     --model-menu-width: min(188px, calc((100vw - 56px) / 2));
   }
+}
+
+/* ─── 底部状态栏：模型族 + 推理强度 ─── */
+.composer-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-model-picker,
+.status-reasoning-picker {
+  position: relative;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-secondary, #a0a5ac);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.status-chip:hover {
+  border-color: var(--orange, #e8734a);
+  color: var(--orange, #e8734a);
+  background: rgba(232, 115, 74, 0.06);
+}
+
+.status-chip svg {
+  opacity: 0.6;
+}
+
+.status-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 160px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  background: var(--bg-elevated, #1a1a1e);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary, #e4e4e7);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+}
+
+.status-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.status-dropdown-item.selected {
+  color: var(--orange, #e8734a);
+}
+
+.status-dropdown-item.selected span {
+  font-weight: 500;
+}
+
+.status-dropdown-item.family-info {
+  color: var(--text-secondary, #a0a5ac);
+  font-size: 12px;
+}
+
+.status-dropdown-divider {
+  height: 1px;
+  background: var(--border-color, rgba(255, 255, 255, 0.08));
+  margin: 4px 0;
 }
 

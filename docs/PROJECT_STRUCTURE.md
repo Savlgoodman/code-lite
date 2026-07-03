@@ -149,7 +149,7 @@ src-tauri/
 
 Python Agent Hub，最终作为 sidecar 随 Tauri 应用分发。
 
-当前目录仍使用 `pc_agent_backend` 历史包名，目标职责已经转向 code-lite。后续可择机迁移为 `code_lite_backend`。
+当前目录仍使用 `code_lite_backend` 历史包名，目标职责已经转向 code-lite。后续可择机迁移为 `code_lite_backend`。
 
 建议目标结构：
 

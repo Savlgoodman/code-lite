@@ -1,9 +1,9 @@
 {
-  "name": "pc-agent",
+  "name": "code-lite",
   "version": "0.1.4",
   "private": true,
   "scripts": {
-    "backend:dev": "uv run --project backend python -m pc_agent_backend.main",
+    "backend:dev": "uv run --project backend python -m code_lite_backend.main",
     "backend:sync": "uv sync --project backend",
     "ui:dev": "npm run dev --prefix ui",
     "ui:build": "npm run build --prefix ui",

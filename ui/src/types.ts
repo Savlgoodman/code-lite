@@ -1,6 +1,15 @@
 export type SessionStatus = "idle" | "running" | "approval" | "error";
 
+export interface AgentSummary {
+  configMode?: string;
+  id: string;
+  label: string;
+  mode?: string;
+  runtimeId?: string;
+}
+
 export interface Session {
+  agent?: AgentSummary | null;
   archived?: boolean;
   id: string;
   title: string;
@@ -10,7 +19,49 @@ export interface Session {
   status: SessionStatus;
 }
 
+/** 进入对话时加载的 agent 信息 */
+export interface SessionAgentInfo {
+  id: string;
+  label: string;
+  adapterKind: "acp" | "nanobot";
+  status: "available" | "experimental" | "missing_dependency" | string;
+}
+
+/** 可选的权限/访问模式 —— 来自 ACP session/new.modes */
+export interface SessionMode {
+  id: string;
+  label: string;
+  isDefault: boolean;
+}
+
+/** 可选的模型 —— 来自 ACP session/new.models */
+export interface SessionModel {
+  id: string;
+  label: string;
+  description?: string | null;
+  isCurrent: boolean;
+}
+
+/** 可选的配置选项 —— 来自 ACP session/new.configOptions */
+export interface SessionConfigOption {
+  id: string;
+  label: string;
+  type: "enum" | "boolean" | "number";
+  values?: string[] | null;
+  currentValue?: string | number | boolean | null;
+  valueLabels?: Record<string, string> | null;
+}
+
+/** 进入对话时加载的完整能力描述 */
+export interface SessionCapabilities {
+  agent: SessionAgentInfo;
+  modes: SessionMode[];
+  models: SessionModel[];
+  configOptions: SessionConfigOption[];
+}
+
 export interface ChatMessage {
+  agent?: AgentSummary | null;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -117,6 +168,31 @@ export interface ConfiguredModel {
   providerName?: string;
 }
 
+export interface ChatModelOption {
+  id: string;
+  label: string;
+  model: string;
+  providerId: string;
+  providerName?: string;
+  reasoningEffort?: string;
+  source: "agent-runtime" | "product-config";
+}
+
+export interface AgentRuntimeModel {
+  description?: string | null;
+  id: string;
+  label: string;
+  source?: string;
+}
+
+export interface AgentRuntimeModelsResult {
+  adapter: string;
+  agentInfo?: Record<string, unknown> | null;
+  command?: string[];
+  currentModelId?: string | null;
+  models: AgentRuntimeModel[];
+}
+
 export interface ConfiguredModelProvider {
   apiKeyPreview: string;
   baseUrl: string;
@@ -175,6 +251,51 @@ export interface AppAboutInfo {
   git: AppAboutGitInfo;
   runtimeEnv: string;
   workspace: string;
+}
+
+export interface AgentRuntimeDetected {
+  command?: string[];
+  detail?: string;
+  missingCommand?: string[] | null;
+  ok: boolean;
+  source?: string;
+  version?: string | null;
+}
+
+export interface AgentRuntimeManagedPackage {
+  installedAt?: number | null;
+  installedVersion?: string | null;
+  name: string;
+  path?: string;
+  requestedVersion?: string;
+}
+
+export interface AgentRuntimeConfig {
+  adapter: string;
+  canActivate?: boolean;
+  canConfigure: boolean;
+  canInstall: boolean;
+  codexPath?: string;
+  command: string[];
+  configMode: string;
+  detected: AgentRuntimeDetected;
+  distribution: string;
+  enabled: boolean;
+  id: "codex" | "claude_code" | "opencode" | "nanobot" | string;
+  isActive: boolean;
+  label: string;
+  managedPackage?: AgentRuntimeManagedPackage;
+  mode: string;
+  status: string;
+}
+
+export interface AgentRuntimeSettingsState {
+  activeAdapter: string;
+  configPath: string;
+  nodeDetected: AgentRuntimeDetected;
+  npmDetected: AgentRuntimeDetected;
+  runtimeRoot: string;
+  runtimes: AgentRuntimeConfig[];
 }
 
 export type AgentEvent =

@@ -29,7 +29,7 @@ CODEX_PRODUCT_PERMISSION_MAPPING: dict[str, dict[str, Any]] = {
         "approvalHandler": "deny command/file approval requests",
         "notes": [
             "Allows code and file inspection, but denies approval requests for commands or file changes.",
-            "Best default for evaluating Codex inside PC Repair Agent.",
+            "Best default for evaluating Codex inside Code Lite.",
         ],
     },
     "ask": {
@@ -40,7 +40,7 @@ CODEX_PRODUCT_PERMISSION_MAPPING: dict[str, dict[str, Any]] = {
         "codexApprovalPolicy": "on-request",
         "codexApprovalsReviewer": "user",
         "sdkHighLevelApprovalMode": None,
-        "approvalHandler": "bridge command/file approval requests to PC Repair Agent UI",
+        "approvalHandler": "bridge command/file approval requests to Code Lite UI",
         "notes": [
             "The public high-level ApprovalMode enum does not expose a user ask value.",
             "Use low-level CodexClient approval_handler and JSON-RPC payloads for this mode.",
@@ -58,7 +58,7 @@ CODEX_PRODUCT_PERMISSION_MAPPING: dict[str, dict[str, Any]] = {
         "approvalHandler": "record auto-review events and keep product blocked rules outside Codex",
         "notes": [
             "Codex auto-review changes who reviews boundary-crossing actions; it does not expand the sandbox.",
-            "PC Repair Agent should still keep its own blocked policy and Execution Gateway.",
+            "Code Lite should still keep its own blocked policy and Execution Gateway.",
         ],
     },
     "fullaccess": {
@@ -72,7 +72,7 @@ CODEX_PRODUCT_PERMISSION_MAPPING: dict[str, dict[str, Any]] = {
         "approvalHandler": "record escalation decisions; never bypass product blocked policy",
         "notes": [
             "Use only for expert/debug workflows.",
-            "This does not mean PC Repair Agent should skip its Rust Execution Gateway.",
+            "This does not mean Code Lite should skip its Rust Execution Gateway.",
         ],
     },
 }
@@ -393,7 +393,7 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Probe openai-codex SDK capabilities for PC Repair Agent adapter design.",
+        description="Probe openai-codex SDK capabilities for Code Lite adapter design.",
     )
     parser.add_argument(
         "--smoke",
@@ -420,7 +420,7 @@ def parse_args() -> argparse.Namespace:
         "--permission-mode",
         choices=PRODUCT_PERMISSION_MODES,
         default="readonly",
-        help="PC Repair Agent product permission mode to map into Codex settings.",
+        help="Code Lite product permission mode to map into Codex settings.",
     )
     parser.add_argument(
         "--approval-decision",

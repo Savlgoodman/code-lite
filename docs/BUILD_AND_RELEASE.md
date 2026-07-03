@@ -22,14 +22,14 @@ http://127.0.0.1:7899
 
 ```powershell
 npm run ui:build
-uv run --project backend python -m pc_agent_backend.main --help
-python -m compileall backend\pc_agent_backend
+uv run --project backend python -m code_lite_backend.main --help
+python -m compileall backend\code_lite_backend
 cargo check --manifest-path .\src-tauri\Cargo.toml
 ```
 
 ## 版本号
 
-版本号以根目录 `VERSION` 文件为唯一手工维护入口。`package.json`、`ui/package.json`、`ui/package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`backend/pyproject.toml`、`backend/uv.lock` 和 `backend/pc_agent_backend/version.py` 中的版本字段都是派生值，由脚本同步。
+版本号以根目录 `VERSION` 文件为唯一手工维护入口。`package.json`、`ui/package.json`、`ui/package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`backend/pyproject.toml`、`backend/uv.lock` 和 `backend/code_lite_backend/version.py` 中的版本字段都是派生值，由脚本同步。
 
 设置新版本：
 
@@ -59,7 +59,7 @@ npm run version:sync
 npm run package:win
 ```
 
-打包命令会在默认 Tauri 配置之外合并 `src-tauri/tauri.release.conf.json`，并把当前 backend sidecar 打入安装包。现阶段 sidecar 文件名仍可能使用历史 `pc-agent-backend-x86_64-pc-windows-msvc.exe`，后续应随 code-lite 命名迁移。开发模式不合并该配置，因此无需预先生成 sidecar。
+打包命令会在默认 Tauri 配置之外合并 `src-tauri/tauri.release.conf.json`，并把当前 backend sidecar 打入安装包。现阶段 sidecar 文件名仍可能使用历史 `code-lite-backend-x86_64-pc-windows-msvc.exe`，后续应随 code-lite 命名迁移。开发模式不合并该配置，因此无需预先生成 sidecar。
 
 指定版本并打包：
 

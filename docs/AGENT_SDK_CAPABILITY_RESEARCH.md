@@ -158,7 +158,7 @@ def keep_runtime_entry(entry):
     return not any(marker in text for marker in blocked)
 
 a = Analysis(
-    ["pc_agent_backend/main.py"],
+    ["code_lite_backend/main.py"],
     excludes=[
         # 如果 Codex adapter 永远显式传 CodexConfig.codex_bin，
         # 可以进一步验证排除 codex_cli_bin。

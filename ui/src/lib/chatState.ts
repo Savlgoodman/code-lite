@@ -28,7 +28,8 @@ export function createEmptySession(): Session {
     preview: "描述电脑问题，Agent 会先生成只读检查计划",
     createdAt: now,
     updatedAt: now,
-    status: "idle"
+    status: "idle",
+    agent: null
   };
 }
 

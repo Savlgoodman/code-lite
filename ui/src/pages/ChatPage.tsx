@@ -16,15 +16,28 @@ import { formatJson, formatSessionStatus } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
-import { cancelTurn, sendApprovalDecision, streamAgentTurn } from "../services/agentClient";
+import { cancelTurn, initializeSession, sendApprovalDecision, streamAgentTurn } from "../services/agentClient";
 import {
   deleteConversation,
   listConversations,
   loadConversation,
   updateConversationArchiveState
 } from "../services/conversationStore";
-import { loadModelSettings } from "../services/settingsStore";
-import type { AgentEvent, ApprovalRequest, ChatMessage, ConfiguredModel, Session, ToolCallItem } from "../types";
+import { loadAgentRuntimeModels, loadAgentRuntimeSettings, loadModelSettings } from "../services/settingsStore";
+import type {
+  AgentEvent,
+  AgentRuntimeModel,
+  AgentSummary,
+  ApprovalRequest,
+  ChatMessage,
+  ChatModelOption,
+  ConfiguredModel,
+  Session,
+  SessionCapabilities,
+  SessionConfigOption,
+  SessionModel,
+  ToolCallItem
+} from "../types";
 import "./ChatPage.css";
 
 const DRAFT_SESSION_ID = "__draft_session__";
@@ -99,6 +112,30 @@ function mergeLoadedSession(loadedSession: Session, cachedSession: Session | und
   };
 }
 
+function configuredModelOptions(models: ConfiguredModel[]): ChatModelOption[] {
+  return models.map((model) => ({
+    id: model.id,
+    label: model.label,
+    model: model.model,
+    providerId: model.providerId,
+    providerName: model.providerName,
+    reasoningEffort: model.generation.reasoningEffort,
+    source: "product-config"
+  }));
+}
+
+function runtimeModelOptions(agent: AgentSummary, models: AgentRuntimeModel[]): ChatModelOption[] {
+  return models.map((model) => ({
+    id: model.id,
+    label: model.label || model.id,
+    model: model.id,
+    providerId: agent.runtimeId ?? agent.id,
+    providerName: agent.label,
+    reasoningEffort: model.id.match(/\[(.*?)\]$/)?.[1] ?? undefined,
+    source: "agent-runtime"
+  }));
+}
+
 export function ChatPage() {
   const initialState = useMemo<StoredState>(() => {
     const session = createDraftSession();
@@ -120,8 +157,12 @@ export function ChatPage() {
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
-  const [availableModels, setAvailableModels] = useState<ConfiguredModel[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
+  const [accessMode, setAccessMode] = useState("read-only");
+  const [reasoningEffort, setReasoningEffort] = useState("xhigh");
+  const [sessionCapabilities, setSessionCapabilities] = useState<SessionCapabilities | null>(null);
+  const [selectedConfig, setSelectedConfig] = useState<Record<string, string | number | boolean>>({});
+  const [selectedModelFamily, setSelectedModelFamily] = useState<string>("");
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
@@ -133,6 +174,7 @@ export function ChatPage() {
   const activeMessages = messages[activeSession.id] ?? [];
   const isActiveSessionRunning = runningSessionIds.has(activeSession.id);
   const activePendingApproval = pendingApproval?.conversationId === activeSession.id ? pendingApproval : null;
+  const sessionAgent = activeSession.agent ?? (isDraftSessionId(activeSession.id) ? activeAgent : null);
 
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !archivedSessionIds.has(session.id)),
@@ -208,30 +250,115 @@ export function ChatPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadModels() {
+    async function loadCapabilities() {
       try {
-        const modelSettings = await loadModelSettings();
-        if (cancelled) {
-          return;
-        }
-        setAvailableModels(modelSettings.models);
-        setSelectedModelId((current) => {
-          if (current && modelSettings.models.some((model) => model.id === current)) {
-            return current;
+        const probeId = activeSession.id && !isDraftSessionId(activeSession.id)
+          ? activeSession.id
+          : "__probe__";
+        const caps = await initializeSession(probeId);
+        if (cancelled) return;
+        setSessionCapabilities(caps);
+
+        // 初始化默认选中值
+        const defaultMode = caps.modes.find((m) => m.isDefault);
+        if (defaultMode) setAccessMode(defaultMode.id);
+
+        // 从 configOptions 提取默认值
+        const configDefaults: Record<string, string | number | boolean> = {};
+        for (const opt of caps.configOptions) {
+          if (opt.currentValue != null) {
+            configDefaults[opt.id] = opt.currentValue;
           }
-          return modelSettings.effectiveDefaultModelId ?? modelSettings.models[0]?.id ?? null;
-        });
+        }
+        if (Object.keys(configDefaults).length > 0) setSelectedConfig(configDefaults);
+
+        // 提取推理强度
+        const reasoningOpt = caps.configOptions.find((o) => o.id === "reasoning_effort");
+        if (reasoningOpt?.currentValue) setReasoningEffort(String(reasoningOpt.currentValue));
+
+        // 提取模型族：从当前模型 ID 或第一个模型中提取
+        const currentModel = caps.models.find((m) => m.isCurrent) ?? caps.models[0];
+        if (currentModel) {
+          const familyMatch = currentModel.id.match(/^(.*?)\[/);
+          setSelectedModelFamily(familyMatch ? familyMatch[1] : currentModel.id);
+        }
       } catch (error) {
-        console.error(error);
+        console.error("Failed to load session capabilities:", error);
+        if (!cancelled) {
+          try {
+            const runtimeSettings = await loadAgentRuntimeSettings();
+            if (cancelled) return;
+            const runtime = runtimeSettings.runtimes.find((item) => item.adapter === runtimeSettings.activeAdapter);
+            if (runtime) {
+              setActiveAgent({
+                configMode: runtime.configMode,
+                id: runtime.adapter,
+                label: runtime.label,
+                mode: runtime.mode,
+                runtimeId: runtime.id,
+              });
+              setAccessMode(runtime.mode || "read-only");
+
+              const fallbackModes = runtime.id === "codex"
+                ? [
+                    { id: "read-only", label: "只读", isDefault: runtime.mode === "read-only" },
+                    { id: "agent", label: "Agent", isDefault: runtime.mode === "agent" },
+                    { id: "agent-full-access", label: "完全访问", isDefault: runtime.mode === "agent-full-access" },
+                  ]
+                : [{ id: runtime.mode || "workspace", label: runtime.mode || "工作区", isDefault: true }];
+
+              const fallbackConfigOptions = runtime.id === "codex"
+                ? [{
+                    id: "reasoning_effort",
+                    label: "思考强度",
+                    type: "enum" as const,
+                    values: ["none", "low", "medium", "high", "xhigh"],
+                    currentValue: "xhigh",
+                    valueLabels: { none: "无", low: "低", medium: "中", high: "高", xhigh: "超高" },
+                  }]
+                : [];
+
+              // 加载模型并构建 models 列表
+              let fallbackModels: SessionModel[] = [];
+              const agentId = runtime.adapter;
+              if (agentId === "codex") {
+                try {
+                  const runtimeModels = await loadAgentRuntimeModels(runtime.id ?? "codex");
+                  fallbackModels = runtimeModels.models.map((m: AgentRuntimeModel) => ({
+                    id: m.id, label: m.label, description: m.description,
+                    isCurrent: m.id === runtimeModels.currentModelId,
+                  }));
+                } catch { /* ignore */ }
+              }
+
+              setSessionCapabilities({
+                agent: {
+                  id: runtime.adapter, label: runtime.label,
+                  adapterKind: "acp" as const, status: runtime.status || "available",
+                },
+                modes: fallbackModes,
+                models: fallbackModels,
+                configOptions: fallbackConfigOptions,
+              });
+
+              // 设置模型族
+              if (fallbackModels.length > 0) {
+                const currentModel = fallbackModels.find((m) => m.isCurrent) ?? fallbackModels[0];
+                const familyMatch = currentModel.id.match(/^(.*?)\[/);
+                setSelectedModelFamily(familyMatch ? familyMatch[1] : currentModel.id);
+              }
+            }
+          } catch (fallbackError) {
+            console.error("Fallback model loading also failed:", fallbackError);
+          }
+        }
       }
     }
 
-    void loadModels();
+    void loadCapabilities();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [activeView]);
+    return () => { cancelled = true; };
+  }, [activeView, activeSession.id, sessionAgent?.id, sessionAgent?.runtimeId]);
 
   useEffect(() => {
     return () => {
@@ -596,12 +723,19 @@ export function ChatPage() {
     abortControllerRef.current = abortController;
 
     try {
+      // 拼接完整模型 ID：模型族[推理强度]
+      const fullModelId = selectedModelFamily && reasoningEffort
+        ? `${selectedModelFamily}[${reasoningEffort}]`
+        : selectedModelFamily || undefined;
       await streamAgentTurn({
+        accessMode,
         conversationId,
         input: text,
-        modelId: selectedModelId,
+        modelId: fullModelId,
         onEvent: (event) => handleAgentEvent(sessionId, event),
         signal: abortController.signal,
+        reasoningEffort,
+        selectedConfig,
         turnId
       });
     } catch (error) {
@@ -689,7 +823,7 @@ export function ChatPage() {
             <OverviewPage />
           ) : (
             <main className="main-panel">
-              <ConversationHeader isRunning={isActiveSessionRunning} title={activeSession.title} />
+              <ConversationHeader agent={sessionAgent} isRunning={isActiveSessionRunning} title={activeSession.title} />
               <MessageList
                 messages={activeMessages}
                 session={activeSession}
@@ -697,15 +831,24 @@ export function ChatPage() {
               />
               <ChatComposer
                 activeTurnId={isActiveSessionRunning ? activeTurnId : null}
+                configOptions={sessionCapabilities?.configOptions ?? []}
                 draft={draft}
-                models={availableModels}
+                accessMode={accessMode}
+                agent={sessionAgent}
+                modes={sessionCapabilities?.modes ?? []}
+                models={sessionCapabilities?.models ?? []}
+                onAccessModeChange={setAccessMode}
+                onConfigChange={(optionId, value) => setSelectedConfig((prev) => ({ ...prev, [optionId]: value }))}
                 onDraftChange={setDraft}
-                onModelChange={setSelectedModelId}
+                onModelFamilyChange={setSelectedModelFamily}
+                onReasoningEffortChange={setReasoningEffort}
                 onResolveApproval={(decision) => void resolveApproval(decision)}
                 onSendMessage={() => void sendMessage()}
                 onStopTurn={() => void stopCurrentTurn()}
                 pendingApproval={activePendingApproval}
-                selectedModelId={selectedModelId}
+                reasoningEffort={reasoningEffort}
+                selectedConfig={selectedConfig}
+                selectedModelFamily={selectedModelFamily}
               />
             </main>
           )}

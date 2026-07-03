@@ -79,7 +79,7 @@ Tauri / Rust backend
 | 模块 | 当前职责 | ACP 路线处理 |
 | --- | --- | --- |
 | `src-tauri/` | 启动、停止、监控 backend sidecar | 暂不改变 |
-| `backend/pc_agent_backend/api/routes/turns.py` | `/api/turns/stream` NDJSON 输出 | 暂不改变 |
+| `backend/code_lite_backend/api/routes/turns.py` | `/api/turns/stream` NDJSON 输出 | 暂不改变 |
 | `AgentAdapter` protocol | `stream_turn()` 与 `cancel_turn()` | 新增 `AcpAgentAdapter` 实现 |
 | `ApprovalBroker` | 等待 UI 审批决定 | 复用，用于 ACP permission request |
 | `ConversationRecorder` | 根据 `AgentEvent` 更新 session/message | 复用 |
@@ -93,7 +93,7 @@ Tauri / Rust backend
 建议新增：
 
 ```text
-backend/pc_agent_backend/agents/acp/
+backend/code_lite_backend/agents/acp/
   __init__.py
   adapter.py
   client.py
@@ -119,15 +119,15 @@ backend/pc_agent_backend/agents/acp/
 同时修改：
 
 ```text
-backend/pc_agent_backend/agents/registry.py
-backend/pc_agent_backend/main.py
-backend/pc_agent_backend/core/config.py
+backend/code_lite_backend/agents/registry.py
+backend/code_lite_backend/main.py
+backend/code_lite_backend/core/config.py
 ```
 
 目标是支持：
 
 ```powershell
-uv run --project backend python -m pc_agent_backend.main --agent-adapter acp
+uv run --project backend python -m code_lite_backend.main --agent-adapter acp
 ```
 
 以及：
@@ -724,7 +724,7 @@ Tauri Desktop
 验证：
 
 ```powershell
-uv run --project backend python -m pc_agent_backend.main --agent-adapter acp
+uv run --project backend python -m code_lite_backend.main --agent-adapter acp
 ```
 
 配合 mock server 跑一轮 `/api/turns/stream`。
@@ -874,7 +874,7 @@ uv run --with agent-client-protocol python .\demo\acp-demo\python_sdk_acp_probe.
 下一步建议只做最小代码验证：
 
 1. 在 `backend/pyproject.toml` 固定加入 `agent-client-protocol`。
-2. 新增 `backend/pc_agent_backend/agents/acp/sdk_client.py`，封装 `spawn_agent_process()`、initialize、session/new、prompt、cancel 和 close。
+2. 新增 `backend/code_lite_backend/agents/acp/sdk_client.py`，封装 `spawn_agent_process()`、initialize、session/new、prompt、cancel 和 close。
 3. 新增 `CodeLiteAcpClient`，实现 `session_update()`、`request_permission()`，把 SDK schema 映射成现有 `AgentEvent` 与 `ApprovalBroker`。
 4. 接入现有 `/api/turns/stream`，先使用 mock ACP agent 验证 allow / reject / usage / stopReason。
 5. 再接真实 `codex-acp`，默认只读、临时 workspace、真实 prompt 需显式开启。

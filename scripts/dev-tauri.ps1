@@ -15,7 +15,7 @@ if (-not (Test-Path $vsDevCmd)) {
 $env:HTTP_PROXY = $Proxy
 $env:HTTPS_PROXY = $Proxy
 $env:ALL_PROXY = $Proxy
-$env:REPAIR_AGENTS_ENV = "DEV"
+$env:CODE_LITE_ENV = "DEV"
 
 $cmd = @(
   "call `"$vsDevCmd`" -arch=x64 -host_arch=x64",

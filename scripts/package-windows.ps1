@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $vsDevCmd = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
-$backendBinaryName = "pc-agent-backend-x86_64-pc-windows-msvc"
+$backendBinaryName = "code-lite-backend-x86_64-pc-windows-msvc"
 $backendBinaryDir = Join-Path $repoRoot "src-tauri\binaries"
 
 if (-not (Test-Path $vsDevCmd)) {
@@ -55,7 +55,7 @@ if (-not $SkipBackendBuild) {
         break
       } catch {
         if ($attempt -eq 5) {
-          throw "Unable to replace backend sidecar binary. Close any running PC Repair Agent/backend process and retry: $backendBinaryPath"
+          throw "Unable to replace backend sidecar binary. Close any running Code Lite/backend process and retry: $backendBinaryPath"
         }
         Start-Sleep -Seconds 1
       }
@@ -85,7 +85,7 @@ if (-not $SkipBackendBuild) {
     (Join-Path $repoRoot "backend\build\pyinstaller"),
     "--specpath",
     (Join-Path $repoRoot "backend\build\spec"),
-    (Join-Path $repoRoot "backend\pc_agent_backend\main.py")
+    (Join-Path $repoRoot "backend\code_lite_backend\main.py")
   )
   uv @pyinstallerArgs
   if ($LASTEXITCODE -ne 0) {

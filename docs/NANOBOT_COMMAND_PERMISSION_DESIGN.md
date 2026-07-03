@@ -100,7 +100,7 @@ tool_events
 session_key
 ```
 
-PC Repair Agent 当前已经在 `backend/pc_agent_backend/agents/nanobot/hooks.py` 中实现 `UiApprovalHook`：
+PC Repair Agent 当前已经在 `backend/code_lite_backend/agents/nanobot/hooks.py` 中实现 `UiApprovalHook`：
 
 1. 遍历 `context.tool_calls`。
 2. 使用 `risk_level(call.name)` 判断风险。
@@ -185,7 +185,7 @@ nanobot `exec` 工具提供了若干安全控制：
 
 ### 4.2 风险等级
 
-建议沿用并扩展当前 `backend/pc_agent_backend/agents/risk.py`：
+建议沿用并扩展当前 `backend/code_lite_backend/agents/risk.py`：
 
 | 风险 | 含义 | 示例 |
 | --- | --- | --- |
@@ -240,7 +240,7 @@ UI 设置权限模式
 建议新增或调整：
 
 ```text
-backend/pc_agent_backend/
+backend/code_lite_backend/
   agents/
     risk.py                    # 风险识别，升级为支持参数级判断
     permissions.py             # 权限模式与决策矩阵
