@@ -46,6 +46,7 @@ docs/
 | `design/0703-AGENT-UNIFIED-ACP.md` | 设计 | 统一前端会话能力、模型、模式和事件格式 |
 | `research/0702-AGENT-ACP-RESEARCH.md` | 调研 | ACP 协议、runtime 分发、认证、权限和配置调研 |
 | `research/0703-BACKEND-ACP-RESEARCH.md` | 调研 | Python backend 侧 ACP client 设计推导和 demo 记录 |
+| `research/0703-VIBEX-ACP-RESEARCH.md` | 调研 | VibeX ACP runtime 生命周期、会话存储和 code-lite 改进方案 |
 
 ### 配套专项
 
