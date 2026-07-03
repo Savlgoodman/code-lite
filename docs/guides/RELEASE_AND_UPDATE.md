@@ -2,7 +2,7 @@
 
 本文记录 code-lite 当前 Windows 原型阶段的版本号、打包和更新策略。
 
-完整编译和发布步骤见 `docs/BUILD_AND_RELEASE.md`。
+完整编译和发布步骤见 `docs/guides/BUILD_AND_RELEASE.md`。
 
 ## 版本号
 

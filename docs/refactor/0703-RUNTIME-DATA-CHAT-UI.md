@@ -1,6 +1,6 @@
 # 运行时数据与聊天 UI 优化设计
 
-> 历史资料：本文记录早期运行时数据目录、聊天 UI 和审批卡片优化方案。code-lite 后续应保留其中关于会话持久化和事件驱动 UI 的有效结论，但产品命名、ACP 主线、推荐入口和运行时目录以当前 `docs/README.md`、`docs/PRD.md`、`docs/ARCHITECTURE.md` 和 `docs/PROJECT_STRUCTURE.md` 为准。
+> 历史资料：本文记录早期运行时数据目录、聊天 UI 和审批卡片优化方案。code-lite 后续应保留其中关于会话持久化和事件驱动 UI 的有效结论，但产品命名、ACP 主线、推荐入口和运行时目录以当前 `docs/README.md`、`docs/guides/PRD.md`、`docs/architecture/ARCHITECTURE.md` 和 `docs/architecture/PROJECT_STRUCTURE.md` 为准。
 
 本文记录权限确认卡片、工具调用卡片、运行时配置目录和消息持久化的优化方案，以及当前已落地的后端拆分结构。
 

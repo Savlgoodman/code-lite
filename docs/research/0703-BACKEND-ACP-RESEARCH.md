@@ -6,7 +6,7 @@
 
 因此新的判断是：短期不重写 backend 技术栈，而是在当前 Python Agent Hub 中新增 `acp` adapter。
 
-后续实现以 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` 为主入口。本文保留 Python backend 侧设计推导、VibeX 参考和 Python SDK demo 记录。
+后续实现以 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` 为主入口。本文保留 Python backend 侧设计推导、VibeX 参考和 Python SDK demo 记录。
 
 ## 1. 结论
 

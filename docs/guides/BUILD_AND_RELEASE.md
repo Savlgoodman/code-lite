@@ -140,4 +140,4 @@ code-lite-backend.exe
 
 兼容期需要继续读取旧 `%USERPROFILE%\.repair-agent` 数据，并提供一次性迁移或兼容读取策略。
 
-自动更新规划见 `docs/RELEASE_AND_UPDATE.md`。
+自动更新规划见 `docs/guides/RELEASE_AND_UPDATE.md`。

@@ -858,8 +858,8 @@ legacy nanobot adapter 可以继续实现 `stream_turn()`、`cancel_turn()` 和�
 
 ## 11. 参考
 
-1. `docs/ACP_ADAPTER_DESIGN.md` — ACP 协议调研
-2. `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` — 当前 ACP 实现设计
+1. `docs/research/0702-AGENT-ACP-RESEARCH.md` — ACP 协议调研
+2. `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` — 当前 ACP 实现设计
 3. `docs/README.md` — 当前文档索引和主线说明
 4. ACP protocol v1: https://agentclientprotocol.com/protocol/v1/
 5. ACP session config options: https://agentclientprotocol.com/protocol/v1/session-config-options.md

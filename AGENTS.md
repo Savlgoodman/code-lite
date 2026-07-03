@@ -26,7 +26,7 @@
 PowerShell 读取文件时建议：
 
 ```powershell
-Get-Content -Encoding UTF8 .\docs\PRD.md
+Get-Content -Encoding UTF8 .\docs\guides\PRD.md
 ```
 
 PowerShell 写入文件时必须显式指定 UTF-8：
@@ -38,8 +38,8 @@ Set-Content -Encoding UTF8 .\path\to\file.md $content
 Python 读写文件时必须显式指定编码：
 
 ```python
-Path("docs/PRD.md").read_text(encoding="utf-8")
-Path("docs/PRD.md").write_text(content, encoding="utf-8")
+Path("docs/guides/PRD.md").read_text(encoding="utf-8")
+Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 ```
 
 手动编辑文件时，也应确认编辑器保存编码为 UTF-8。
@@ -51,28 +51,30 @@ Path("docs/PRD.md").write_text(content, encoding="utf-8")
 | 路径 | 用途 |
 |------|------|
 | `docs/README.md` | 文档索引，说明当前主线、保留文档和已清理旧路线 |
-| `docs/PRD.md` | 产品需求文档，记录 code-lite 的产品定位、核心功能、MVP 范围和路线规划 |
-| `docs/ARCHITECTURE.md` | 架构设计文档，记录 Tauri、Python Agent Hub、多 Agent Adapter、远程同步和权限边界 |
-| `docs/PROJECT_STRUCTURE.md` | 项目目录结构规划，记录目标代码目录、职责边界和命名迁移策略 |
-| `docs/UI_DEVELOPMENT.md` | UI 与 Tauri 桌面壳开发文档，记录环境依赖、启动流程、目录职责和常见问题 |
-| `docs/DEVELOPMENT_WORKFLOW.md` | 开发流程规范，记录 dev 集成、分支命名、master 使用范围、变基合并和版本升级要求 |
-| `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` | ACP Agent Adapter 实施设计，记录 Codex、Claude Code、opencode 的主线接入方案 |
-| `docs/UNIFIED_ACP_ADAPTER_DESIGN.md` | 统一前端交互协议设计，记录 session capabilities、模型、模式和事件映射 |
-| `docs/REMOTE_SYNC_DESIGN.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
-| `docs/MODEL_PROVIDER_CONFIGURATION_DESIGN.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
-| `docs/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
+| `docs/guides/PRD.md` | 产品需求文档，记录 code-lite 的产品定位、核心功能、MVP 范围和路线规划 |
+| `docs/architecture/ARCHITECTURE.md` | 架构设计文档，记录 Tauri、Python Agent Hub、多 Agent Adapter、远程同步和权限边界 |
+| `docs/architecture/PROJECT_STRUCTURE.md` | 项目目录结构规划，记录目标代码目录、职责边界和命名迁移策略 |
+| `docs/guides/UI_DEVELOPMENT.md` | UI 与 Tauri 桌面壳开发文档，记录环境依赖、启动流程、目录职责和常见问题 |
+| `docs/development/DEVELOPMENT_WORKFLOW.md` | 开发流程规范，记录 dev 集成、分支命名、master 使用范围、变基合并和版本升级要求 |
+| `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` | ACP Agent Adapter 实施设计，记录 Codex、Claude Code、opencode 的主线接入方案 |
+| `docs/design/0703-AGENT-UNIFIED-ACP.md` | 统一前端交互协议设计，记录 session capabilities、模型、模式和事件映射 |
+| `docs/design/0702-REMOTE-SYNC.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
+| `docs/design/0703-RUNTIME-MODEL-PROVIDER.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
+| `docs/guides/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
 | `demo/acp-demo/README.md` | ACP mock、Python SDK probe 和 Codex ACP smoke 使用说明 |
 
 阅读建议：
 
-1. 做产品需求相关任务，先读 `docs/README.md` 和 `docs/PRD.md`。
-2. 做架构、模块边界相关任务，先读 `docs/ARCHITECTURE.md` 和 `docs/PROJECT_STRUCTURE.md`。
-3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/UI_DEVELOPMENT.md`。
-4. 做 Codex、Claude Code、opencode、ACP adapter 和 runtime 事件相关任务，先读 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` 和 `docs/UNIFIED_ACP_ADAPTER_DESIGN.md`。
-5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/REMOTE_SYNC_DESIGN.md`。
-6. 做模型供应商、模型选择和 runtime 配置相关任务，先读 `docs/MODEL_PROVIDER_CONFIGURATION_DESIGN.md`。
-7. 做 legacy nanobot demo 相关任务，只参考 `demo/nanobot-demo/README.md` 和当前代码，不把 nanobot 作为新功能主线。
-8. 做功能开发、Bug 修复、性能优化、重构或发布合并前，先读 `docs/DEVELOPMENT_WORKFLOW.md`。
+1. 做产品需求相关任务，先读 `docs/README.md` 和 `docs/guides/PRD.md`。
+2. 做架构、模块边界相关任务，先读 `docs/architecture/ARCHITECTURE.md` 和 `docs/architecture/PROJECT_STRUCTURE.md`。
+3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/guides/UI_DEVELOPMENT.md`。
+4. 做 Codex、Claude Code、opencode、ACP adapter 和 runtime 事件相关任务，先读 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` 和 `docs/design/0703-AGENT-UNIFIED-ACP.md`。
+5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/design/0702-REMOTE-SYNC.md`。
+6. 做模型供应商、模型选择和 runtime 配置相关任务，先读 `docs/design/0703-RUNTIME-MODEL-PROVIDER.md`。
+7. 做运行时数据、聊天 UI、迁移或重构相关任务，先读 `docs/refactor/0703-RUNTIME-DATA-CHAT-UI.md`。
+8. 做 ACP 协议、Python backend ACP client 或 SDK 探针相关调研，先读 `docs/research/0702-AGENT-ACP-RESEARCH.md` 和 `docs/research/0703-BACKEND-ACP-RESEARCH.md`。
+9. 做 legacy nanobot demo 相关任务，只参考 `demo/nanobot-demo/README.md` 和当前代码，不把 nanobot 作为新功能主线。
+10. 做功能开发、Bug 修复、性能优化、重构或发布合并前，先读 `docs/development/DEVELOPMENT_WORKFLOW.md`。
 
 ## 开发与启动入口
 
@@ -116,7 +118,7 @@ npm run backend:dev
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-tauri.ps1 -Proxy http://127.0.0.1:7899
 ```
 
-完整开发步骤、环境依赖、排错说明和 UI 结构说明见 `docs/UI_DEVELOPMENT.md`。
+完整开发步骤、环境依赖、排错说明和 UI 结构说明见 `docs/guides/UI_DEVELOPMENT.md`。
 
 ## 分支开发流程
 
@@ -152,7 +154,7 @@ perf/events-0701-stream-cache
 
 每次 `dev` 合并到 `master` 后，必须立即进行一次独立版本升级提交。版本升级使用统一入口，例如 `npm run version:set -- 0.1.3` 或修改 `VERSION` 后运行 `npm run version:sync`。版本提交只包含版本相关文件，不混入功能代码。
 
-完整流程见 `docs/DEVELOPMENT_WORKFLOW.md`。
+完整流程见 `docs/development/DEVELOPMENT_WORKFLOW.md`。
 
 ## 提交规范
 

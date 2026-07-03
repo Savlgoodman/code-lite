@@ -4,7 +4,7 @@
 
 本文记录 code-lite 使用 ACP 作为 Claude Code、Codex、opencode 统一 adapter 路线的调研结论和落地建议。后续实现以 ACP 主线为准：当 runtime 提供 ACP server 时，code-lite 作为 ACP client 统一控制 agent。
 
-后续实现以 `docs/ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md` 为主入口。本文保留为 ACP 协议、runtime 分发、权限和配置疑虑的调研记录。
+后续实现以 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` 为主入口。本文保留为 ACP 协议、runtime 分发、权限和配置疑虑的调研记录。
 
 ## 1. 总结
 

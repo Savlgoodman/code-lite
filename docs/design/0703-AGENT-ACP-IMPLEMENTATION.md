@@ -6,9 +6,9 @@
 
 相关背景文档：
 
-1. `docs/ACP_ADAPTER_DESIGN.md`：ACP 协议与 runtime 安装、配置、权限问题的调研。
-2. `docs/PYTHON_BACKEND_ACP_ADAPTER_DESIGN.md`：保留 Python backend 的 ACP adapter 架构。
-3. `docs/UNIFIED_ACP_ADAPTER_DESIGN.md`：统一前端会话能力、模型、模式和事件格式。
+1. `docs/research/0702-AGENT-ACP-RESEARCH.md`：ACP 协议与 runtime 安装、配置、权限问题的调研。
+2. `docs/research/0703-BACKEND-ACP-RESEARCH.md`：保留 Python backend 的 ACP adapter 架构。
+3. `docs/design/0703-AGENT-UNIFIED-ACP.md`：统一前端会话能力、模型、模式和事件格式。
 4. `demo/acp-demo/python_sdk_acp_probe.py`：官方 Python SDK 与真实 `codex-acp` 探针。
 
 ## 1. 技术路线定稿

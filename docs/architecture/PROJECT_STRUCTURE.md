@@ -30,22 +30,29 @@ code-lite/
 ```text
 docs/
   README.md
-  PRD.md
-  ARCHITECTURE.md
-  PROJECT_STRUCTURE.md
-  UI_DEVELOPMENT.md
-  DEVELOPMENT_WORKFLOW.md
-  ACP_AGENT_ADAPTER_IMPLEMENTATION_DESIGN.md
-  UNIFIED_ACP_ADAPTER_DESIGN.md
-  ACP_ADAPTER_DESIGN.md
-  MODEL_PROVIDER_CONFIGURATION_DESIGN.md
-  REMOTE_SYNC_DESIGN.md
-  ADR/
+  architecture/
+    ARCHITECTURE.md
+    PROJECT_STRUCTURE.md
+  design/
+    0702-REMOTE-SYNC.md
+    0703-AGENT-ACP-IMPLEMENTATION.md
+    0703-AGENT-UNIFIED-ACP.md
+    0703-RUNTIME-MODEL-PROVIDER.md
+  development/
+    DEVELOPMENT_WORKFLOW.md
+  guides/
+    PRD.md
+    UI_DEVELOPMENT.md
+    BUILD_AND_RELEASE.md
+    RELEASE_AND_UPDATE.md
+  refactor/
+    0703-RUNTIME-DATA-CHAT-UI.md
+  research/
+    0702-AGENT-ACP-RESEARCH.md
+    0703-BACKEND-ACP-RESEARCH.md
 ```
 
-`ADR/` 用于保存架构决策记录。当某个技术选择足够重要，例如“远程同步采用 WebSocket 还是 SSE”，就可以写一篇 ADR。
-
-历史维修、nanobot 专项和 native SDK 直连文档不再作为产品主方向入口。新增文档应优先围绕 ACP runtime、远程同步、权限审批、会话事件和运行时配置展开。
+分类和命名规则以 `docs/README.md` 为准。历史维修、nanobot 专项和 native SDK 直连文档不再作为产品主方向入口。新增文档应优先围绕 ACP runtime、远程同步、权限审批、会话事件和运行时配置展开。
 
 ### `ui/`
 
