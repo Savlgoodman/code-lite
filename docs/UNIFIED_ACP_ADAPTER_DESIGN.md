@@ -536,7 +536,7 @@ const [selectedConfig, setSelectedConfig] = useState<Record<string, string | num
 ### 5.1 目录结构
 
 ```text
-backend/pc_agent_backend/
+backend/code_lite_backend/
   ├── agents/
   │   ├── __init__.py
   │   ├── registry.py                 # AgentAdapter 注册表

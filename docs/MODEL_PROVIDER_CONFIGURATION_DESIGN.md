@@ -38,7 +38,7 @@
 
 ### 3.1 配置文件
 
-当前 backend 默认通过 `backend/pc_agent_backend/core/config.py` 解析配置：
+当前 backend 默认通过 `backend/code_lite_backend/core/config.py` 解析配置：
 
 ```text
 REPAIR_AGENTS_ENV=DEV -> <repo>/data/config/nanobot_config.json
@@ -80,7 +80,7 @@ REPAIR_AGENTS_ENV=DEV -> <repo>/data/config/nanobot_config.json
 
 ### 3.2 设置页后端接口
 
-当前 `backend/pc_agent_backend/api/routes/settings.py` 已有两个模型提供商接口：
+当前 `backend/code_lite_backend/api/routes/settings.py` 已有两个模型提供商接口：
 
 1. `POST /api/settings/model-providers/models`：接收 `baseUrl` 和 `apiKey`，尝试请求 `<baseUrl>/models` 或 `<baseUrl>/v1/models`。
 2. `POST /api/settings/model-providers/default`：把连接信息固定写入 `providers.custom`，把第一个模型固定写成 `modelPresets.pcAgentDefault`，并设置为 `agents.defaults.modelPreset`。
@@ -114,7 +114,7 @@ REPAIR_AGENTS_ENV=DEV -> <repo>/data/config/nanobot_config.json
 
 ### 3.4 nanobot adapter
 
-当前 `backend/pc_agent_backend/agents/nanobot/adapter.py` 每一轮都创建新的 `Nanobot.from_config(...)`，并调用：
+当前 `backend/code_lite_backend/agents/nanobot/adapter.py` 每一轮都创建新的 `Nanobot.from_config(...)`，并调用：
 
 ```python
 run = await bot.run_streamed(
@@ -542,7 +542,7 @@ PATCH /api/settings/models/default
 
 ### 8.1 AgentRunRequest 扩展
 
-`backend/pc_agent_backend/schemas/agent.py` 建议扩展：
+`backend/code_lite_backend/schemas/agent.py` 建议扩展：
 
 ```python
 @dataclass(frozen=True)

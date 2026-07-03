@@ -1,8 +1,8 @@
 {
   "$schema": "../ui/node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "PC Repair Agent",
+  "productName": "Code Lite",
   "version": "0.1.4",
-  "identifier": "com.pcrepair.agent",
+  "identifier": "com.codelite.app",
   "build": {
     "beforeDevCommand": "npm run dev --prefix ui -- --host 127.0.0.1 --port 1420 --strictPort",
     "devUrl": "http://127.0.0.1:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "PC Repair Agent",
+        "title": "Code Lite",
         "width": 1200,
         "height": 756,
         "minWidth": 900,

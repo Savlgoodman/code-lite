@@ -610,13 +610,13 @@ uv run python .\cli_approval_demo.py --config .\nanobot_config.local.json
 ```text
 backend/
   pyproject.toml
-  pc_agent_backend/
+  code_lite_backend/
     runtime/
     nanobot_tools/
     adapters/
 ```
 
-自定义 Tool 放在 `pc_agent_backend.nanobot_tools` 下，并在 `backend/pyproject.toml` 注册 entry point。
+自定义 Tool 放在 `code_lite_backend.nanobot_tools` 下，并在 `backend/pyproject.toml` 注册 entry point。
 
 ### 6.2 nanobot 配置建议
 

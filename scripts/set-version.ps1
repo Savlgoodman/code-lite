@@ -66,12 +66,12 @@ Update-RegexVersion `
 
 Update-RegexVersion `
   -Path (Join-Path $repoRoot "ui\package-lock.json") `
-  -Pattern '(?s)^(\{\s*"name"\s*:\s*"pc-agent-ui",\s*"version"\s*:\s*)".+?"' `
+  -Pattern '(?s)^(\{\s*"name"\s*:\s*"code-lite-ui",\s*"version"\s*:\s*)".+?"' `
   -Replacement "`${1}`"$Version`""
 
 Update-RegexVersion `
   -Path (Join-Path $repoRoot "ui\package-lock.json") `
-  -Pattern '(?s)(\s*""\s*:\s*\{\s*"name"\s*:\s*"pc-agent-ui",\s*"version"\s*:\s*)".+?"' `
+  -Pattern '(?s)(\s*""\s*:\s*\{\s*"name"\s*:\s*"code-lite-ui",\s*"version"\s*:\s*)".+?"' `
   -Replacement "`${1}`"$Version`""
 
 Update-RegexVersion `
@@ -86,7 +86,7 @@ Update-RegexVersion `
 
 Update-RegexVersion `
   -Path (Join-Path $repoRoot "src-tauri\Cargo.lock") `
-  -Pattern '(?ms)(\[\[package\]\]\s+name = "pc-repair-agent"\s+version = )".+?"' `
+  -Pattern '(?ms)(\[\[package\]\]\s+name = "code-lite"\s+version = )".+?"' `
   -Replacement "`${1}`"$Version`""
 
 Update-RegexVersion `
@@ -96,16 +96,16 @@ Update-RegexVersion `
 
 Update-RegexVersion `
   -Path (Join-Path $repoRoot "backend\uv.lock") `
-  -Pattern '(?ms)(\[\[package\]\]\s+name = "pc-agent-backend"\s+version = )".+?"' `
+  -Pattern '(?ms)(\[\[package\]\]\s+name = "code-lite-backend"\s+version = )".+?"' `
   -Replacement "`${1}`"$Version`""
 
 Update-RegexVersion `
-  -Path (Join-Path $repoRoot "backend\pc_agent_backend\version.py") `
+  -Path (Join-Path $repoRoot "backend\code_lite_backend\version.py") `
   -Pattern '(?m)^APP_VERSION = ".+?"' `
   -Replacement "APP_VERSION = `"$Version`""
 
 Update-RegexVersion `
-  -Path (Join-Path $repoRoot "backend\pc_agent_backend\version.py") `
+  -Path (Join-Path $repoRoot "backend\code_lite_backend\version.py") `
   -Pattern '(?m)^BACKEND_VERSION = ".+?"' `
   -Replacement "BACKEND_VERSION = `"$Version`""
 

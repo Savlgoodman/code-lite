@@ -120,7 +120,7 @@ git switch master
 git merge --ff-only dev
 npm run version:set -- 0.1.3
 git status --short
-git add VERSION package.json ui/package.json ui/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/pc_agent_backend/version.py
+git add VERSION package.json ui/package.json ui/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
 git commit -m "chore: 升级版本到 0.1.3"
 ```
 

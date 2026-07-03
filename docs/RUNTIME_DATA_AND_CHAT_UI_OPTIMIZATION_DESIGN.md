@@ -10,7 +10,7 @@
 
 1. UI 通过 `ui/src/services/agentClient.ts` 调用 Tauri `ensure_backend`，再读取 Python backend 的 NDJSON 流。
 2. `ui/src/App.tsx` 直接维护会话、消息、工具调用和审批状态。
-3. 会话与消息暂存在浏览器 `localStorage`，键名为 `pc-agent-ui-state-v2`。
+3. 会话与消息暂存在浏览器 `localStorage`，键名为 `code-lite-ui-state-v2`。
 4. 权限确认卡片目前渲染在消息列表底部，和输入框没有形成固定关联。
 5. 工具调用卡片目前直接内联展示，完成后仍展开显示一个 `pre`，且只展示参数或结果中的一种。
 6. backend 曾默认读取仓库内配置文件，导致运行时配置和源码目录耦合。
@@ -64,7 +64,7 @@ Windows 示例：
 
 ```text
 REPAIR_AGENTS_ENV=DEV
-H:\pc-repair-agent\data
+H:\code-lite-agent\data
 ```
 
 普通环境示例：
@@ -519,8 +519,8 @@ ToolCallGroup.anchorOffset = firstTool.anchorOffset
 {
   "ok": true,
   "env": "DEV",
-  "dataDir": "H:\\pc-repair-agent\\data",
-  "configPath": "H:\\pc-repair-agent\\data\\config\\nanobot_config.json",
+  "dataDir": "H:\\code-lite-agent\\data",
+  "configPath": "H:\\code-lite-agent\\data\\config\\nanobot_config.json",
   "configExists": true,
   "apiKeyPresent": false
 }
@@ -623,7 +623,7 @@ AgentEvent
 当前后端已经按 FastAPI 项目结构拆分：
 
 ```text
-backend/pc_agent_backend/
+backend/code_lite_backend/
   main.py                 # CLI 参数解析和 uvicorn 启动
   app.py                  # FastAPI app 工厂、CORS 和 AppServices 装配
   api/
@@ -729,7 +729,7 @@ Agent adapter 边界：
 ## 12. 待确认问题
 
 1. 自动创建的最小配置文件名是否确定为 `config/nanobot_config.json`，还是沿用 `nanobot_config.local.json`。
-2. 普通环境目录名是否固定为 `~/.repair-agent`，还是后续需要和应用名称保持一致，例如 `~/.pc-repair-agent`。
+2. 普通环境目录名是否固定为 `~/.repair-agent`，还是后续需要和应用名称保持一致，例如 `~/.code-lite-agent`。
 3. `events.ndjson` 是否第一阶段就要实现，还是先只实现 `session.json` 和 `messages.json`。
 4. 旧 `localStorage` 会话是否需要一次性迁移，还是可以在开发阶段直接丢弃。
 5. 工具组折叠状态是否需要持久化到 `messages.json`，还是每次加载后根据工具状态重新计算。

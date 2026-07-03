@@ -38,7 +38,7 @@
 ├── backend/
 │   ├── pyproject.toml        # Python backend 依赖
 │   ├── uv.lock               # uv 锁文件
-│   └── pc_agent_backend/     # FastAPI backend 源码，历史包名后续可迁移
+│   └── code_lite_backend/     # FastAPI backend 源码，历史包名后续可迁移
 │       ├── main.py           # CLI/uvicorn 启动入口
 │       ├── app.py            # FastAPI app 工厂
 │       ├── api/              # health、conversation、turn、approval、settings 路由
@@ -136,7 +136,7 @@ npm run tauri:dev:win
 5. Tauri 自动启动 Vite，再启动桌面窗口。
 6. UI 首次发送消息时，Tauri 会通过 `ensure_backend` 启动 Python backend。
 
-开发态默认不声明 Tauri `externalBin`，因此不需要先生成 `src-tauri/binaries/pc-agent-backend-x86_64-pc-windows-msvc.exe`。打包时由 `src-tauri/tauri.release.conf.json` 注入 backend sidecar 配置，产物名后续会随 code-lite 命名迁移。
+开发态默认不声明 Tauri `externalBin`，因此不需要先生成 `src-tauri/binaries/code-lite-backend-x86_64-pc-windows-msvc.exe`。打包时由 `src-tauri/tauri.release.conf.json` 注入 backend sidecar 配置，产物名后续会随 code-lite 命名迁移。
 
 启动成功后，开发服务器默认监听：
 
@@ -173,7 +173,7 @@ data/config/nanobot_config.json
 如果需要指定配置或切换 adapter：
 
 ```powershell
-uv run --project backend python -m pc_agent_backend.main --config .\demo\nanobot_config.local.json --workspace . --agent-adapter nanobot
+uv run --project backend python -m code_lite_backend.main --config .\demo\nanobot_config.local.json --workspace . --agent-adapter nanobot
 ```
 
 adapter 目标值包括 `nanobot`、`codex`、`claude_code`，后续会加入 `opencode`。
@@ -208,7 +208,7 @@ cargo check
 Python backend 入口检查：
 
 ```powershell
-uv run --project backend python -m pc_agent_backend.main --help
+uv run --project backend python -m code_lite_backend.main --help
 ```
 
 ## 日志位置
@@ -336,7 +336,7 @@ npm exec --prefix ui -- tauri icon .\src-tauri\icons\app-icon.svg --output .\src
 开发模式不应依赖 PyInstaller 生成的 backend sidecar。如果仍看到类似以下错误：
 
 ```text
-resource path `binaries\pc-agent-backend-x86_64-pc-windows-msvc.exe` doesn't exist
+resource path `binaries\code-lite-backend-x86_64-pc-windows-msvc.exe` doesn't exist
 ```
 
 请确认启动命令使用的是默认开发配置，例如 `npm run tauri:dev:win` 或 `npm run tauri:dev`，不要在开发命令里额外传入 `src-tauri/tauri.release.conf.json`。
@@ -394,5 +394,5 @@ Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
 ```powershell
 git status --short
 npm run ui:build
-uv run --project backend python -m pc_agent_backend.main --help
+uv run --project backend python -m code_lite_backend.main --help
 ```

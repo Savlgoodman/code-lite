@@ -1,12 +1,12 @@
 [package]
-name = "pc-repair-agent"
+name = "code-lite"
 version = "0.1.4"
-description = "PC Repair Agent desktop shell"
-authors = ["PC Repair Agent"]
+description = "Code Lite desktop shell"
+authors = ["Code Lite"]
 edition = "2021"
 
 [lib]
-name = "pc_repair_agent_lib"
+name = "code_lite_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

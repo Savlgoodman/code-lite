@@ -220,7 +220,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--session",
-        default="pc-agent-demo",
+        default="code-lite-demo",
         help="会话 key",
     )
     return parser.parse_args()

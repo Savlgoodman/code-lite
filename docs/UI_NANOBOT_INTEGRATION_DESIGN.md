@@ -170,7 +170,7 @@ MVP 职责：
 ```text
 backend/
   pyproject.toml
-  pc_agent_backend/
+  code_lite_backend/
     __init__.py
     main.py
     protocol/

@@ -9,7 +9,7 @@
 当前 backend 已有统一入口：
 
 ```text
-backend/pc_agent_backend/agents/
+backend/code_lite_backend/agents/
   registry.py
   nanobot/
   codex/

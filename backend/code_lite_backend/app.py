@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from code_lite_backend.agents import create_agent_adapter
+from code_lite_backend.api.router import api_router
+from code_lite_backend.core.config import RuntimeConfig
+from code_lite_backend.services.approvals import ApprovalBroker
+from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigStore
+from code_lite_backend.services.conversation_recorder import ConversationRecorder
+from code_lite_backend.services.model_config import ModelConfigStore
+from code_lite_backend.services.runtime import AppServices
+from code_lite_backend.storage.conversations import ConversationStore
+from code_lite_backend.version import BACKEND_VERSION
+
+
+def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
+    app = FastAPI(title="Code Lite Backend", version=BACKEND_VERSION)
+    approvals = ApprovalBroker()
+    conversation_store = ConversationStore(runtime_config.record_dir)
+    model_config_store = ModelConfigStore(runtime_config)
+    agent_runtime_config_store = AgentRuntimeConfigStore(runtime_config)
+    services = AppServices(
+        runtime_config=runtime_config,
+        workspace=workspace,
+        approvals=approvals,
+        conversation_store=conversation_store,
+        conversation_recorder=ConversationRecorder(conversation_store),
+        model_config_store=model_config_store,
+        agent_runtime_config_store=agent_runtime_config_store,
+        agent_adapter=create_agent_adapter(
+            runtime_config=runtime_config,
+            approvals=approvals,
+            agent_runtime_config_store=agent_runtime_config_store,
+        ),
+    )
+    app.state.services = services
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(api_router)
+    return app
