@@ -35,6 +35,7 @@ import type {
   Session,
   SessionCapabilities,
   SessionConfigOption,
+  SessionModel,
   ToolCallItem
 } from "../types";
 import "./ChatPage.css";
@@ -156,13 +157,12 @@ export function ChatPage() {
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
-  const [availableModels, setAvailableModels] = useState<ChatModelOption[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
   const [accessMode, setAccessMode] = useState("read-only");
-  const [reasoningEffort, setReasoningEffort] = useState("none");
+  const [reasoningEffort, setReasoningEffort] = useState("xhigh");
   const [sessionCapabilities, setSessionCapabilities] = useState<SessionCapabilities | null>(null);
   const [selectedConfig, setSelectedConfig] = useState<Record<string, string | number | boolean>>({});
+  const [selectedModelFamily, setSelectedModelFamily] = useState<string>("");
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
@@ -252,55 +252,39 @@ export function ChatPage() {
 
     async function loadCapabilities() {
       try {
-        // 统一通过 SessionCapabilities 加载所有 agent 元数据
         const probeId = activeSession.id && !isDraftSessionId(activeSession.id)
           ? activeSession.id
           : "__probe__";
         const caps = await initializeSession(probeId);
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
         setSessionCapabilities(caps);
 
-        // 从 capabilities 构建模型列表（兼容 agent-runtime 和 product-config 来源）
-        const modelOptions: ChatModelOption[] = caps.models.map((m) => ({
-          id: m.id,
-          label: m.label,
-          model: m.id,
-          providerId: caps.agent.id,
-          providerName: caps.agent.label,
-          source: caps.agent.adapterKind === "acp" ? "agent-runtime" as const : "product-config" as const,
-        }));
-        setAvailableModels(modelOptions);
-        setSelectedModelId((current) => {
-          if (current && modelOptions.some((model) => model.id === current)) {
-            return current;
-          }
-          const currentModel = caps.models.find((m) => m.isCurrent);
-          if (currentModel && modelOptions.some((model) => model.id === currentModel.id)) {
-            return currentModel.id;
-          }
-          return modelOptions[0]?.id ?? null;
-        });
-
-        // 从 capabilities 初始化选中值
+        // 初始化默认选中值
         const defaultMode = caps.modes.find((m) => m.isDefault);
-        if (defaultMode) {
-          setAccessMode(defaultMode.id);
-        }
+        if (defaultMode) setAccessMode(defaultMode.id);
+
+        // 从 configOptions 提取默认值
         const configDefaults: Record<string, string | number | boolean> = {};
         for (const opt of caps.configOptions) {
           if (opt.currentValue != null) {
             configDefaults[opt.id] = opt.currentValue;
           }
         }
-        if (Object.keys(configDefaults).length > 0) {
-          setSelectedConfig(configDefaults);
+        if (Object.keys(configDefaults).length > 0) setSelectedConfig(configDefaults);
+
+        // 提取推理强度
+        const reasoningOpt = caps.configOptions.find((o) => o.id === "reasoning_effort");
+        if (reasoningOpt?.currentValue) setReasoningEffort(String(reasoningOpt.currentValue));
+
+        // 提取模型族：从当前模型 ID 或第一个模型中提取
+        const currentModel = caps.models.find((m) => m.isCurrent) ?? caps.models[0];
+        if (currentModel) {
+          const familyMatch = currentModel.id.match(/^(.*?)\[/);
+          setSelectedModelFamily(familyMatch ? familyMatch[1] : currentModel.id);
         }
       } catch (error) {
         console.error("Failed to load session capabilities:", error);
         if (!cancelled) {
-          // Fallback: 从旧的 runtime settings 构建 SessionCapabilities
           try {
             const runtimeSettings = await loadAgentRuntimeSettings();
             if (cancelled) return;
@@ -311,11 +295,10 @@ export function ChatPage() {
                 id: runtime.adapter,
                 label: runtime.label,
                 mode: runtime.mode,
-                runtimeId: runtime.id
+                runtimeId: runtime.id,
               });
               setAccessMode(runtime.mode || "read-only");
 
-              // 从 runtime settings 构建 fallback SessionCapabilities
               const fallbackModes = runtime.id === "codex"
                 ? [
                     { id: "read-only", label: "只读", isDefault: runtime.mode === "read-only" },
@@ -330,63 +313,40 @@ export function ChatPage() {
                     label: "思考强度",
                     type: "enum" as const,
                     values: ["none", "low", "medium", "high", "xhigh"],
-                    currentValue: "none",
-                    valueLabels: { none: "无思考", low: "低思考", medium: "中思考", high: "高思考", xhigh: "超高思考" },
+                    currentValue: "xhigh",
+                    valueLabels: { none: "无", low: "低", medium: "中", high: "高", xhigh: "超高" },
                   }]
                 : [];
 
+              // 加载模型并构建 models 列表
+              let fallbackModels: SessionModel[] = [];
+              const agentId = runtime.adapter;
+              if (agentId === "codex") {
+                try {
+                  const runtimeModels = await loadAgentRuntimeModels(runtime.id ?? "codex");
+                  fallbackModels = runtimeModels.models.map((m: AgentRuntimeModel) => ({
+                    id: m.id, label: m.label, description: m.description,
+                    isCurrent: m.id === runtimeModels.currentModelId,
+                  }));
+                } catch { /* ignore */ }
+              }
+
               setSessionCapabilities({
                 agent: {
-                  id: runtime.adapter,
-                  label: runtime.label,
-                  adapterKind: "acp" as const,
-                  status: runtime.status || "available",
+                  id: runtime.adapter, label: runtime.label,
+                  adapterKind: "acp" as const, status: runtime.status || "available",
                 },
                 modes: fallbackModes,
-                models: [],
+                models: fallbackModels,
                 configOptions: fallbackConfigOptions,
               });
-            }
 
-            // 加载模型（保持旧路径兼容）
-            const agentId = runtime?.adapter ?? runtimeSettings.activeAdapter;
-            if (agentId === "codex") {
-              const agentForModels: AgentSummary = {
-                configMode: runtime?.configMode,
-                id: agentId,
-                label: runtime?.label ?? "Codex",
-                mode: runtime?.mode,
-                runtimeId: runtime?.id ?? "codex"
-              };
-              const runtimeModels = await loadAgentRuntimeModels(runtime?.id ?? "codex");
-              const modelOptions = runtimeModelOptions(agentForModels, runtimeModels.models);
-              if (cancelled) return;
-              setAvailableModels(modelOptions);
-              setSelectedModelId((current) => {
-                if (current && modelOptions.some((model) => model.id === current)) return current;
-                if (runtimeModels.currentModelId && modelOptions.some((model) => model.id === runtimeModels.currentModelId)) return runtimeModels.currentModelId;
-                return modelOptions[0]?.id ?? null;
-              });
-
-              // 补充 fallback capabilities 中的 models
-              setSessionCapabilities((prev) => prev ? {
-                ...prev,
-                models: runtimeModels.models.map((m) => ({
-                  id: m.id,
-                  label: m.label,
-                  description: m.description,
-                  isCurrent: m.id === runtimeModels.currentModelId,
-                })),
-              } : prev);
-            } else {
-              const modelSettings = await loadModelSettings();
-              if (cancelled) return;
-              const modelOptions = configuredModelOptions(modelSettings.models);
-              setAvailableModels(modelOptions);
-              setSelectedModelId((current) => {
-                if (current && modelOptions.some((model) => model.id === current)) return current;
-                return modelSettings.effectiveDefaultModelId ?? modelOptions[0]?.id ?? null;
-              });
+              // 设置模型族
+              if (fallbackModels.length > 0) {
+                const currentModel = fallbackModels.find((m) => m.isCurrent) ?? fallbackModels[0];
+                const familyMatch = currentModel.id.match(/^(.*?)\[/);
+                setSelectedModelFamily(familyMatch ? familyMatch[1] : currentModel.id);
+              }
             }
           } catch (fallbackError) {
             console.error("Fallback model loading also failed:", fallbackError);
@@ -397,17 +357,8 @@ export function ChatPage() {
 
     void loadCapabilities();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [activeView, activeSession.id, sessionAgent?.id, sessionAgent?.runtimeId]);
-
-  useEffect(() => {
-    const selected = availableModels.find((model) => model.id === selectedModelId);
-    if (selected) {
-      setReasoningEffort(selected.reasoningEffort || "none");
-    }
-  }, [availableModels, selectedModelId]);
 
   useEffect(() => {
     return () => {
@@ -772,11 +723,15 @@ export function ChatPage() {
     abortControllerRef.current = abortController;
 
     try {
+      // 拼接完整模型 ID：模型族[推理强度]
+      const fullModelId = selectedModelFamily && reasoningEffort
+        ? `${selectedModelFamily}[${reasoningEffort}]`
+        : selectedModelFamily || undefined;
       await streamAgentTurn({
         accessMode,
         conversationId,
         input: text,
-        modelId: selectedModelId,
+        modelId: fullModelId,
         onEvent: (event) => handleAgentEvent(sessionId, event),
         signal: abortController.signal,
         reasoningEffort,
@@ -881,11 +836,11 @@ export function ChatPage() {
                 accessMode={accessMode}
                 agent={sessionAgent}
                 modes={sessionCapabilities?.modes ?? []}
-                models={availableModels}
+                models={sessionCapabilities?.models ?? []}
                 onAccessModeChange={setAccessMode}
                 onConfigChange={(optionId, value) => setSelectedConfig((prev) => ({ ...prev, [optionId]: value }))}
                 onDraftChange={setDraft}
-                onModelChange={setSelectedModelId}
+                onModelFamilyChange={setSelectedModelFamily}
                 onReasoningEffortChange={setReasoningEffort}
                 onResolveApproval={(decision) => void resolveApproval(decision)}
                 onSendMessage={() => void sendMessage()}
@@ -893,7 +848,7 @@ export function ChatPage() {
                 pendingApproval={activePendingApproval}
                 reasoningEffort={reasoningEffort}
                 selectedConfig={selectedConfig}
-                selectedModelId={selectedModelId}
+                selectedModelFamily={selectedModelFamily}
               />
             </main>
           )}
