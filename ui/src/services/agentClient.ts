@@ -73,6 +73,28 @@ export async function createConversation(options: {
   return response.json() as Promise<{ session: Session; messages: unknown[] }>;
 }
 
+export interface ConversationEventsResult {
+  events: Array<Record<string, unknown>>;
+}
+
+export async function getConversationEvents(
+  conversationId: string,
+  afterSequence = 0,
+): Promise<ConversationEventsResult> {
+  const baseUrl = await ensureBackend();
+  const params = afterSequence > 0 ? `?after=${afterSequence}` : "";
+  const response = await fetch(
+    `${baseUrl}/api/conversations/${encodeURIComponent(conversationId)}/events${params}`,
+    { headers: { "Content-Type": "application/json" } },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+
+  return response.json() as Promise<ConversationEventsResult>;
+}
+
 export async function streamAgentTurn(options: StartTurnOptions): Promise<void> {
   const baseUrl = await ensureBackend();
   const response = await fetch(`${baseUrl}/api/turns/stream`, {

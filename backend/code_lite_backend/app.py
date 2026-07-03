@@ -17,6 +17,7 @@ from code_lite_backend.services.conversation_recorder import ConversationRecorde
 from code_lite_backend.services.model_config import ModelConfigStore
 from code_lite_backend.services.runtime import AppServices
 from code_lite_backend.storage.conversations import ConversationStore
+from code_lite_backend.storage.event_store import ConversationEventStore
 from code_lite_backend.version import BACKEND_VERSION
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     approvals = ApprovalBroker()
     conversation_store = ConversationStore(runtime_config.record_dir)
+    event_store = ConversationEventStore(runtime_config.record_dir)
     model_config_store = ModelConfigStore(runtime_config)
     agent_runtime_config_store = AgentRuntimeConfigStore(runtime_config)
     runtime_manager = AcpRuntimeManager(conversation_store=conversation_store)
@@ -43,6 +45,7 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
             runtime_manager=runtime_manager,
         ),
         runtime_manager=runtime_manager,
+        event_store=event_store,
     )
     app = FastAPI(title="Code Lite Backend", version=BACKEND_VERSION)
     app.state.services = services

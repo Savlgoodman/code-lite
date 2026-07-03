@@ -64,6 +64,22 @@ async def get_conversation(
     return JSONResponse(conversation)
 
 
+@router.get("/conversations/{conversation_id}/events")
+async def get_conversation_events(
+    conversation_id: str,
+    after: int = 0,
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    """获取会话事件列表，支持按 sequence 过滤（用于远程同步补偿）。
+
+    ?after=42 返回 sequence > 42 的所有事件。
+    """
+    if services.event_store is None:
+        return JSONResponse({"events": [], "error": "event store not available"})
+    events = await services.event_store.load_events(conversation_id, after=after)
+    return JSONResponse({"events": events})
+
+
 @router.patch("/conversations/{conversation_id}/archive")
 async def update_conversation_archive_state(
     conversation_id: str,

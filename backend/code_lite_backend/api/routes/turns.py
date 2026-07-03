@@ -121,6 +121,10 @@ async def stream_turn(
 
     async def event_stream():
         assistant_message_id = ""
+        event_store = services.event_store
+        runtime_id = agent_id  # runtime identifier for events
+        native_session_id: str | None = None
+
         if prompt:
             turn_record = services.conversation_recorder.start_turn(
                 conversation_id=conversation_id,
@@ -131,20 +135,28 @@ async def stream_turn(
             if resolved_model:
                 services.model_config_store.mark_last_used(resolved_model.model_id)
             assistant_message_id = str(turn_record.assistant_message["id"])
-            yield encode_ndjson_event(
-                {
-                    "type": "conversation.turn.started",
-                    "conversationId": conversation_id,
-                    "turnId": turn_id,
-                    "session": turn_record.session,
-                    "userMessage": turn_record.user_message,
-                    "assistantMessage": turn_record.assistant_message,
-                }
-            )
+            started_event = {
+                "type": "conversation.turn.started",
+                "conversationId": conversation_id,
+                "turnId": turn_id,
+                "session": turn_record.session,
+                "userMessage": turn_record.user_message,
+                "assistantMessage": turn_record.assistant_message,
+            }
+            if event_store:
+                await event_store.append_event(
+                    conversation_id, started_event, runtime=runtime_id,
+                )
+            yield encode_ndjson_event(started_event)
 
         completed = False
         try:
             async for event in services.agent_adapter.stream_turn(run_request):
+                # 从 metadata 中提取 nativeSessionId
+                metadata = event.get("metadata")
+                if isinstance(metadata, dict) and metadata.get("nativeSessionId"):
+                    native_session_id = str(metadata["nativeSessionId"])
+
                 if assistant_message_id:
                     session = services.conversation_recorder.apply_agent_event(
                         conversation_id=conversation_id,
@@ -156,21 +168,43 @@ async def stream_turn(
                             **event,
                             "session": session,
                         }
+
+                # 持久化到 events.ndjson（跳过高频 text.delta 以减少 IO）
+                if event_store:
+                    event_type = event.get("type", "")
+                    skip_persist = event_type in (
+                        "agent.text.delta",
+                        "agent.reasoning.delta",
+                    )
+                    if not skip_persist:
+                        await event_store.append_event(
+                            conversation_id, event,
+                            runtime=runtime_id,
+                            native_session_id=native_session_id,
+                        )
+
                 yield encode_ndjson_event(event)
                 if event.get("type") in {"agent.run.completed", "agent.run.failed"}:
                     completed = True
         except asyncio.CancelledError:
+            cancel_event = {
+                "type": "agent.run.failed",
+                "conversationId": conversation_id,
+                "turnId": turn_id,
+                "error": "用户取消了当前任务。",
+            }
             if assistant_message_id:
                 services.conversation_recorder.apply_agent_event(
                     conversation_id=conversation_id,
                     assistant_message_id=assistant_message_id,
-                    event={
-                        "type": "agent.run.failed",
-                        "conversationId": conversation_id,
-                        "turnId": turn_id,
-                        "error": "用户取消了当前任务。",
-                    },
+                    event=cancel_event,
                 )
+                if event_store:
+                    await event_store.append_event(
+                        conversation_id, cancel_event,
+                        runtime=runtime_id,
+                        native_session_id=native_session_id,
+                    )
                 completed = True
             raise
         finally:
