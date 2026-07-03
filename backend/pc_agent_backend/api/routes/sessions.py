@@ -14,6 +14,7 @@ from pc_agent_backend.agents.acp.client import AcpClientHandler
 from pc_agent_backend.agents.acp.mapper import to_jsonable
 from pc_agent_backend.agents.runtimes import CODEX_DESCRIPTOR
 from pc_agent_backend.api.dependencies import get_services
+from pc_agent_backend.services.agent_runtime_config import _string_list
 from pc_agent_backend.schemas.session import (
     SessionCapabilities,
     build_nanobot_session_capabilities,
@@ -83,6 +84,14 @@ async def _initialize_acp_session(
         command = agent_runtime_config_store.codex_command()
         env = agent_runtime_config_store.codex_env()
         default_mode = agent_runtime_config_store.codex_mode()
+    elif agent_id == "claude_code":
+        runtime_settings = agent_runtime_config_store.load()["agentRuntimes"]
+        claude_runtime = runtime_settings.get("claude_code", {})
+        command = _string_list(claude_runtime.get("command"))
+        if not command:
+            command = agent_runtime_config_store.managed_claude_command()
+        env = dict(__import__("os").environ)
+        default_mode = str(claude_runtime.get("mode") or descriptor.default_mode)
     else:
         command = descriptor.default_command
         env = dict(__import__("os").environ)

@@ -19,7 +19,7 @@ CODEX_ACP_PACKAGE = "@agentclientprotocol/codex-acp"
 CLAUDE_ACP_PACKAGE = "@agentclientprotocol/claude-agent-acp"
 DEFAULT_CODEX_ACP_VERSION = "1.1.0"
 DEFAULT_CLAUDE_ACP_VERSION = "0.55.0"
-SUPPORTED_ACTIVE_ADAPTERS = {"codex", "nanobot"}
+SUPPORTED_ACTIVE_ADAPTERS = {"codex", "claude_code", "nanobot"}
 
 
 class AgentRuntimeConfigError(ValueError):
@@ -167,7 +167,7 @@ class AgentRuntimeConfigStore:
     def update_active_adapter(self, adapter: str) -> dict[str, Any]:
         adapter = adapter.strip().lower()
         if adapter not in SUPPORTED_ACTIVE_ADAPTERS:
-            raise AgentRuntimeConfigError("当前只支持切换 Codex 和 nanobot")
+            raise AgentRuntimeConfigError("当前只支持切换 Codex、Claude Code 和 nanobot")
         config = self.load()
         config["activeAdapter"] = adapter
         self.save(config)
@@ -464,8 +464,15 @@ class AgentRuntimeConfigStore:
             command = _string_list(runtime.get("command"))
             if not command:
                 command = self.managed_claude_command()
-            ok = bool(command and (Path(command[0]).exists() or shutil.which(command[0])))
-            return {"ok": ok, "detail": "待接入 Claude Code ACP" if not ok else "已检测到 Claude Code ACP 命令"}
+            resolved_cmd = [_resolve_executable(command[0]), *command[1:]] if command else []
+            ok = bool(resolved_cmd and (Path(resolved_cmd[0]).exists() or shutil.which(resolved_cmd[0])))
+            detail = "Claude Code ACP 已接入" if ok else "未检测到 Claude Code ACP 命令"
+            return {
+                "ok": ok,
+                "detail": detail,
+                "command": resolved_cmd,
+                "source": str(runtime.get("distribution") or "configured"),
+            }
         return {"ok": False, "detail": "未知 runtime"}
 
     def _detect_command(self, command: list[str]) -> dict[str, Any]:

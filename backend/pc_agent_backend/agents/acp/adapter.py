@@ -312,7 +312,8 @@ class AcpAgentAdapter:
         """解析当前 runtime 的可执行命令。"""
         if self.name == "codex":
             return self._agent_runtime_config_store.codex_command()
-        # 后续 Claude Code 和 opencode 在此添加分支
+        if self.name == "claude_code":
+            return self._agent_runtime_config_store.managed_claude_command()
         return self.descriptor.default_command
 
     def _resolve_env(self) -> dict[str, str]:
@@ -333,7 +334,8 @@ class AcpAgentAdapter:
         """解析当前 runtime 的模式。"""
         if self.name == "codex":
             return resolve_codex_mode(fallback)
-        # 后续 runtime 在此添加
+        if self.name == "claude_code":
+            return str(fallback or self.descriptor.default_mode)
         return None
 
     async def _drain_stderr(self, process: Any, client: AcpClientHandler) -> None:
