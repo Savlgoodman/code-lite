@@ -332,7 +332,9 @@ class AcpAgentAdapter:
             except Exception as exc:
                 logger.warning("[configure] set_session_mode(%s) failed: %s", mode, exc)
 
-        # ── 设置模型 ───
+        # ── 设置模型 ──
+        # Claude Code: 模型通过 set_config_option(config_id="model", value="haiku") 设置
+        # Codex: 模型通过 set_session_model 设置（如果支持）
         model = str(
             request.runtime_model or request.model_metadata.get("model") or ""
         ).strip()
@@ -342,14 +344,30 @@ class AcpAgentAdapter:
             request.runtime_model, request.model_metadata.get("model"), model,
         )
         if model:
-            try:
-                await asyncio.wait_for(
-                    conn.set_session_model(session_id=session_id, model_id=model),
-                    timeout=10,
-                )
-                logger.info("[configure] set_session_model(%s) OK", model)
-            except Exception as exc:
-                logger.warning("[configure] set_session_model(%s) failed: %s", model, exc)
+            if self.name == "claude_code":
+                # Claude Code 不支持 set_session_model，通过 config option 设置
+                try:
+                    await asyncio.wait_for(
+                        conn.set_config_option(
+                            session_id=session_id,
+                            config_id="model",
+                            value=model,
+                        ),
+                        timeout=10,
+                    )
+                    logger.info("[configure] set_config_option(model=%s) OK", model)
+                except Exception as exc:
+                    logger.warning("[configure] set_config_option(model=%s) failed: %s", model, exc)
+            else:
+                # Codex 等其他 runtime 尝试 set_session_model
+                try:
+                    await asyncio.wait_for(
+                        conn.set_session_model(session_id=session_id, model_id=model),
+                        timeout=10,
+                    )
+                    logger.info("[configure] set_session_model(%s) OK", model)
+                except Exception as exc:
+                    logger.warning("[configure] set_session_model(%s) failed: %s", model, exc)
 
         # ─── 设置 reasoning effort ───
         reasoning_effort = (

@@ -916,13 +916,15 @@ export function ChatPage() {
 
       // 解析模型 ID：
       // - Codex 用 "模型族[推理强度]" 格式（模型 id 本身含括号）
-      // - Claude Code 用完整模型 id（如 claude-sonnet-4-5），推理强度走 selectedConfig
-      const usesBracketFormat = models.some((m) => /\[.*\]$/.test(m.id));
+      // - Claude Code 用短名称（如 haiku/sonnet/opus[1m]），推理强度走 effort config
+      const agentRuntimeId = sessionAgent?.runtimeId ?? sessionAgent?.id ?? "";
+      const isCodex = agentRuntimeId === "codex";
       let fullModelId: string | undefined;
-      if (usesBracketFormat && cfg?.modelFamily && cfg.reasoningEffort) {
+      if (isCodex && cfg?.modelFamily && cfg.reasoningEffort) {
+        // Codex: 用 bracket 格式 "family[effort]"
         fullModelId = `${cfg.modelFamily}[${cfg.reasoningEffort}]`;
       } else if (cfg?.modelFamily) {
-        // 直接匹配完整模型 id（Claude Code）或用模型族
+        // Claude Code 等：直接用模型 id，推理强度通过 effort config 传递
         const exact = models.find((m) => m.id === cfg.modelFamily);
         fullModelId = exact?.id ?? cfg.modelFamily;
       }
