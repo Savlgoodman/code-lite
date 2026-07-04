@@ -92,10 +92,35 @@ def _setup_shutdown_hooks(app_instance) -> None:
             signal.signal(signal.SIGBREAK, _win_signal_handler)
 
 
+def configure_logging() -> None:
+    """配置根 logger，让所有模块的 logger.info/error 输出到 stdout。
+
+    没有这个配置，uvicorn 的 log_level 只影响 uvicorn 自己的 logger，
+    我们模块里的 logging.getLogger(__name__) 会被静默丢弃。
+    """
+    root = logging.getLogger()
+    if root.handlers:
+        # 已配置（如被 uvicorn 提前初始化），只调整级别
+        root.setLevel(logging.INFO)
+        return
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+    # code_lite_backend 命名空间显式设为 INFO
+    logging.getLogger("code_lite_backend").setLevel(logging.INFO)
+
+
 def main() -> None:
     configure_stdio_encoding()
     args = parse_args()
     configure_log_file(args.log_file)
+    configure_logging()
     workspace = Path(args.workspace).resolve()
     runtime_config = resolve_runtime_config(
         workspace=workspace,

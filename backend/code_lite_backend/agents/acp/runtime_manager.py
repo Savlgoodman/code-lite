@@ -234,6 +234,7 @@ class AcpRuntimeManager:
                 )
 
         # 3/4. session/new
+        logger.info("[session] calling new_session for %s...", conversation_id[:12])
         result = await asyncio.wait_for(
             connection.sdk_connection.new_session(
                 cwd=str(workspace),
@@ -246,6 +247,19 @@ class AcpRuntimeManager:
         # 序列化 session_result 供后续构建 capabilities 使用
         from code_lite_backend.agents.acp.mapper import to_jsonable
         session_data = to_jsonable(result)
+        # 记录 session/new 返回了哪些能力字段
+        if isinstance(session_data, dict):
+            modes = session_data.get("modes")
+            models = session_data.get("models")
+            config_opts = session_data.get("configOptions")
+            logger.info(
+                "[session] new_session OK — modes=%s models=%s configOptions=%s",
+                len(modes) if isinstance(modes, list) else type(modes).__name__,
+                (len(models.get("availableModels", [])) if isinstance(models, dict) else type(models).__name__),
+                (len(config_opts) if isinstance(config_opts, (list, dict)) else type(config_opts).__name__),
+            )
+        else:
+            logger.warning("[session] new_session returned non-dict: %s", type(session_data).__name__)
 
         created_at = saved_binding.created_at if saved_binding else _now_iso()
         binding = AcpSessionBinding(
@@ -358,16 +372,28 @@ class AcpRuntimeManager:
         merged_env = dict(default_environment())
         merged_env.update(env)
 
+        logger.info("[spawn] runtime=%s command=%s cwd=%s", descriptor.id, command, workspace)
+
         # spawn 子进程
-        process = await asyncio.create_subprocess_exec(
-            command[0],
-            *command[1:],
-            stdin=aio_subprocess.PIPE,
-            stdout=aio_subprocess.PIPE,
-            stderr=aio_subprocess.PIPE,
-            env=merged_env,
-            cwd=str(workspace),
-        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                command[0],
+                *command[1:],
+                stdin=aio_subprocess.PIPE,
+                stdout=aio_subprocess.PIPE,
+                stderr=aio_subprocess.PIPE,
+                env=merged_env,
+                cwd=str(workspace),
+            )
+        except FileNotFoundError:
+            logger.error("[spawn] executable not found: %s", command[0])
+            raise
+        except Exception:
+            logger.exception("[spawn] failed to create subprocess: %s", command)
+            raise
+
+        logger.info("[spawn] subprocess started, pid=%s", process.pid)
+
         if process.stdout is None or process.stdin is None:
             process.kill()
             await process.wait()
@@ -399,6 +425,7 @@ class AcpRuntimeManager:
         )
 
         # initialize
+        logger.info("[spawn] calling initialize()...")
         try:
             initialize_result = await asyncio.wait_for(
                 sdk_connection.initialize(
@@ -418,8 +445,31 @@ class AcpRuntimeManager:
                 ),
                 timeout=30,
             )
-        except Exception:
-            # 清理失败连接
+            logger.info(
+                "[spawn] initialize() OK — agent_info=%s load_session=%s",
+                getattr(initialize_result, "agent_info", None),
+                getattr(getattr(initialize_result, "agent_capabilities", None), "load_session", None),
+            )
+        except asyncio.TimeoutError:
+            stderr_dump = "\n".join(client_handler.stderr_tail)
+            logger.error(
+                "[spawn] initialize() TIMEOUT after 30s. returncode=%s stderr:\n%s",
+                process.returncode, stderr_dump or "(empty)",
+            )
+            with contextlib.suppress(Exception):
+                process.kill()
+            with contextlib.suppress(Exception):
+                await process.wait()
+            stderr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stderr_task
+            raise
+        except Exception as exc:
+            stderr_dump = "\n".join(client_handler.stderr_tail)
+            logger.error(
+                "[spawn] initialize() FAILED: %s: %s. returncode=%s stderr:\n%s",
+                type(exc).__name__, exc, process.returncode, stderr_dump or "(empty)",
+            )
             with contextlib.suppress(Exception):
                 process.kill()
             with contextlib.suppress(Exception):

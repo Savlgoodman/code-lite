@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import Any
 
 import acp
@@ -21,6 +22,7 @@ from code_lite_backend.schemas.session import (
 )
 from code_lite_backend.services.runtime import AppServices
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -36,6 +38,8 @@ async def initialize_session(
 
     使用 AcpRuntimeManager 复用连接和 session，不再每轮临时 spawn。
     """
+    logger.info("POST /sessions/%s/initialize — entry", conversation_id)
+
     # 优先从会话绑定的 agent 解析，其次 fallback 到全局 activeAdapter
     persisted_agent = None
     if conversation_id and not conversation_id.startswith("__"):
@@ -44,10 +48,16 @@ async def initialize_session(
             raw_agent = persisted["session"].get("agent")
             if isinstance(raw_agent, dict):
                 persisted_agent = str(raw_agent.get("id") or "").strip() or None
+        logger.info("  persisted_agent from session: %s", persisted_agent)
+    else:
+        logger.info("  conversation_id starts with __, skipping persisted agent lookup")
 
     agent_id = services.agent_runtime_config_store.resolve_adapter(persisted_agent)
+    logger.info("  resolved agent_id: %s", agent_id)
+
     agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
     agent_label = str(agent_metadata.get("label") or agent_id)
+    logger.info("  agent_label: %s, metadata: %s", agent_label, agent_metadata)
 
     if agent_id == "nanobot":
         caps = build_nanobot_session_capabilities(
@@ -61,9 +71,13 @@ async def initialize_session(
         from code_lite_backend.agents.runtimes import get_descriptor
         descriptor = get_descriptor(agent_id)
         if descriptor is None:
+            logger.error("  No descriptor for agent_id=%s", agent_id)
             return JSONResponse({
                 "error": f"不支持的 agent: {agent_id}",
             }, status_code=400)
+
+    logger.info("  descriptor: id=%s label=%s status=%s default_mode=%s",
+                descriptor.id, descriptor.label, descriptor.status, descriptor.default_mode)
 
     try:
         caps = await _initialize_acp_session(
@@ -73,8 +87,19 @@ async def initialize_session(
             services=services,
             conversation_id=conversation_id,
         )
+        logger.info("  SUCCESS — modes=%d models=%d configOptions=%d",
+                    len(caps.modes), len(caps.models), len(caps.config_options))
+        logger.info("  modes: %s", [m.id for m in caps.modes])
+        logger.info("  models: %s", [m.id for m in caps.models])
+        logger.info("  configOptions: %s", [o.id for o in caps.config_options])
         return JSONResponse(caps.to_dict())
+    except FileNotFoundError as exc:
+        logger.error("  FAIL — command not found: %s", exc)
+        return JSONResponse({
+            "error": f"初始化 session 失败：{agent_label} 的可执行文件未找到 ({exc})。请在设置页安装 ACP 包。",
+        }, status_code=502)
     except Exception as exc:
+        logger.exception("  FAIL — unexpected error: %s: %s", type(exc).__name__, exc)
         return JSONResponse({
             "error": f"初始化 session 失败: {type(exc).__name__}: {exc}",
         }, status_code=502)
@@ -111,9 +136,12 @@ async def _initialize_acp_session(
         env = dict(__import__("os").environ)
         default_mode = descriptor.default_mode
 
+    logger.info("  command: %s", command)
+    logger.info("  default_mode: %s", default_mode)
+
     runtime_manager = services.runtime_manager
     if runtime_manager is None:
-        # fallback: 如果没有 runtime_manager（旧路径），使用临时 probe
+        logger.info("  No runtime_manager, using legacy path")
         return await _initialize_acp_session_legacy(
             agent_id=agent_id,
             agent_label=agent_label,
@@ -125,41 +153,45 @@ async def _initialize_acp_session(
         )
 
     # 使用 RuntimeManager 复用连接
+    logger.info("  Calling ensure_connection (conversation=%s)...", conversation_id)
     connection = await runtime_manager.ensure_connection(
         descriptor=descriptor,
         command=command,
         env=env,
         workspace=services.workspace,
+        conversation_id=conversation_id,
         approvals=services.approvals,
     )
+    logger.info("  Connection ready, process.returncode=%s", connection.process.returncode)
 
     # 使用 RuntimeManager 复用或创建 session
+    logger.info("  Calling ensure_session (conversation=%s)...", conversation_id)
     binding = await runtime_manager.ensure_session(
         connection=connection,
         conversation_id=conversation_id,
         workspace=services.workspace,
     )
+    logger.info("  Session bound: native_id=%s", binding.native_session_id[:16] if binding.native_session_id else "?")
 
     # 使用 binding 中保存的 session/new 原始数据构建 SessionCapabilities
-    return build_session_capabilities(
+    caps_data = binding.capabilities
+    logger.info("  capabilities from binding: %s",
+                "present" if caps_data else "MISSING — will produce empty modes/models")
+
+    result = build_session_capabilities(
         agent_id=agent_id,
         agent_label=agent_label,
         adapter_kind="acp",
         status=descriptor.status,
-        session_result=_SessionDataWrapper(binding.capabilities),
+        session_result=_SessionDataWrapper(caps_data),
         default_mode=default_mode,
         runtime=descriptor.id,
     )
+    return result
 
 
 class _SessionDataWrapper:
-    """包装序列化的 session result dict，使其兼容 to_jsonable() 的期望。
-
-    to_jsonable() 对 dict 直接递归序列化，所以这里只需要让对象
-    能被 to_jsonable 正确处理即可。由于 binding.capabilities 已经是 dict，
-    而 build_session_capabilities 内部用 to_jsonable(session_result) 转换，
-    dict 会被 to_jsonable 直接透传。
-    """
+    """包装序列化的 session result dict，使其兼容 to_jsonable() 的期望。"""
 
     def __init__(self, data: dict[str, Any] | None) -> None:
         self._data = data or {}
@@ -193,6 +225,7 @@ async def _initialize_acp_session_legacy(
     )
     process = None
     try:
+        logger.info("  [legacy] spawning: %s", command)
         async with acp.spawn_agent_process(
             client,
             command[0],
@@ -220,6 +253,8 @@ async def _initialize_acp_session_legacy(
                 ),
                 timeout=30,
             )
+            logger.info("  [legacy] initialized, agent_info=%s",
+                        getattr(initialize_result, "agent_info", None))
             session_result = await asyncio.wait_for(
                 conn.new_session(
                     cwd=str(services.workspace),
@@ -227,6 +262,7 @@ async def _initialize_acp_session_legacy(
                 ),
                 timeout=30,
             )
+            logger.info("  [legacy] session/new returned session_id=%s", session_result.session_id)
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(conn.close_session(session_result.session_id), timeout=5)
 

@@ -600,13 +600,8 @@ export function ChatPage() {
         setSessionRunning(sessionId, false);
       }
       setSessionRunning(nextSessionId, true);
-      // 只有当前是 draft 或空时才自动切换 — 不强制打断用户正在看的会话
-      setActiveSessionId((current) => {
-        if (isDraftSessionId(current) || !current) {
-          return nextSessionId;
-        }
-        return current;
-      });
+      // 总是切换到真实会话 id（draft -> real id 转换必须切换）
+      setActiveSessionId(nextSessionId);
       setSessions((current) => {
         // 移除 draft 和同 id 的旧会话，用事件中的真实 session 替换
         const cleaned = current.filter(
