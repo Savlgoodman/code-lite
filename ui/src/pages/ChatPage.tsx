@@ -608,8 +608,10 @@ export function ChatPage() {
       return;
     }
 
-    const targetSessionId = sessionId; // 事件来自哪个 turn 就用哪个 session
-    const assistantMessageId = activeAssistantMessageIdBySessionRef.current[targetSessionId];
+    // 用事件的 conversationId 做路由（draft session 发送后会变成真实 id）
+    const targetSessionId = event.conversationId || sessionId;
+    const assistantMessageId = activeAssistantMessageIdBySessionRef.current[targetSessionId]
+      ?? activeAssistantMessageIdBySessionRef.current[sessionId];
     if (!assistantMessageId) {
       return;
     }
