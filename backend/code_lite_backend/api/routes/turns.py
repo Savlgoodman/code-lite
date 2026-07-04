@@ -58,14 +58,10 @@ async def stream_turn(
             persisted_agent = str(raw_agent.get("id") or "").strip() or None
     agent_id = services.agent_runtime_config_store.resolve_adapter(persisted_agent)
     agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
-    logger.info(
-        "POST /turns/stream — conversation=%s turn=%s agent=%s model=%s mode=%s effort=%s prompt_len=%d",
-        conversation_id, turn_id, agent_id, requested_model_id,
-        requested_access_mode, requested_reasoning_effort, len(prompt),
-    )
     resolved_model = None
     runtime_model = None
     model_metadata: dict[str, object] = {}
+
     if agent_id in _ACP_RUNTIME_IDS:
         # ACP runtime：使用 runtime 原生模型（不查产品级 model_config）
         runtime_model = requested_model_id
@@ -130,6 +126,18 @@ async def stream_turn(
         access_mode=requested_access_mode,
         model_metadata=model_metadata,
         reasoning_effort=requested_reasoning_effort,
+    )
+
+    # 详细日志：记录完整请求参数，帮助排查模型选择问题
+    prompt_preview = prompt[:80] + ("..." if len(prompt) > 80 else "")
+    logger.info(
+        "POST /turns/stream [%s] conversation=%s turn=%s agent=%s(%s) model=%s runtime_model=%s mode=%s effort=%s selectedConfig=%s prompt_len=%d prompt=%s",
+        "ACP" if agent_id in _ACP_RUNTIME_IDS else "product",
+        conversation_id, turn_id, agent_id, agent_metadata.get("label"),
+        requested_model_id, runtime_model,
+        requested_access_mode, requested_reasoning_effort,
+        selected_config,
+        len(prompt), prompt_preview,
     )
 
     async def event_stream():

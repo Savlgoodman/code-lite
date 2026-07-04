@@ -181,6 +181,11 @@ class AcpAgentAdapter:
             "Starting turn %s for conversation %s (runtime=%s, command=%s)",
             request.turn_id, request.conversation_id, self.name, command[0],
         )
+        logger.info(
+            "[_run_turn] model_id=%s runtime_model=%s access_mode=%s reasoning_effort=%s model_metadata=%s",
+            request.model_id, request.runtime_model, request.access_mode,
+            request.reasoning_effort, request.model_metadata,
+        )
         try:
             await output_queue.put({
                 "type": "agent.run.started",
@@ -310,8 +315,13 @@ class AcpAgentAdapter:
     ) -> None:
         session_id = session_binding.native_session_id
 
-        # 设置模式
+        # ─── 设置模式 ───
         mode = self._resolve_mode(request.access_mode)
+        logger.info(
+            "[configure] turn=%s conversation=%s session=%s access_mode=%s -> resolved_mode=%s runtime=%s",
+            request.turn_id, request.conversation_id[:12], session_id[:12],
+            request.access_mode, mode, self.name,
+        )
         if mode:
             try:
                 await asyncio.wait_for(
@@ -322,10 +332,15 @@ class AcpAgentAdapter:
             except Exception as exc:
                 logger.warning("[configure] set_session_mode(%s) failed: %s", mode, exc)
 
-        # 设置模型
+        # ── 设置模型 ───
         model = str(
             request.runtime_model or request.model_metadata.get("model") or ""
         ).strip()
+        logger.info(
+            "[configure] turn=%s conversation=%s runtime_model=%s model_metadata.model=%s -> final_model=%s",
+            request.turn_id, request.conversation_id[:12],
+            request.runtime_model, request.model_metadata.get("model"), model,
+        )
         if model:
             try:
                 await asyncio.wait_for(
@@ -336,13 +351,17 @@ class AcpAgentAdapter:
             except Exception as exc:
                 logger.warning("[configure] set_session_model(%s) failed: %s", model, exc)
 
-        # 设置 reasoning effort（config id 因 runtime 而异：
-        # Codex 用 reasoning_effort，Claude Code 用 effort）
+        # ─── 设置 reasoning effort ───
         reasoning_effort = (
             request.reasoning_effort or request.model_metadata.get("reasoningEffort") or ""
         ).strip()
+        effort_config_id = "effort" if self.name == "claude_code" else "reasoning_effort"
+        logger.info(
+            "[configure] turn=%s conversation=%s reasoning_effort=%s config_id=%s runtime=%s",
+            request.turn_id, request.conversation_id[:12],
+            reasoning_effort, effort_config_id, self.name,
+        )
         if reasoning_effort and reasoning_effort != "none":
-            effort_config_id = "effort" if self.name == "claude_code" else "reasoning_effort"
             try:
                 await asyncio.wait_for(
                     conn.set_config_option(
@@ -355,6 +374,8 @@ class AcpAgentAdapter:
                 logger.info("[configure] set_config_option(%s=%s) OK", effort_config_id, reasoning_effort)
             except Exception as exc:
                 logger.warning("[configure] set_config_option(%s=%s) failed: %s", effort_config_id, reasoning_effort, exc)
+        else:
+            logger.info("[configure] skipping set_config_option (effort=%s)", reasoning_effort or "(empty)")
 
     def _resolve_command(self) -> list[str]:
         """解析当前 runtime 的可执行命令。"""
