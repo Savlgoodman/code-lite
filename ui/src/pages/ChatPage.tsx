@@ -156,7 +156,7 @@ export function ChatPage() {
   const [archivedSessionIds, setArchivedSessionIds] = useState<Set<string>>(() => new Set());
   const [searchText, setSearchText] = useState("");
   const [draft, setDraft] = useState("");
-  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const [activeTurnIdBySession, setActiveTurnIdBySession] = useState<Record<string, string>>({});
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
@@ -165,7 +165,7 @@ export function ChatPage() {
   const [sessionCapabilities, setSessionCapabilities] = useState<SessionCapabilities | null>(null);
   const [selectedConfig, setSelectedConfig] = useState<Record<string, string | number | boolean>>({});
   const [selectedModelFamily, setSelectedModelFamily] = useState<string>("");
-  const [contextUsage, setContextUsage] = useState<UsageStats | null>(null);
+  const [contextUsageBySession, setContextUsageBySession] = useState<Record<string, UsageStats>>({});
   const [showAgentSelection, setShowAgentSelection] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
@@ -179,6 +179,8 @@ export function ChatPage() {
   const isActiveSessionRunning = runningSessionIds.has(activeSession.id);
   const activePendingApproval = pendingApproval?.conversationId === activeSession.id ? pendingApproval : null;
   const sessionAgent = activeSession.agent ?? (isDraftSessionId(activeSession.id) ? activeAgent : null);
+  const contextUsage = contextUsageBySession[activeSession.id] ?? null;
+  const activeTurnId = activeTurnIdBySession[activeSession.id] ?? null;
 
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !archivedSessionIds.has(session.id)),
@@ -719,7 +721,10 @@ export function ChatPage() {
     }
 
     if (event.type === "agent.context.updated") {
-      setContextUsage(event.context);
+      setContextUsageBySession((prev) => ({
+        ...prev,
+        [targetSessionId]: event.context,
+      }));
       return;
     }
 
@@ -730,10 +735,13 @@ export function ChatPage() {
       if (typeof event.usage === "object" && event.usage) {
         const finalUsage = event.usage as Record<string, unknown>;
         if (finalUsage.contextUsedTokens != null || finalUsage.contextWindowTokens != null) {
-          setContextUsage({
-            ...contextUsage,
-            ...finalUsage,
-          } as UsageStats);
+          setContextUsageBySession((prev) => ({
+            ...prev,
+            [targetSessionId]: {
+              ...(prev[targetSessionId] ?? {}),
+              ...finalUsage,
+            } as UsageStats,
+          }));
         }
       }
       setMessages((current) =>
@@ -771,7 +779,7 @@ export function ChatPage() {
     const conversationId = isDraftSessionId(sessionId) ? undefined : sessionId;
     const turnId = createId("turn");
     setDraft("");
-    setActiveTurnId(turnId);
+    setActiveTurnIdBySession((prev) => ({ ...prev, [sessionId]: turnId }));
     setSessionRunning(sessionId, true);
     activeAssistantMessageIdRef.current = null;
     activeStreamSessionIdRef.current = null;
@@ -813,7 +821,11 @@ export function ChatPage() {
         });
       }
     } finally {
-      setActiveTurnId(null);
+      setActiveTurnIdBySession((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
       activeStreamSessionIdRef.current = null;
       abortControllerRef.current = null;
     }
@@ -824,11 +836,16 @@ export function ChatPage() {
       return;
     }
 
+    const sessionId = activeSession.id;
     const turnId = activeTurnId;
     abortControllerRef.current?.abort();
     flushQueuedMessageDeltas();
     await cancelTurn(turnId).catch(() => undefined);
-    setActiveTurnId(null);
+    setActiveTurnIdBySession((prev) => {
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
     setPendingApproval(null);
   }
 
