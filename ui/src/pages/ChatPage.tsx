@@ -244,6 +244,24 @@ export function ChatPage() {
               },
               sessions: remoteSessions
             });
+
+            // 恢复所有会话的保存配置（从 listConversations 返回的 session 中读取）
+            const restoredConfigs: Record<string, SessionConfig> = {};
+            for (const session of remoteSessions) {
+              const savedConfig = (session as unknown as Record<string, unknown>).config;
+              if (savedConfig && typeof savedConfig === "object") {
+                const cfg = savedConfig as Partial<SessionConfig>;
+                restoredConfigs[session.id] = {
+                  modelFamily: String(cfg.modelFamily ?? ""),
+                  accessMode: String(cfg.accessMode ?? ""),
+                  reasoningEffort: String(cfg.reasoningEffort ?? "medium"),
+                  selectedConfig: (cfg.selectedConfig as Record<string, string | number | boolean>) ?? {},
+                };
+              }
+            }
+            if (Object.keys(restoredConfigs).length > 0) {
+              setConfigBySession(restoredConfigs);
+            }
           } else {
             const draftSession = createDraftSession();
             nextState = normalizeStoredState({
