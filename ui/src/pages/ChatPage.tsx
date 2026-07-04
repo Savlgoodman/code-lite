@@ -47,6 +47,14 @@ const STREAM_DELTA_FLUSH_MS = 60;
 type ActiveView = "chat" | "overview" | "settings";
 type PendingApprovalState = ApprovalRequest & { conversationId: string };
 
+/** 每个会话独立的配置：模型、权限模式、思考强度、其他选项 */
+interface SessionConfig {
+  modelFamily: string;
+  accessMode: string;
+  reasoningEffort: string;
+  selectedConfig: Record<string, string | number | boolean>;
+}
+
 function createDraftSession(): Session {
   return {
     ...createEmptySession(),
@@ -160,13 +168,20 @@ export function ChatPage() {
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
-  const [accessMode, setAccessMode] = useState("read-only");
-  const [reasoningEffort, setReasoningEffort] = useState("xhigh");
-  const [sessionCapabilities, setSessionCapabilities] = useState<SessionCapabilities | null>(null);
-  const [selectedConfig, setSelectedConfig] = useState<Record<string, string | number | boolean>>({});
-  const [selectedModelFamily, setSelectedModelFamily] = useState<string>("");
   const [contextUsageBySession, setContextUsageBySession] = useState<Record<string, UsageStats>>({});
   const [showAgentSelection, setShowAgentSelection] = useState(false);
+
+  // ─── Per-session 状态：每个会话独立的 capabilities 和 config ───
+  const [capabilitiesBySession, setCapabilitiesBySession] = useState<Record<string, SessionCapabilities>>({});
+  const [configBySession, setConfigBySession] = useState<Record<string, SessionConfig>>({});
+
+  // ─── 派生：当前会话的 capabilities 和 config ───
+  const currentCapabilities = capabilitiesBySession[activeSessionId] ?? null;
+  const currentConfig = configBySession[activeSessionId] ?? null;
+
+  // ─── 向后兼容：draft session 时仍用全局 activeAgent ───
+  // draft session 的 capabilities 通过 __probe__ 获取，存储到 draft id 下
+  // 一旦 draft → real id，会把 draft 的 caps/config 迁移到 real id
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
@@ -174,15 +189,6 @@ export function ChatPage() {
   // per-session stream state
   const activeAssistantMessageIdBySessionRef = useRef<Record<string, string>>({});
   const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
-  // 记录用户已手动选择过模型/模式的会话，避免 loadCapabilities 覆盖用户选择
-  const userSelectedSessionsRef = useRef<Set<string>>(new Set());
-  // per-session 选择快照：切换会话时恢复各自的模型/模式/思考强度
-  const selectionBySessionRef = useRef<Record<string, {
-    modelFamily: string;
-    accessMode: string;
-    reasoningEffort: string;
-    selectedConfig: Record<string, string | number | boolean>;
-  }>>({});
 
   const activeSession = sessions.find((item) => item.id === activeSessionId) ?? sessions[0];
   const activeMessages = messages[activeSession.id] ?? [];
@@ -264,139 +270,158 @@ export function ChatPage() {
   }, []);
 
   useEffect(() => {
+    // draft session 也通过 __probe__ 探测 capabilities
+    // 真实会话的 agent 来自 session.agent 字段
+    if (!activeSessionId) return;
     let cancelled = false;
 
     async function loadCapabilities() {
       try {
-        const probeId = activeSession.id && !isDraftSessionId(activeSession.id)
-          ? activeSession.id
-          : "__probe__";
-        const caps = await initializeSession(probeId);
-        if (cancelled) return;
-        setSessionCapabilities(caps);
-
-        // 如果用户已经在该会话手动选择过模型/模式，恢复该会话自己的选择快照，
-        // 不用后端默认值覆盖
-        const alreadyCustomized = userSelectedSessionsRef.current.has(activeSession.id);
-        if (alreadyCustomized) {
-          const snap = selectionBySessionRef.current[activeSession.id];
-          if (snap) {
-            setSelectedModelFamily(snap.modelFamily);
-            setAccessMode(snap.accessMode);
-            setReasoningEffort(snap.reasoningEffort);
-            setSelectedConfig(snap.selectedConfig);
+        // 如果当前会话已有缓存，跳过重复初始化（切换回该会话时从缓存读取）
+        const existingCaps = capabilitiesBySession[activeSessionId];
+        if (existingCaps && activeSessionId !== DRAFT_SESSION_ID) {
+          // capabilities 已缓存；检查 config 是否已初始化
+          if (!configBySession[activeSessionId]) {
+            const defaultConfig = buildDefaultConfig(existingCaps);
+            if (!cancelled) {
+              setConfigBySession((prev) => ({ ...prev, [activeSessionId]: defaultConfig }));
+            }
           }
           return;
         }
 
-        // 初始化默认选中值（仅首次）
-        const defaultMode = caps.modes.find((m) => m.isDefault);
-        if (defaultMode) setAccessMode(defaultMode.id);
+        const probeId = isDraftSessionId(activeSessionId) ? "__probe__" : activeSessionId;
+        const caps = await initializeSession(probeId);
+        if (cancelled) return;
 
-        // 从 configOptions 提取默认值
-        const configDefaults: Record<string, string | number | boolean> = {};
-        for (const opt of caps.configOptions) {
-          if (opt.currentValue != null) {
-            configDefaults[opt.id] = opt.currentValue;
+        // 写入 capabilities 缓存
+        setCapabilitiesBySession((prev) => ({ ...prev, [activeSessionId]: caps }));
+
+        // 初始化 config（仅当该会话没有 config 时）
+        if (!configBySession[activeSessionId]) {
+          const defaultConfig = buildDefaultConfig(caps);
+          if (!cancelled) {
+            setConfigBySession((prev) => ({ ...prev, [activeSessionId]: defaultConfig }));
           }
-        }
-        if (Object.keys(configDefaults).length > 0) setSelectedConfig(configDefaults);
-
-        // 提取推理强度
-        const reasoningOpt = caps.configOptions.find((o) => o.id === "reasoning_effort");
-        if (reasoningOpt?.currentValue) setReasoningEffort(String(reasoningOpt.currentValue));
-
-        // 提取模型族：从当前模型 ID 或第一个模型中提取
-        const currentModel = caps.models.find((m) => m.isCurrent) ?? caps.models[0];
-        if (currentModel) {
-          const familyMatch = currentModel.id.match(/^(.*?)\[/);
-          setSelectedModelFamily(familyMatch ? familyMatch[1] : currentModel.id);
         }
       } catch (error) {
         console.error("Failed to load session capabilities:", error);
+        // ... fallback 逻辑（保留原有行为，但写入 capabilitiesBySession 而非全局 state）
         if (!cancelled) {
-          // 优先使用会话绑定的 agent，其次 fallback 到全局 activeAdapter
-          const fallbackAgentId = sessionAgent?.id
-            ?? (await loadAgentRuntimeSettings().then(s => s.activeAdapter).catch(() => null));
-          try {
-            const runtimeSettings = await loadAgentRuntimeSettings();
-            if (cancelled) return;
-            const runtime = runtimeSettings.runtimes.find(
-              (item) => item.adapter === (fallbackAgentId || runtimeSettings.activeAdapter)
-            );
-            if (runtime) {
-              setActiveAgent({
-                configMode: runtime.configMode,
-                id: runtime.adapter,
-                label: runtime.label,
-                mode: runtime.mode,
-                runtimeId: runtime.id,
-              });
-              setAccessMode(runtime.mode || "read-only");
-
-              const isCodex = runtime.id === "codex";
-              // fallback modes 仅在后端 initialize 完全失败时兜底；
-              // 正常情况下 modes/models 全部来自后端 session/new
-              const fallbackModes = isCodex
-                ? [
-                    { id: "read-only", label: "只读", isDefault: runtime.mode === "read-only" },
-                    { id: "agent", label: "Agent", isDefault: runtime.mode === "agent" },
-                    { id: "agent-full-access", label: "完全访问", isDefault: runtime.mode === "agent-full-access" },
-                  ]
-                : [{ id: runtime.mode || "default", label: runtime.mode || "默认", isDefault: true }];
-
-              const fallbackConfigOptions = isCodex
-                ? [{
-                    id: "reasoning_effort",
-                    label: "思考强度",
-                    type: "enum" as const,
-                    values: ["none", "low", "medium", "high", "xhigh"],
-                    currentValue: "xhigh",
-                    valueLabels: { none: "无", low: "低", medium: "中", high: "高", xhigh: "超高" },
-                  }]
-                : [];
-
-              // 加载模型并构建 models 列表
-              let fallbackModels: SessionModel[] = [];
-              const agentId = runtime.adapter;
-              if (agentId === "codex") {
-                try {
-                  const runtimeModels = await loadAgentRuntimeModels(runtime.id ?? "codex");
-                  fallbackModels = runtimeModels.models.map((m: AgentRuntimeModel) => ({
-                    id: m.id, label: m.label, description: m.description,
-                    isCurrent: m.id === runtimeModels.currentModelId,
-                  }));
-                } catch { /* ignore */ }
-              }
-
-              setSessionCapabilities({
-                agent: {
-                  id: runtime.adapter, label: runtime.label,
-                  adapterKind: "acp" as const, status: runtime.status || "available",
-                },
-                modes: fallbackModes,
-                models: fallbackModels,
-                configOptions: fallbackConfigOptions,
-              });
-
-              // 设置模型族
-              if (fallbackModels.length > 0) {
-                const currentModel = fallbackModels.find((m) => m.isCurrent) ?? fallbackModels[0];
-                const familyMatch = currentModel.id.match(/^(.*?)\[/);
-                setSelectedModelFamily(familyMatch ? familyMatch[1] : currentModel.id);
-              }
-            }
-          } catch (fallbackError) {
-            console.error("Fallback model loading also failed:", fallbackError);
-          }
+          void loadCapabilitiesFallback();
         }
       }
     }
 
-    void loadCapabilities();
+    async function loadCapabilitiesFallback() {
+      try {
+        const fallbackAgentId = sessionAgent?.id
+          ?? (await loadAgentRuntimeSettings().then(s => s.activeAdapter).catch(() => null));
+        const runtimeSettings = await loadAgentRuntimeSettings();
+        const runtime = runtimeSettings.runtimes.find(
+          (item) => item.adapter === (fallbackAgentId || runtimeSettings.activeAdapter)
+        );
+        if (!runtime) return;
 
+        setActiveAgent({
+          configMode: runtime.configMode,
+          id: runtime.adapter,
+          label: runtime.label,
+          mode: runtime.mode,
+          runtimeId: runtime.id,
+        });
+
+        const isCodex = runtime.id === "codex";
+        const fallbackModes = isCodex
+          ? [
+              { id: "read-only", label: "只读", isDefault: runtime.mode === "read-only" },
+              { id: "agent", label: "Agent", isDefault: runtime.mode === "agent" },
+              { id: "agent-full-access", label: "完全访问", isDefault: runtime.mode === "agent-full-access" },
+            ]
+          : [{ id: runtime.mode || "default", label: runtime.mode || "默认", isDefault: true }];
+
+        const fallbackConfigOptions: SessionConfigOption[] = isCodex
+          ? [{
+              id: "reasoning_effort",
+              label: "思考强度",
+              type: "enum" as const,
+              values: ["none", "low", "medium", "high", "xhigh"],
+              currentValue: "xhigh",
+              valueLabels: { none: "无", low: "低", medium: "中", high: "高", xhigh: "超高" },
+            }]
+          : [];
+
+        let fallbackModels: SessionModel[] = [];
+        const agentId = runtime.adapter;
+        if (agentId === "codex") {
+          try {
+            const runtimeModels = await loadAgentRuntimeModels(runtime.id ?? "codex");
+            fallbackModels = runtimeModels.models.map((m: AgentRuntimeModel) => ({
+              id: m.id, label: m.label, description: m.description,
+              isCurrent: m.id === runtimeModels.currentModelId,
+            }));
+          } catch { /* ignore */ }
+        }
+
+        const fallbackCaps: SessionCapabilities = {
+          agent: {
+            id: runtime.adapter, label: runtime.label,
+            adapterKind: "acp" as const, status: runtime.status || "available",
+          },
+          modes: fallbackModes,
+          models: fallbackModels,
+          configOptions: fallbackConfigOptions,
+        };
+
+        setCapabilitiesBySession((prev) => ({ ...prev, [activeSessionId]: fallbackCaps }));
+
+        // 初始化 config（仅当该会话没有 config 时）
+        if (!configBySession[activeSessionId]) {
+          const defaultConfig = buildDefaultConfig(fallbackCaps);
+          setConfigBySession((prev) => ({ ...prev, [activeSessionId]: defaultConfig }));
+        }
+      } catch (fallbackError) {
+        console.error("Fallback model loading also failed:", fallbackError);
+      }
+    }
+
+    /** 从 capabilities 中提取默认 config */
+    function buildDefaultConfig(caps: SessionCapabilities): SessionConfig {
+      // 提取权限模式默认值
+      const defaultMode = caps.modes.find((m) => m.isDefault);
+      const accessMode = defaultMode?.id ?? caps.modes[0]?.id ?? "read-only";
+
+      // 提取推理强度默认值
+      const reasoningOpt = caps.configOptions.find((o) => o.id === "reasoning_effort" || o.id === "effort");
+      const reasoningEffort = reasoningOpt?.currentValue ? String(reasoningOpt.currentValue) : "medium";
+
+      // 提取其他 configOptions 默认值
+      const selectedConfig: Record<string, string | number | boolean> = {};
+      for (const opt of caps.configOptions) {
+        if (opt.currentValue != null) {
+          selectedConfig[opt.id] = opt.currentValue;
+        }
+      }
+
+      // 提取模型族
+      const currentModel = caps.models.find((m) => m.isCurrent) ?? caps.models[0];
+      let modelFamily = "";
+      if (currentModel) {
+        const familyMatch = currentModel.id.match(/^(.*?)\[/);
+        modelFamily = familyMatch ? familyMatch[1] : currentModel.id;
+      }
+
+      return {
+        modelFamily,
+        accessMode,
+        reasoningEffort,
+        selectedConfig,
+      };
+    }
+
+    void loadCapabilities();
     return () => { cancelled = true; };
-  }, [activeView, activeSession.id, sessionAgent?.id, sessionAgent?.runtimeId]);
+  }, [activeView, activeSessionId, sessionAgent?.id, sessionAgent?.runtimeId]);
 
   useEffect(() => {
     return () => {
@@ -411,25 +436,21 @@ export function ChatPage() {
     setSessions((current) => current.map((session) => (session.id === sessionId ? updater(session) : session)));
   }
 
-  // 标记当前会话已被用户手动选择模型/模式，避免后续 loadCapabilities 覆盖
-  function markUserSelected() {
-    userSelectedSessionsRef.current.add(activeSession.id);
-  }
-
-  // 保存当前会话的选择快照（切换会话时可恢复）
-  function snapshotSelection(sessionId: string, patch: Partial<{
-    modelFamily: string;
-    accessMode: string;
-    reasoningEffort: string;
-    selectedConfig: Record<string, string | number | boolean>;
-  }>) {
-    const prev = selectionBySessionRef.current[sessionId] ?? {
-      modelFamily: selectedModelFamily,
-      accessMode,
-      reasoningEffort,
-      selectedConfig,
-    };
-    selectionBySessionRef.current[sessionId] = { ...prev, ...patch };
+  /** 更新当前会话的 config */
+  function updateSessionConfig(patch: Partial<SessionConfig>) {
+    setConfigBySession((prev) => {
+      const current = prev[activeSessionId];
+      const next: SessionConfig = current
+        ? { ...current, ...patch }
+        : {
+            modelFamily: "",
+            accessMode: "",
+            reasoningEffort: "medium",
+            selectedConfig: {},
+            ...patch,
+          };
+      return { ...prev, [activeSessionId]: next };
+    });
   }
 
   function setSessionRunning(sessionId: string, running: boolean) {
@@ -635,23 +656,19 @@ export function ChatPage() {
       const nextSessionId = event.conversationId;
       activeAssistantMessageIdBySessionRef.current[nextSessionId] = event.assistantMessage.id;
       activeStreamSessionIdByTurnRef.current[nextSessionId] = nextSessionId;
-      // 发送即视为用户确定了当前模型/模式选择；把标记和快照从旧 id 迁移到真实 id
-      userSelectedSessionsRef.current.add(nextSessionId);
-      if (nextSessionId !== sessionId) {
-        const draftSnap = selectionBySessionRef.current[sessionId];
-        if (draftSnap && !selectionBySessionRef.current[nextSessionId]) {
-          selectionBySessionRef.current[nextSessionId] = draftSnap;
+
+      // draft → real id 转换时，迁移 capabilities 和 config
+      if (nextSessionId !== sessionId && isDraftSessionId(sessionId)) {
+        const draftCaps = capabilitiesBySession[sessionId];
+        if (draftCaps && !capabilitiesBySession[nextSessionId]) {
+          setCapabilitiesBySession((prev) => ({ ...prev, [nextSessionId]: draftCaps }));
+        }
+        const draftCfg = configBySession[sessionId];
+        if (draftCfg && !configBySession[nextSessionId]) {
+          setConfigBySession((prev) => ({ ...prev, [nextSessionId]: draftCfg }));
         }
       }
-      // 无论是否手动改过，都把当前 UI 选择固化为该会话的快照
-      if (!selectionBySessionRef.current[nextSessionId]) {
-        selectionBySessionRef.current[nextSessionId] = {
-          modelFamily: selectedModelFamily,
-          accessMode,
-          reasoningEffort,
-          selectedConfig,
-        };
-      }
+
       if (nextSessionId !== sessionId) {
         setSessionRunning(sessionId, false);
       }
@@ -861,28 +878,31 @@ export function ChatPage() {
     abortControllerRef.current = abortController;
 
     try {
+      // 从当前会话的 config 读取配置
+      const cfg = configBySession[sessionId] ?? currentConfig;
+      const models = currentCapabilities?.models ?? [];
+
       // 解析模型 ID：
       // - Codex 用 "模型族[推理强度]" 格式（模型 id 本身含括号）
       // - Claude Code 用完整模型 id（如 claude-sonnet-4-5），推理强度走 selectedConfig
-      const models = sessionCapabilities?.models ?? [];
       const usesBracketFormat = models.some((m) => /\[.*\]$/.test(m.id));
       let fullModelId: string | undefined;
-      if (usesBracketFormat && selectedModelFamily && reasoningEffort) {
-        fullModelId = `${selectedModelFamily}[${reasoningEffort}]`;
-      } else if (selectedModelFamily) {
+      if (usesBracketFormat && cfg?.modelFamily && cfg.reasoningEffort) {
+        fullModelId = `${cfg.modelFamily}[${cfg.reasoningEffort}]`;
+      } else if (cfg?.modelFamily) {
         // 直接匹配完整模型 id（Claude Code）或用模型族
-        const exact = models.find((m) => m.id === selectedModelFamily);
-        fullModelId = exact?.id ?? selectedModelFamily;
+        const exact = models.find((m) => m.id === cfg.modelFamily);
+        fullModelId = exact?.id ?? cfg.modelFamily;
       }
       await streamAgentTurn({
-        accessMode,
+        accessMode: cfg?.accessMode,
         conversationId,
         input: text,
         modelId: fullModelId,
         onEvent: (event) => handleAgentEvent(sessionId, event),
         signal: abortController.signal,
-        reasoningEffort,
-        selectedConfig,
+        reasoningEffort: cfg?.reasoningEffort,
+        selectedConfig: cfg?.selectedConfig,
         turnId
       });
     } catch (error) {
@@ -1001,25 +1021,28 @@ export function ChatPage() {
               />
               <ChatComposer
                 activeTurnId={isActiveSessionRunning ? activeTurnId : null}
-                configOptions={sessionCapabilities?.configOptions ?? []}
+                configOptions={currentCapabilities?.configOptions ?? []}
                 contextUsage={contextUsage}
                 draft={draft}
-                accessMode={accessMode}
+                accessMode={currentConfig?.accessMode ?? ""}
                 agent={sessionAgent}
-                modes={sessionCapabilities?.modes ?? []}
-                models={sessionCapabilities?.models ?? []}
-                onAccessModeChange={(v) => { markUserSelected(); snapshotSelection(activeSession.id, { accessMode: v }); setAccessMode(v); }}
-                onConfigChange={(optionId, value) => { markUserSelected(); setSelectedConfig((prev) => { const next = { ...prev, [optionId]: value }; snapshotSelection(activeSession.id, { selectedConfig: next }); return next; }); }}
+                modes={currentCapabilities?.modes ?? []}
+                models={currentCapabilities?.models ?? []}
+                onAccessModeChange={(v) => updateSessionConfig({ accessMode: v })}
+                onConfigChange={(optionId, value) => {
+                  const next = { ...(currentConfig?.selectedConfig ?? {}), [optionId]: value };
+                  updateSessionConfig({ selectedConfig: next });
+                }}
                 onDraftChange={setDraft}
-                onModelFamilyChange={(v) => { markUserSelected(); snapshotSelection(activeSession.id, { modelFamily: v }); setSelectedModelFamily(v); }}
-                onReasoningEffortChange={(v) => { markUserSelected(); snapshotSelection(activeSession.id, { reasoningEffort: v }); setReasoningEffort(v); }}
+                onModelFamilyChange={(v) => updateSessionConfig({ modelFamily: v })}
+                onReasoningEffortChange={(v) => updateSessionConfig({ reasoningEffort: v })}
                 onResolveApproval={(decision) => void resolveApproval(decision)}
                 onSendMessage={() => void sendMessage()}
                 onStopTurn={() => void stopCurrentTurn()}
                 pendingApproval={activePendingApproval}
-                reasoningEffort={reasoningEffort}
-                selectedConfig={selectedConfig}
-                selectedModelFamily={selectedModelFamily}
+                reasoningEffort={currentConfig?.reasoningEffort ?? ""}
+                selectedConfig={currentConfig?.selectedConfig ?? {}}
+                selectedModelFamily={currentConfig?.modelFamily ?? ""}
               />
             </main>
           )}
