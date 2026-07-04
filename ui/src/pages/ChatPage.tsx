@@ -280,13 +280,16 @@ export function ChatPage() {
         // 如果当前会话已有缓存，跳过重复初始化（切换回该会话时从缓存读取）
         const existingCaps = capabilitiesBySession[activeSessionId];
         if (existingCaps && activeSessionId !== DRAFT_SESSION_ID) {
-          // capabilities 已缓存；检查 config 是否已初始化
-          if (!configBySession[activeSessionId]) {
-            const defaultConfig = buildDefaultConfig(existingCaps);
-            if (!cancelled) {
-              setConfigBySession((prev) => ({ ...prev, [activeSessionId]: defaultConfig }));
+          // capabilities 已缓存；使用函数式更新确保不覆盖用户的选择
+          setConfigBySession((prev) => {
+            // 如果 config 已存在，不覆盖（保留用户的选择）
+            if (prev[activeSessionId]) {
+              return prev;
             }
-          }
+            // 否则设置默认值
+            const defaultConfig = buildDefaultConfig(existingCaps);
+            return { ...prev, [activeSessionId]: defaultConfig };
+          });
           return;
         }
 
@@ -297,13 +300,14 @@ export function ChatPage() {
         // 写入 capabilities 缓存
         setCapabilitiesBySession((prev) => ({ ...prev, [activeSessionId]: caps }));
 
-        // 初始化 config（仅当该会话没有 config 时）
-        if (!configBySession[activeSessionId]) {
-          const defaultConfig = buildDefaultConfig(caps);
-          if (!cancelled) {
-            setConfigBySession((prev) => ({ ...prev, [activeSessionId]: defaultConfig }));
+        // 初始化 config（仅当该会话没有 config 时）— 使用函数式更新确保不覆盖
+        setConfigBySession((prev) => {
+          if (prev[activeSessionId]) {
+            return prev;  // config 已存在，不覆盖
           }
-        }
+          const defaultConfig = buildDefaultConfig(caps);
+          return { ...prev, [activeSessionId]: defaultConfig };
+        });
       } catch (error) {
         console.error("Failed to load session capabilities:", error);
         // ... fallback 逻辑（保留原有行为，但写入 capabilitiesBySession 而非全局 state）
@@ -375,11 +379,14 @@ export function ChatPage() {
 
         setCapabilitiesBySession((prev) => ({ ...prev, [activeSessionId]: fallbackCaps }));
 
-        // 初始化 config（仅当该会话没有 config 时）
-        if (!configBySession[activeSessionId]) {
+        // 初始化 config（仅当该会话没有 config 时）— 使用函数式更新确保不覆盖
+        setConfigBySession((prev) => {
+          if (prev[activeSessionId]) {
+            return prev;  // config 已存在，不覆盖
+          }
           const defaultConfig = buildDefaultConfig(fallbackCaps);
-          setConfigBySession((prev) => ({ ...prev, [activeSessionId]: defaultConfig }));
-        }
+          return { ...prev, [activeSessionId]: defaultConfig };
+        });
       } catch (fallbackError) {
         console.error("Fallback model loading also failed:", fallbackError);
       }
@@ -660,12 +667,24 @@ export function ChatPage() {
       // draft → real id 转换时，迁移 capabilities 和 config
       if (nextSessionId !== sessionId && isDraftSessionId(sessionId)) {
         const draftCaps = capabilitiesBySession[sessionId];
-        if (draftCaps && !capabilitiesBySession[nextSessionId]) {
-          setCapabilitiesBySession((prev) => ({ ...prev, [nextSessionId]: draftCaps }));
+        if (draftCaps) {
+          setCapabilitiesBySession((prev) => {
+            // 如果目标 session 已有 capabilities，不覆盖
+            if (prev[nextSessionId]) {
+              return prev;
+            }
+            return { ...prev, [nextSessionId]: draftCaps };
+          });
         }
         const draftCfg = configBySession[sessionId];
-        if (draftCfg && !configBySession[nextSessionId]) {
-          setConfigBySession((prev) => ({ ...prev, [nextSessionId]: draftCfg }));
+        if (draftCfg) {
+          setConfigBySession((prev) => {
+            // 如果目标 session 已有 config，不覆盖（保留用户的选择）
+            if (prev[nextSessionId]) {
+              return prev;
+            }
+            return { ...prev, [nextSessionId]: draftCfg };
+          });
         }
       }
 
