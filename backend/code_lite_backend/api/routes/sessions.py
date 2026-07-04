@@ -36,7 +36,16 @@ async def initialize_session(
 
     使用 AcpRuntimeManager 复用连接和 session，不再每轮临时 spawn。
     """
-    agent_id = services.agent_runtime_config_store.resolve_adapter(None)
+    # 优先从会话绑定的 agent 解析，其次 fallback 到全局 activeAdapter
+    persisted_agent = None
+    if conversation_id and not conversation_id.startswith("__"):
+        persisted = services.conversation_store.get_conversation(conversation_id)
+        if persisted and isinstance(persisted.get("session"), dict):
+            raw_agent = persisted["session"].get("agent")
+            if isinstance(raw_agent, dict):
+                persisted_agent = str(raw_agent.get("id") or "").strip() or None
+
+    agent_id = services.agent_runtime_config_store.resolve_adapter(persisted_agent)
     agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
     agent_label = str(agent_metadata.get("label") or agent_id)
 
@@ -93,7 +102,9 @@ async def _initialize_acp_session(
         command = _string_list(claude_runtime.get("command"))
         if not command:
             command = agent_runtime_config_store.managed_claude_command()
-        env = dict(__import__("os").environ)
+        from code_lite_backend.agents.runtimes import claude_env
+        logs_dir = str(runtime_config.logs_dir / "claude-agent-acp")
+        env = claude_env(claude_runtime, logs_dir=logs_dir)
         default_mode = str(claude_runtime.get("mode") or descriptor.default_mode)
     else:
         command = descriptor.default_command

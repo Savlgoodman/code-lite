@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -31,6 +32,8 @@ from code_lite_backend.schemas.agent import (
 )
 from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigStore
 from code_lite_backend.services.approvals import ApprovalBroker
+
+logger = logging.getLogger(__name__)
 
 
 class AcpAgentAdapter:
@@ -175,6 +178,10 @@ class AcpAgentAdapter:
     ) -> None:
         command = self._resolve_command()
         env = self._resolve_env()
+        logger.info(
+            "Starting turn %s for conversation %s (runtime=%s, command=%s)",
+            request.turn_id, request.conversation_id, self.name, command[0],
+        )
         try:
             await output_queue.put({
                 "type": "agent.run.started",
@@ -195,21 +202,21 @@ class AcpAgentAdapter:
                 workspace=request.workspace,
                 approvals=self._approvals,
             )
+            logger.info("Connection ready for %s (key=%s)", self.name, connection.key.runtime_id)
 
             # 获取 conversation lock（串行化同一会话的 prompt）
             lock = self._runtime_manager.get_turn_lock(request.conversation_id)
             async with lock:
-                # 更新 client handler 以使用 persistent connection 的 client
-                # 注意：sdk_connection 的回调是通过 connection 创建时的 client_handler
-                # 我们需要确保 events 能正确路由到当前 turn 的 output_queue
                 connection_sdk = connection.sdk_connection
-                # 把 connection 的 client_handler 的 output_queue 临时指向当前 turn 的 queue
                 original_handler = connection._client_handler
+
+                # 注册当前 turn 的路由（多路复用）
                 if original_handler is not None:
-                    original_handler.output_queue = output_queue  # type: ignore[assignment]
-                    original_handler.conversation_id = request.conversation_id
-                    original_handler.turn_id = request.turn_id
-                    original_handler.native_session_id = None
+                    original_handler.register_turn(
+                        conversation_id=request.conversation_id,
+                        turn_id=request.turn_id,
+                        output_queue=output_queue,
+                    )
 
                 # 确保 native session 存在
                 binding = await self._runtime_manager.ensure_session(
@@ -217,26 +224,42 @@ class AcpAgentAdapter:
                     conversation_id=request.conversation_id,
                     workspace=request.workspace,
                 )
+
+                # 注册 session_id 到 route 的映射
                 if original_handler is not None:
-                    original_handler.native_session_id = binding.native_session_id
+                    original_handler.update_route_session(
+                        binding.native_session_id, request.conversation_id,
+                    )
                 client.native_session_id = binding.native_session_id
+                logger.info(
+                    "Session bound: %s -> native %s",
+                    request.conversation_id[:12], binding.native_session_id[:12],
+                )
 
                 # 配置 session（mode, model, reasoning effort）
                 await self._configure_session(connection_sdk, binding, request)
 
                 # 发送 prompt
+                logger.info("Sending prompt to session %s", binding.native_session_id[:12])
                 prompt_result = await connection_sdk.prompt(
                     session_id=binding.native_session_id,
                     prompt=[acp.text_block(request.prompt)],
                 )
+                logger.info("Prompt completed for %s (stop=%s)", request.turn_id, getattr(prompt_result, "stop_reason", None))
 
                 await output_queue.put({
                     "type": "agent.text.completed",
                     "conversationId": request.conversation_id,
                     "turnId": request.turn_id,
                 })
-                usage_dict = client.latest_usage.to_dict() if client.latest_usage else (
-                    original_handler.latest_usage.to_dict() if original_handler and original_handler.latest_usage else None
+                # 从 route 获取最新 usage
+                route = original_handler._resolve_route(binding.native_session_id) if original_handler else None
+                route_usage = route.latest_usage if route else None
+                usage_dict = (
+                    route_usage.to_dict() if route_usage else
+                    client.latest_usage.to_dict() if client.latest_usage else
+                    original_handler.latest_usage.to_dict() if original_handler and original_handler.latest_usage else
+                    None
                 )
                 await output_queue.put({
                     "type": "agent.run.completed",
@@ -252,6 +275,7 @@ class AcpAgentAdapter:
                 })
 
         except asyncio.CancelledError:
+            logger.info("Turn %s cancelled", request.turn_id)
             await output_queue.put({
                 "type": "agent.run.failed",
                 "conversationId": request.conversation_id,
@@ -260,6 +284,7 @@ class AcpAgentAdapter:
             })
             raise
         except FileNotFoundError as exc:
+            logger.error("ACP process not found for %s: %s", self.name, exc)
             await output_queue.put({
                 "type": "agent.run.failed",
                 "conversationId": request.conversation_id,
@@ -267,6 +292,7 @@ class AcpAgentAdapter:
                 "error": f"{self.descriptor.label} ACP 启动失败：{exc}",
             })
         except Exception as exc:
+            logger.exception("Turn %s failed for conversation %s", request.turn_id, request.conversation_id)
             # 尝试从 connection 获取 stderr
             connection = self._runtime_manager.get_connection_for_conversation(request.conversation_id)
             stderr = ""
@@ -280,6 +306,9 @@ class AcpAgentAdapter:
                 "error": f"{self.descriptor.label} ACP 运行失败：{type(exc).__name__}: {exc}{suffix}",
             })
         finally:
+            # 清理 route
+            if original_handler is not None:
+                original_handler.remove_turn(request.conversation_id)
             await output_queue.put(None)
 
     async def _configure_session(
