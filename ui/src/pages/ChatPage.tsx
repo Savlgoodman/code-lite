@@ -179,6 +179,11 @@ export function ChatPage() {
   const currentCapabilities = capabilitiesBySession[activeSessionId] ?? null;
   const currentConfig = configBySession[activeSessionId] ?? null;
 
+  // ─── 同步 state 到 ref（确保 sendMessage 读取到最新值）───
+  useEffect(() => {
+    configBySessionRef.current = configBySession;
+  }, [configBySession]);
+
   // ─── 向后兼容：draft session 时仍用全局 activeAgent ───
   // draft session 的 capabilities 通过 __probe__ 获取，存储到 draft id 下
   // 一旦 draft → real id，会把 draft 的 caps/config 迁移到 real id
@@ -189,6 +194,8 @@ export function ChatPage() {
   // per-session stream state
   const activeAssistantMessageIdBySessionRef = useRef<Record<string, string>>({});
   const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
+  // 使用 ref 存储最新的 config，确保 sendMessage 读取到最新值（避免闭包捕获旧值）
+  const configBySessionRef = useRef<Record<string, SessionConfig>>({});
 
   const activeSession = sessions.find((item) => item.id === activeSessionId) ?? sessions[0];
   const activeMessages = messages[activeSession.id] ?? [];
@@ -456,6 +463,8 @@ export function ChatPage() {
             selectedConfig: {},
             ...patch,
           };
+      // 同步更新 ref，确保 sendMessage 读取到最新值
+      configBySessionRef.current = { ...prev, [activeSessionId]: next };
       return { ...prev, [activeSessionId]: next };
     });
   }
@@ -897,8 +906,8 @@ export function ChatPage() {
     abortControllerRef.current = abortController;
 
     try {
-      // 从当前会话的 config 读取配置
-      const cfg = configBySession[sessionId] ?? currentConfig;
+      // 从 ref 读取最新的 config（避免闭包捕获旧值）
+      const cfg = configBySessionRef.current[sessionId] ?? currentConfig;
       const models = currentCapabilities?.models ?? [];
 
       // 解析模型 ID：
