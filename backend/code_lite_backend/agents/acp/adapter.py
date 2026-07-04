@@ -194,15 +194,16 @@ class AcpAgentAdapter:
                 },
             })
 
-            # 使用 RuntimeManager 确保连接存在
+            # 使用 RuntimeManager 确保连接存在（每个 conversation 独立连接）
             connection = await self._runtime_manager.ensure_connection(
                 descriptor=self.descriptor,
                 command=command,
                 env=env,
                 workspace=request.workspace,
+                conversation_id=request.conversation_id,
                 approvals=self._approvals,
             )
-            logger.info("Connection ready for %s (key=%s)", self.name, connection.key.runtime_id)
+            logger.info("Connection ready for %s (conversation=%s)", self.name, request.conversation_id[:12])
 
             # 获取 conversation lock（串行化同一会话的 prompt）
             lock = self._runtime_manager.get_turn_lock(request.conversation_id)
@@ -210,13 +211,15 @@ class AcpAgentAdapter:
                 connection_sdk = connection.sdk_connection
                 original_handler = connection._client_handler
 
-                # 注册当前 turn 的路由（多路复用）
+                # 直接更新 handler 状态（不需要多路复用——每个 connection 只有一个 handler，
+                # 只服务于一个 conversation）
                 if original_handler is not None:
-                    original_handler.register_turn(
-                        conversation_id=request.conversation_id,
-                        turn_id=request.turn_id,
-                        output_queue=output_queue,
-                    )
+                    original_handler.conversation_id = request.conversation_id
+                    original_handler.turn_id = request.turn_id
+                    original_handler.output_queue = output_queue  # type: ignore[assignment]
+                    original_handler.native_session_id = None
+                    # 重置 mapper 去重状态（新 turn）
+                    original_handler.mapper.reset_dedup()
 
                 # 确保 native session 存在
                 binding = await self._runtime_manager.ensure_session(
@@ -225,11 +228,8 @@ class AcpAgentAdapter:
                     workspace=request.workspace,
                 )
 
-                # 注册 session_id 到 route 的映射
                 if original_handler is not None:
-                    original_handler.update_route_session(
-                        binding.native_session_id, request.conversation_id,
-                    )
+                    original_handler.native_session_id = binding.native_session_id
                 client.native_session_id = binding.native_session_id
                 logger.info(
                     "Session bound: %s -> native %s",
@@ -252,13 +252,11 @@ class AcpAgentAdapter:
                     "conversationId": request.conversation_id,
                     "turnId": request.turn_id,
                 })
-                # 从 route 获取最新 usage
-                route = original_handler._resolve_route(binding.native_session_id) if original_handler else None
-                route_usage = route.latest_usage if route else None
+                # 获取 usage（handler 是 per-conversation 的，直接用）
+                handler_usage = original_handler.latest_usage if original_handler else None
                 usage_dict = (
-                    route_usage.to_dict() if route_usage else
+                    handler_usage.to_dict() if handler_usage else
                     client.latest_usage.to_dict() if client.latest_usage else
-                    original_handler.latest_usage.to_dict() if original_handler and original_handler.latest_usage else
                     None
                 )
                 await output_queue.put({
@@ -306,9 +304,6 @@ class AcpAgentAdapter:
                 "error": f"{self.descriptor.label} ACP 运行失败：{type(exc).__name__}: {exc}{suffix}",
             })
         finally:
-            # 清理 route
-            if original_handler is not None:
-                original_handler.remove_turn(request.conversation_id)
             await output_queue.put(None)
 
     async def _configure_session(

@@ -28,12 +28,14 @@ logger = logging.getLogger(__name__)
 class ConnectionKey:
     """连接复用键。
 
-    相同 key 的 connection 可以共享，避免重复 spawn 子进程。
+    每个 conversation 一个独立连接，彻底隔离事件流。
+    同一 conversation 的多轮 turn 复用同一连接。
     """
 
     runtime_id: str
     workspace: str
     config_mode: str
+    conversation_id: str  # 每个会话独立隔离
     command_fingerprint: str
     env_fingerprint: str
 
@@ -132,13 +134,15 @@ class AcpRuntimeManager:
         command: list[str],
         env: dict[str, str],
         workspace: Path,
+        conversation_id: str,
         approvals: ApprovalBroker,
     ) -> AcpRuntimeConnection:
         """确保存在 ready 的 ACP 连接。
 
-        如果已有匹配的连接则复用，否则 spawn 新进程并 initialize。
+        每个 conversation 一个独立连接，彻底隔离事件流。
+        同一 conversation 的多轮 turn 复用同一连接。
         """
-        key = self._build_key(descriptor, command, env, workspace)
+        key = self._build_key(descriptor, command, env, workspace, conversation_id)
 
         # 已有 ready connection 则复用
         existing = self._connections.get(key)
@@ -493,6 +497,7 @@ class AcpRuntimeManager:
         command: list[str],
         env: dict[str, str],
         workspace: Path,
+        conversation_id: str = "",
     ) -> ConnectionKey:
         command_fp = hashlib.sha256(" ".join(command).encode()).hexdigest()[:12]
         # env fingerprint: 只记录 key 名，不记录 value（避免泄露 secret）
@@ -502,6 +507,7 @@ class AcpRuntimeManager:
             runtime_id=descriptor.id,
             workspace=str(workspace),
             config_mode=descriptor.config_mode,
+            conversation_id=conversation_id,
             command_fingerprint=command_fp,
             env_fingerprint=env_fp,
         )
