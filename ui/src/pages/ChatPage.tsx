@@ -185,19 +185,6 @@ export function ChatPage() {
     configBySessionRef.current = configBySession;
   }, [configBySession]);
 
-  // ─── context usage 变化时 debounce 保存到后端 ───
-  useEffect(() => {
-    for (const [sessionId, usage] of Object.entries(contextUsageBySession)) {
-      if (isDraftSessionId(sessionId)) continue;
-      const prevTimer = contextUsageSaveTimerRef.current[sessionId];
-      if (prevTimer) window.clearTimeout(prevTimer);
-      contextUsageSaveTimerRef.current[sessionId] = window.setTimeout(() => {
-        saveConversationConfig(sessionId, { contextUsage: usage } as unknown as Record<string, unknown>)
-          .catch((err) => console.error("Failed to save context usage:", err));
-      }, 2000); // context usage 变化频繁，2s debounce
-    }
-  }, [contextUsageBySession]);
-
   // ─── 向后兼容：draft session 时仍用全局 activeAgent ───
   // draft session 的 capabilities 通过 __probe__ 获取，存储到 draft id 下
   // 一旦 draft → real id，会把 draft 的 caps/config 迁移到 real id
@@ -206,7 +193,6 @@ export function ChatPage() {
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
   const streamFlushTimerRef = useRef<number | null>(null);
   const configSaveTimerRef = useRef<Record<string, number>>({});
-  const contextUsageSaveTimerRef = useRef<Record<string, number>>({});
   // per-session stream state
   const activeAssistantMessageIdBySessionRef = useRef<Record<string, string>>({});
   const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
@@ -492,10 +478,6 @@ export function ChatPage() {
       for (const timer of Object.values(configSaveTimerRef.current)) {
         window.clearTimeout(timer);
       }
-      // 清理所有 context usage save timers
-      for (const timer of Object.values(contextUsageSaveTimerRef.current)) {
-        window.clearTimeout(timer);
-      }
     };
   }, []);
 
@@ -612,22 +594,58 @@ export function ChatPage() {
           ...current,
           [sessionId]: isRunning ? mergeLoadedMessages(conversation.messages, current[sessionId]) : conversation.messages
         }));
-        // 恢复保存的配置
+
+        // 从最后一条 assistant 消息恢复 model 和 context usage
+        const messages = isRunning
+          ? mergeLoadedMessages(conversation.messages, undefined)
+          : conversation.messages;
+        const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+
+        // 恢复 config（从 session.config 或最后一条消息的 model 字段）
         const savedConfig = (conversation.session as unknown as Record<string, unknown>).config;
+        let restoredModel = "";
+        let restoredEffort = "";
         if (savedConfig && typeof savedConfig === "object") {
+          const cfg = savedConfig as Partial<SessionConfig>;
+          restoredModel = String(cfg.modelFamily ?? "");
+          restoredEffort = String(cfg.reasoningEffort ?? "");
+        }
+        // fallback: 从最后一条消息的 model 字段解析
+        if (!restoredModel && lastAssistant?.model) {
+          const modelInfo = lastAssistant.model as Record<string, unknown>;
+          restoredModel = String(modelInfo.runtimeModel ?? modelInfo.model ?? "");
+          restoredEffort = String(modelInfo.reasoningEffort ?? "");
+        }
+        // 从 session.agent.mode 恢复 accessMode
+        const agentMode = (conversation.session as unknown as Record<string, unknown>).agent;
+        const restoredAccessMode = typeof agentMode === "object" && agentMode
+          ? String((agentMode as Record<string, unknown>).mode ?? "")
+          : "";
+
+        if (restoredModel || restoredAccessMode) {
           setConfigBySession((prev) => {
             if (prev[sessionId]) return prev; // 已有本地配置，不覆盖
-            const cfg = savedConfig as Partial<SessionConfig>;
             return {
               ...prev,
               [sessionId]: {
-                modelFamily: String(cfg.modelFamily ?? ""),
-                accessMode: String(cfg.accessMode ?? ""),
-                reasoningEffort: String(cfg.reasoningEffort ?? "medium"),
-                selectedConfig: (cfg.selectedConfig as Record<string, string | number | boolean>) ?? {},
+                modelFamily: restoredModel,
+                accessMode: restoredAccessMode || "read-only",
+                reasoningEffort: restoredEffort || "medium",
+                selectedConfig: restoredEffort ? { reasoning_effort: restoredEffort } : {},
               },
             };
           });
+        }
+
+        // 恢复 context usage（从最后一条消息的 usage 字段）
+        if (lastAssistant?.usage) {
+          const usage = lastAssistant.usage as UsageStats;
+          if (usage.contextUsedTokens != null || usage.contextWindowTokens != null) {
+            setContextUsageBySession((prev) => {
+              if (prev[sessionId]) return prev;
+              return { ...prev, [sessionId]: usage };
+            });
+          }
         }
       })
       .catch((error) => console.error(error));

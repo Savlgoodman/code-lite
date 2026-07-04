@@ -66,6 +66,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   createdAt: number;
+  model?: Record<string, unknown>;
   reasoning?: string;
   streaming?: boolean;
   error?: string;
