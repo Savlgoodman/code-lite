@@ -171,8 +171,9 @@ export function ChatPage() {
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
   const streamFlushTimerRef = useRef<number | null>(null);
-  const activeAssistantMessageIdRef = useRef<string | null>(null);
-  const activeStreamSessionIdRef = useRef<string | null>(null);
+  // per-session stream state
+  const activeAssistantMessageIdBySessionRef = useRef<Record<string, string>>({});
+  const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
 
   const activeSession = sessions.find((item) => item.id === activeSessionId) ?? sessions[0];
   const activeMessages = messages[activeSession.id] ?? [];
@@ -580,30 +581,35 @@ export function ChatPage() {
   function handleAgentEvent(sessionId: string, event: AgentEvent) {
     if (event.type === "conversation.turn.started") {
       const nextSessionId = event.conversationId;
-      activeAssistantMessageIdRef.current = event.assistantMessage.id;
-      activeStreamSessionIdRef.current = nextSessionId;
+      activeAssistantMessageIdBySessionRef.current[nextSessionId] = event.assistantMessage.id;
+      activeStreamSessionIdByTurnRef.current[nextSessionId] = nextSessionId;
       if (nextSessionId !== sessionId) {
         setSessionRunning(sessionId, false);
       }
       setSessionRunning(nextSessionId, true);
-      setActiveSessionId(nextSessionId);
-      setSessions((current) => {
-        const withoutDraft = current.filter((session) => session.id !== sessionId);
-        const existingIndex = withoutDraft.findIndex((session) => session.id === nextSessionId);
-        if (existingIndex >= 0) {
-          return withoutDraft.map((session) => (session.id === nextSessionId ? event.session : session));
+      // 只有当前是 draft 或空时才自动切换 — 不强制打断用户正在看的会话
+      setActiveSessionId((current) => {
+        if (isDraftSessionId(current) || !current) {
+          return nextSessionId;
         }
-        return [event.session, ...withoutDraft];
+        return current;
+      });
+      setSessions((current) => {
+        // 移除 draft 和同 id 的旧会话，用事件中的真实 session 替换
+        const cleaned = current.filter(
+          (session) => !isDraftSessionId(session.id) && session.id !== nextSessionId,
+        );
+        return [event.session, ...cleaned];
       });
       setMessages((current) => ({
-        ...Object.fromEntries(Object.entries(current).filter(([id]) => id !== sessionId)),
-        [nextSessionId]: [...(current[nextSessionId] ?? []), event.userMessage, event.assistantMessage]
+        ...current,
+        [nextSessionId]: [...(current[nextSessionId] ?? []), event.userMessage, event.assistantMessage],
       }));
       return;
     }
 
-    const assistantMessageId = activeAssistantMessageIdRef.current;
-    const targetSessionId = activeStreamSessionIdRef.current ?? sessionId;
+    const targetSessionId = sessionId; // 事件来自哪个 turn 就用哪个 session
+    const assistantMessageId = activeAssistantMessageIdBySessionRef.current[targetSessionId];
     if (!assistantMessageId) {
       return;
     }
@@ -781,8 +787,8 @@ export function ChatPage() {
     setDraft("");
     setActiveTurnIdBySession((prev) => ({ ...prev, [sessionId]: turnId }));
     setSessionRunning(sessionId, true);
-    activeAssistantMessageIdRef.current = null;
-    activeStreamSessionIdRef.current = null;
+    delete activeAssistantMessageIdBySessionRef.current[sessionId];
+    delete activeStreamSessionIdByTurnRef.current[sessionId];
     setPendingApproval(null);
 
     const abortController = new AbortController();
@@ -826,7 +832,8 @@ export function ChatPage() {
         delete next[sessionId];
         return next;
       });
-      activeStreamSessionIdRef.current = null;
+      delete activeAssistantMessageIdBySessionRef.current[sessionId];
+      delete activeStreamSessionIdByTurnRef.current[sessionId];
       abortControllerRef.current = null;
     }
   }
