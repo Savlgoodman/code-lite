@@ -936,3 +936,54 @@ conversations/{conversation_id}/
 
 **设计完成日期**：2026-07-05  
 **文档版本**：v1.0
+
+---
+
+## 12. 补充说明
+
+### 12.1 Per-conversation 连接的设计权衡
+
+当前设计每个会话一个 ACP 连接。替代方案包括：
+- 方案 A：workspace 级连接 + 全局队列（节省内存但并发受限）
+- 方案 B：混合策略，每连接服务 1-3 个会话（负载均衡）
+
+**当前建议**：保持 per-conversation 设计，代码简单、调试容易、资源开销可接受（2-3 个活跃会话 ~150-300MB）。
+
+### 12.2 Modes 统一处理
+
+后端返回列表，前端统一渲染。新增模式无需改前端代码。
+
+### 12.3 Capabilities Caching
+
+缓存 session/new 结果到 AcpSessionBinding.capabilities，切换会话时从缓存读取，无需重复初始化。
+
+### 12.4 ChatPage 重构建议
+
+**核心问题**：切换会话时输入框配置更新不及时，多会话状态管理混乱。
+
+**重构方案**：Per-session state 隔离
+
+```typescript
+// Per-session maps
+const [capabilitiesBySession, setCapabilitiesBySession] = useState<Record<string, SessionCapabilities>>({});
+const [configBySession, setConfigBySession] = useState<Record<string, SessionConfig>>({});
+
+// 当前会话的配置
+const currentConfig = configBySession[activeSession.id];
+const currentCaps = capabilitiesBySession[activeSession.id];
+
+// 更新配置
+function updateSessionConfig(patch) {
+  setConfigBySession(prev => ({
+    ...prev,
+    [activeSession.id]: { ...prev[activeSession.id], ...patch },
+  }));
+}
+```
+
+**收益**：切换会话即时更新配置，每个会话的模型/模式/思考强度独立。
+
+---
+
+**文档版本**：v1.1  
+**最后更新**：2026-07-05（补充 §12）
