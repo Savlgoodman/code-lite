@@ -22,6 +22,7 @@ import {
   deleteConversation,
   listConversations,
   loadConversation,
+  saveConversationConfig,
   updateConversationArchiveState
 } from "../services/conversationStore";
 import { loadAgentRuntimeModels, loadAgentRuntimeSettings, loadModelSettings } from "../services/settingsStore";
@@ -191,6 +192,7 @@ export function ChatPage() {
   const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
   const streamFlushTimerRef = useRef<number | null>(null);
+  const configSaveTimerRef = useRef<Record<string, number>>({});
   // per-session stream state
   const activeAssistantMessageIdBySessionRef = useRef<Record<string, string>>({});
   const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
@@ -443,6 +445,10 @@ export function ChatPage() {
       if (streamFlushTimerRef.current !== null) {
         window.clearTimeout(streamFlushTimerRef.current);
       }
+      // 清理所有 config save timers
+      for (const timer of Object.values(configSaveTimerRef.current)) {
+        window.clearTimeout(timer);
+      }
     };
   }, []);
 
@@ -450,10 +456,13 @@ export function ChatPage() {
     setSessions((current) => current.map((session) => (session.id === sessionId ? updater(session) : session)));
   }
 
-  /** 更新当前会话的 config */
+  /** 更新当前会话的 config（同时保存到后端） */
   function updateSessionConfig(patch: Partial<SessionConfig>) {
+    const sessionId = activeSessionId;
+    if (isDraftSessionId(sessionId)) return; // draft session 不保存
+
     setConfigBySession((prev) => {
-      const current = prev[activeSessionId];
+      const current = prev[sessionId];
       const next: SessionConfig = current
         ? { ...current, ...patch }
         : {
@@ -463,9 +472,18 @@ export function ChatPage() {
             selectedConfig: {},
             ...patch,
           };
-      const result = { ...prev, [activeSessionId]: next };
+      const result = { ...prev, [sessionId]: next };
       // 同步更新 ref，确保后续事件处理器立即读取到最新值
       configBySessionRef.current = result;
+
+      // debounce 保存到后端（500ms 内只保存最后一次）
+      const prevTimer = configSaveTimerRef.current[sessionId];
+      if (prevTimer) window.clearTimeout(prevTimer);
+      configSaveTimerRef.current[sessionId] = window.setTimeout(() => {
+        saveConversationConfig(sessionId, next as unknown as Record<string, unknown>)
+          .catch((err) => console.error("Failed to save session config:", err));
+      }, 500);
+
       return result;
     });
   }
@@ -547,6 +565,23 @@ export function ChatPage() {
           ...current,
           [sessionId]: isRunning ? mergeLoadedMessages(conversation.messages, current[sessionId]) : conversation.messages
         }));
+        // 恢复保存的配置
+        const savedConfig = (conversation.session as unknown as Record<string, unknown>).config;
+        if (savedConfig && typeof savedConfig === "object") {
+          setConfigBySession((prev) => {
+            if (prev[sessionId]) return prev; // 已有本地配置，不覆盖
+            const cfg = savedConfig as Partial<SessionConfig>;
+            return {
+              ...prev,
+              [sessionId]: {
+                modelFamily: String(cfg.modelFamily ?? ""),
+                accessMode: String(cfg.accessMode ?? ""),
+                reasoningEffort: String(cfg.reasoningEffort ?? "medium"),
+                selectedConfig: (cfg.selectedConfig as Record<string, string | number | boolean>) ?? {},
+              },
+            };
+          });
+        }
       })
       .catch((error) => console.error(error));
   }

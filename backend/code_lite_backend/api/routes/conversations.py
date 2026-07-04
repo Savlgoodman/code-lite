@@ -99,6 +99,35 @@ async def update_conversation_archive_state(
     return JSONResponse({"session": session})
 
 
+@router.patch("/conversations/{conversation_id}/config")
+async def update_conversation_config(
+    conversation_id: str,
+    payload: dict[str, Any],
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    """保存会话配置（modelFamily/accessMode/reasoningEffort/selectedConfig）。
+
+    body: { "config": { "modelFamily": "sonnet", "accessMode": "auto", ... } }
+    """
+    config = payload.get("config")
+    if not isinstance(config, dict):
+        return JSONResponse({"error": "config must be a dict"}, status_code=400)
+
+    try:
+        session = services.conversation_store._read_session(conversation_id)
+    except ValueError:
+        return JSONResponse({"error": "invalid conversation id"}, status_code=400)
+
+    if session is None:
+        return JSONResponse({"error": "conversation not found"}, status_code=404)
+
+    updated = services.conversation_store.save_session(
+        conversation_id,
+        {**session, "config": config},
+    )
+    return JSONResponse({"session": updated})
+
+
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
