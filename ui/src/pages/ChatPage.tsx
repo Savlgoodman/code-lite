@@ -876,7 +876,7 @@ export function ChatPage() {
         <AgentSelectionPanel
           availableAgents={[
             { id: "codex", label: "Codex", glyph: "Cx", status: "available", description: "OpenAI Codex，通过 ACP 协议接入。支持代码生成、工具调用和文件操作。" },
-            { id: "claude_code", label: "Claude Code", glyph: "Cl", status: "experimental", description: "Anthropic Claude Code，通过 ACP 协议接入。支持代码生成和分析。" },
+            { id: "claude_code", label: "Claude Code", glyph: "Cl", status: "available", description: "Anthropic Claude Code，通过 ACP 协议接入。支持 Haiku/Sonnet/Opus 等模型等级，代码生成和分析。" },
             { id: "opencode", label: "opencode", glyph: "Op", status: "planned", description: "opencode agent，通过 ACP 协议接入。当前为计划接入状态。" },
             { id: "nanobot", label: "Nanobot", glyph: "Nb", status: "available", description: "Legacy agent，使用产品级模型配置。适合非代码任务。" },
           ]}

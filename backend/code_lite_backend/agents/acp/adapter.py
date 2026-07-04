@@ -17,7 +17,9 @@ from code_lite_backend.agents.acp.mapper import to_jsonable
 from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
 from code_lite_backend.agents.runtimes import (
     RuntimeDescriptor,
+    claude_env,
     codex_env,
+    resolve_claude_mode,
     resolve_codex_mode,
 )
 from code_lite_backend.agents.runtimes import CODEX_DESCRIPTOR
@@ -325,6 +327,12 @@ class AcpAgentAdapter:
         if self.name == "codex":
             return self._agent_runtime_config_store.codex_command()
         if self.name == "claude_code":
+            runtime_settings = self._agent_runtime_config_store.load()["agentRuntimes"]
+            claude_runtime = runtime_settings.get("claude_code", {})
+            from code_lite_backend.services.agent_runtime_config import _string_list
+            command = _string_list(claude_runtime.get("command"))
+            if command:
+                return command
             return self._agent_runtime_config_store.managed_claude_command()
         return self.descriptor.default_command
 
@@ -340,6 +348,11 @@ class AcpAgentAdapter:
                 codex_home.mkdir(parents=True, exist_ok=True)
                 isolated_home = str(codex_home)
             return codex_env(codex_runtime, logs_dir=logs_dir, isolated_codex_home=isolated_home)
+        if self.name == "claude_code":
+            runtime_config = self._agent_runtime_config_store.load()
+            claude_runtime = runtime_config["agentRuntimes"].get("claude_code", {})
+            logs_dir = str(self._runtime_config.logs_dir / "claude-agent-acp")
+            return claude_env(claude_runtime, logs_dir=logs_dir)
         return dict(__import__("os").environ)
 
     def _resolve_mode(self, fallback: str | None = None) -> str | None:
@@ -347,7 +360,7 @@ class AcpAgentAdapter:
         if self.name == "codex":
             return resolve_codex_mode(fallback)
         if self.name == "claude_code":
-            return str(fallback or self.descriptor.default_mode)
+            return resolve_claude_mode(fallback)
         return None
 
     async def _drain_stderr(self, process: Any, client: AcpClientHandler) -> None:

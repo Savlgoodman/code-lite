@@ -99,15 +99,45 @@ CLAUDE_DESCRIPTOR = RuntimeDescriptor(
     adapter_kind="acp",
     default_mode="ask",
     config_mode="user-native",
-    status="experimental",
+    status="available",
     caveats=[
-        "Claude Code ACP 尚未经过完整 smoke test",
-        ".claude/skills 和 CLAUDE.md 加载行为待验证",
+        "compat mode 不能保证所有危险动作经由 gateway",
+        "usage_update 是 best effort",
     ],
     managed_npm_package="@agentclientprotocol/claude-agent-acp",
     managed_npm_version="0.55.0",
     default_command=["claude-agent-acp"],
+    default_env={"NO_BROWSER": "1"},
 )
+
+# Claude Code 的 mode 映射：产品 access_mode → ACP mode_id
+CLAUDE_MODE_MAP: dict[str, str] = {
+    "ask": "ask",
+    "code": "code",
+    "plan": "plan",
+}
+
+
+def claude_env(
+    runtime_config_dict: dict[str, Any],
+    base_env: dict[str, str] | None = None,
+    logs_dir: str | None = None,
+) -> dict[str, str]:
+    """构建 Claude Code ACP 的环境变量。"""
+    env = dict(os.environ)
+    if base_env:
+        env.update(base_env)
+    env.setdefault("NO_BROWSER", "1")
+    mode = str(runtime_config_dict.get("mode") or "ask")
+    env["INITIAL_AGENT_MODE"] = mode
+    if logs_dir:
+        env.setdefault("APP_SERVER_LOGS", logs_dir)
+    return env
+
+
+def resolve_claude_mode(fallback: str | None = None) -> str:
+    mode = str(fallback or "ask")
+    return CLAUDE_MODE_MAP.get(mode, "ask")
 
 
 # ─── opencode ─────────────────────────────────────────────────────────────────
