@@ -787,7 +787,94 @@ conversation_projection_snapshots
 
 ---
 
-## 12. 上下文窗口占用展示：Context Ring
+## 12. 架构演进：从共享连接到会话隔离
+
+### 12.1 问题背景
+
+在实现 AcpRuntimeManager 常驻连接后，遇到严重的**多会话流式串连**问题：
+
+1. **内容串流**：两个并发 Codex 会话互相显示对方的回复
+2. **页面卡死**：一个会话结束后，另一个会话停在"思考中"无法切换
+3. **会话 id 冲突**：sidebar 中两个不同会话显示相同 id
+4. **模型错乱**：Claude Code 会话显示 Codex 的模型列表
+
+### 12.2 根因分析
+
+尝试了三次打补丁修复，每次只解决了表象：
+
+| 修复尝试 | 修复内容 | 结果 |
+|----------|----------|------|
+| 第 1 次 | per-session `contextUsage` 和 `activeTurnId` map | 解决 context ring 覆盖，但流式仍串 |
+| 第 2 次 | per-session `activeAssistantMessageIdRef` 和 `activeStreamSessionIdRef` | 解决 ref 覆盖，但 draft→real id 转换仍导致路由错误 |
+| 第 3 次 | `event.conversationId` 优先路由 | 解决了 draft 转换问题，但并发场景仍不稳定 |
+
+**根本原因**：所有会话共享同一个 ACP 子进程连接。`AcpClientHandler` 通过 `session_id` 做事件多路复用路由，但以下因素导致路由天然脆弱：
+
+1. **SDK 回调参数有限**：`session_update(session_id, update)` 只有一个 `session_id`，无法区分是哪个 conversation 的事件
+2. **draft session → 真实 session 转换**：`conversation.turn.started` 事件携带真实 `conversationId`，但 `sendMessage` 闭包捕获的是 `__draft_session__`，后续事件路由需要额外映射
+3. **handler 状态竞争**：多个 turn 同时调用 `original_handler.output_queue = output_queue` 覆盖路由表
+4. **前端 ref 单例**：`activeAssistantMessageIdRef` 等 ref 在并发会话间互相覆盖
+
+### 12.3 根治方案：会话级连接隔离
+
+**设计决策**：每个 conversation 一个独立的 ACP 子进程连接，彻底消除多路复用需求。
+
+```text
+之前（共享连接）：
+  AcpRuntimeManager
+    connections: {ConnectionKey(runtime, workspace) -> AcpRuntimeConnection}
+    └── 一个 connection 服务所有 conversations
+    └── handler 需要 TurnRoute 多路复用表
+    └── 事件按 session_id 路由（脆弱）
+
+之后（会话隔离）：
+  AcpRuntimeManager
+    connections: {ConnectionKey(runtime, workspace, conversation_id) -> AcpRuntimeConnection}
+    └── 每个 conversation 一个独立 connection + handler
+    └── handler 直接写入 output_queue（无需路由）
+    └── 事件天然隔离，不可能串
+```
+
+### 12.4 具体改动
+
+**ConnectionKey 增加 `conversation_id`**：
+
+```python
+@dataclass(frozen=True)
+class ConnectionKey:
+    runtime_id: str
+    workspace: str
+    config_mode: str
+    conversation_id: str  # 新增：每个会话独立隔离
+    command_fingerprint: str
+    env_fingerprint: str
+```
+
+**AcpClientHandler 简化**：移除 `TurnRoute`、`register_turn()`、`update_route_session()`、`_put_to()` 等多路复用代码。回到简单的 per-connection 设计，每个 handler 只服务一个 conversation。
+
+**adapter._run_turn 简化**：不再需要 `register_turn()`，直接更新 handler 的 `conversation_id`/`turn_id`/`output_queue`（因为 handler 是 per-conversation 的，没有并发冲突）。新增 `mapper.reset_dedup()` 在新 turn 开始时重置文本去重状态。
+
+### 12.5 代价与收益
+
+**代价**：每个活跃会话多一个 ACP 子进程。对于桌面应用，同时 2-3 个活跃会话的资源开销可接受。同一会话的多轮对话仍复用连接，不会重复 spawn。
+
+**收益**：
+1. **彻底消除流式串连**：事件物理隔离，不可能路由到错误的会话
+2. **代码量减少**：移除 ~120 行多路复用代码，handler 从 260 行减到 150 行
+3. **前端简化**：不再需要 per-session ref map，`handleAgentEvent` 直接用 `event.conversationId` 路由
+4. **调试简单**：每个连接的 stderr ring buffer 只包含一个会话的日志
+5. **取消隔离**：取消一个会话不会影响其他会话
+
+### 12.6 设计教训
+
+1. **并发隔离优于 multiplexing**：对于异步流式事件，物理隔离比逻辑路由更可靠。multiplexing 的复杂度随并发数线性增长，而隔离的复杂度是常数。
+2. **SDK 回调参数决定路由能力**：ACP SDK 的 `session_update(session_id, update)` 只传 `session_id`，不足以区分 conversation。如果用 `conversation_id` 做回调参数，multiplexing 会简单得多。
+3. **draft session 是路由隐患**：`__draft_session__` → 真实 id 的转换发生在流式中间，导致发送时和接收时的 session id 不一致。应避免在流式过程中改变路由 key。
+4. **打三次补丁不如重构**：每次补丁都引入了新的状态层（per-session map），但没有解决根本的架构问题。根治方案反而更简单。
+
+---
+
+## 13. 上下文窗口占用展示：Context Ring
 
 ### 12.1 设计目标
 
@@ -914,7 +1001,7 @@ function ContextRing({ usedTokens, windowTokens }: ContextRingProps) {
 
 ---
 
-## 13. 新会话创建流程：Agent 选择前置
+## 14. 新会话创建流程：Agent 选择前置
 
 ### 13.1 当前问题
 
@@ -1115,7 +1202,7 @@ async function confirmAgentSelection(agentId: string) {
 
 ---
 
-## 14. 移除 "启用 Agent" 机制
+## 15. 移除 "启用 Agent" 机制
 
 ### 14.1 当前实现
 
@@ -1169,7 +1256,7 @@ POST /api/agent-runtimes/{runtime_id}/activate
 
 ---
 
-## 15. 风险与待验证项
+## 16. 风险与待验证项
 
 | 风险 | 说明 | 建议 |
 |------|------|------|
@@ -1187,7 +1274,7 @@ POST /api/agent-runtimes/{runtime_id}/activate
 
 ---
 
-## 16. 核心结论
+## 17. 核心结论
 
 1. **优先修复每轮临时 spawn ACP + 每轮新 session**：这是当前"慢"和"不像连续对话"的主要原因。建议把 VibeX 的 ACP runtime 生命周期设计作为下一轮重构重点，优先实现 Python 版常驻 `AcpRuntimeManager`。
 
@@ -1210,7 +1297,7 @@ POST /api/agent-runtimes/{runtime_id}/activate
 
 ---
 
-## 17. 参考
+## 18. 参考
 
 1. `docs/research/0703-VIBEX-ACP-RESEARCH.md` — VibeX ACP Runtime 与会话存储借鉴研究
 2. `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` — ACP Agent Adapter 实施设计
