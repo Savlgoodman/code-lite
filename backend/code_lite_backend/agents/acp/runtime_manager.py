@@ -249,14 +249,13 @@ class AcpRuntimeManager:
         session_data = to_jsonable(result)
         # 记录 session/new 返回了哪些能力字段
         if isinstance(session_data, dict):
-            modes = session_data.get("modes")
-            models = session_data.get("models")
             config_opts = session_data.get("configOptions")
+            opt_ids = []
+            if isinstance(config_opts, list):
+                opt_ids = [o.get("id") for o in config_opts if isinstance(o, dict)]
             logger.info(
-                "[session] new_session OK — modes=%s models=%s configOptions=%s",
-                len(modes) if isinstance(modes, list) else type(modes).__name__,
-                (len(models.get("availableModels", [])) if isinstance(models, dict) else type(models).__name__),
-                (len(config_opts) if isinstance(config_opts, (list, dict)) else type(config_opts).__name__),
+                "[session] new_session OK — top-level keys=%s configOption ids=%s",
+                list(session_data.keys()), opt_ids,
             )
         else:
             logger.warning("[session] new_session returned non-dict: %s", type(session_data).__name__)

@@ -312,20 +312,15 @@ export function ChatPage() {
               setAccessMode(runtime.mode || "read-only");
 
               const isCodex = runtime.id === "codex";
-              const isClaude = runtime.id === "claude_code";
+              // fallback modes 仅在后端 initialize 完全失败时兜底；
+              // 正常情况下 modes/models 全部来自后端 session/new
               const fallbackModes = isCodex
                 ? [
                     { id: "read-only", label: "只读", isDefault: runtime.mode === "read-only" },
                     { id: "agent", label: "Agent", isDefault: runtime.mode === "agent" },
                     { id: "agent-full-access", label: "完全访问", isDefault: runtime.mode === "agent-full-access" },
                   ]
-                : isClaude
-                ? [
-                    { id: "ask", label: "Ask", isDefault: runtime.mode === "ask" },
-                    { id: "code", label: "Code", isDefault: runtime.mode === "code" },
-                    { id: "plan", label: "Plan", isDefault: runtime.mode === "plan" },
-                  ]
-                : [{ id: runtime.mode || "workspace", label: runtime.mode || "工作区", isDefault: true }];
+                : [{ id: runtime.mode || "default", label: runtime.mode || "默认", isDefault: true }];
 
               const fallbackConfigOptions = isCodex
                 ? [{
