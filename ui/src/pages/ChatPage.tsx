@@ -174,6 +174,15 @@ export function ChatPage() {
   // per-session stream state
   const activeAssistantMessageIdBySessionRef = useRef<Record<string, string>>({});
   const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
+  // 记录用户已手动选择过模型/模式的会话，避免 loadCapabilities 覆盖用户选择
+  const userSelectedSessionsRef = useRef<Set<string>>(new Set());
+  // per-session 选择快照：切换会话时恢复各自的模型/模式/思考强度
+  const selectionBySessionRef = useRef<Record<string, {
+    modelFamily: string;
+    accessMode: string;
+    reasoningEffort: string;
+    selectedConfig: Record<string, string | number | boolean>;
+  }>>({});
 
   const activeSession = sessions.find((item) => item.id === activeSessionId) ?? sessions[0];
   const activeMessages = messages[activeSession.id] ?? [];
@@ -266,7 +275,21 @@ export function ChatPage() {
         if (cancelled) return;
         setSessionCapabilities(caps);
 
-        // 初始化默认选中值
+        // 如果用户已经在该会话手动选择过模型/模式，恢复该会话自己的选择快照，
+        // 不用后端默认值覆盖
+        const alreadyCustomized = userSelectedSessionsRef.current.has(activeSession.id);
+        if (alreadyCustomized) {
+          const snap = selectionBySessionRef.current[activeSession.id];
+          if (snap) {
+            setSelectedModelFamily(snap.modelFamily);
+            setAccessMode(snap.accessMode);
+            setReasoningEffort(snap.reasoningEffort);
+            setSelectedConfig(snap.selectedConfig);
+          }
+          return;
+        }
+
+        // 初始化默认选中值（仅首次）
         const defaultMode = caps.modes.find((m) => m.isDefault);
         if (defaultMode) setAccessMode(defaultMode.id);
 
@@ -386,6 +409,27 @@ export function ChatPage() {
 
   function updateSession(sessionId: string, updater: (session: Session) => Session) {
     setSessions((current) => current.map((session) => (session.id === sessionId ? updater(session) : session)));
+  }
+
+  // 标记当前会话已被用户手动选择模型/模式，避免后续 loadCapabilities 覆盖
+  function markUserSelected() {
+    userSelectedSessionsRef.current.add(activeSession.id);
+  }
+
+  // 保存当前会话的选择快照（切换会话时可恢复）
+  function snapshotSelection(sessionId: string, patch: Partial<{
+    modelFamily: string;
+    accessMode: string;
+    reasoningEffort: string;
+    selectedConfig: Record<string, string | number | boolean>;
+  }>) {
+    const prev = selectionBySessionRef.current[sessionId] ?? {
+      modelFamily: selectedModelFamily,
+      accessMode,
+      reasoningEffort,
+      selectedConfig,
+    };
+    selectionBySessionRef.current[sessionId] = { ...prev, ...patch };
   }
 
   function setSessionRunning(sessionId: string, running: boolean) {
@@ -591,6 +635,23 @@ export function ChatPage() {
       const nextSessionId = event.conversationId;
       activeAssistantMessageIdBySessionRef.current[nextSessionId] = event.assistantMessage.id;
       activeStreamSessionIdByTurnRef.current[nextSessionId] = nextSessionId;
+      // 发送即视为用户确定了当前模型/模式选择；把标记和快照从旧 id 迁移到真实 id
+      userSelectedSessionsRef.current.add(nextSessionId);
+      if (nextSessionId !== sessionId) {
+        const draftSnap = selectionBySessionRef.current[sessionId];
+        if (draftSnap && !selectionBySessionRef.current[nextSessionId]) {
+          selectionBySessionRef.current[nextSessionId] = draftSnap;
+        }
+      }
+      // 无论是否手动改过，都把当前 UI 选择固化为该会话的快照
+      if (!selectionBySessionRef.current[nextSessionId]) {
+        selectionBySessionRef.current[nextSessionId] = {
+          modelFamily: selectedModelFamily,
+          accessMode,
+          reasoningEffort,
+          selectedConfig,
+        };
+      }
       if (nextSessionId !== sessionId) {
         setSessionRunning(sessionId, false);
       }
@@ -947,11 +1008,11 @@ export function ChatPage() {
                 agent={sessionAgent}
                 modes={sessionCapabilities?.modes ?? []}
                 models={sessionCapabilities?.models ?? []}
-                onAccessModeChange={setAccessMode}
-                onConfigChange={(optionId, value) => setSelectedConfig((prev) => ({ ...prev, [optionId]: value }))}
+                onAccessModeChange={(v) => { markUserSelected(); snapshotSelection(activeSession.id, { accessMode: v }); setAccessMode(v); }}
+                onConfigChange={(optionId, value) => { markUserSelected(); setSelectedConfig((prev) => { const next = { ...prev, [optionId]: value }; snapshotSelection(activeSession.id, { selectedConfig: next }); return next; }); }}
                 onDraftChange={setDraft}
-                onModelFamilyChange={setSelectedModelFamily}
-                onReasoningEffortChange={setReasoningEffort}
+                onModelFamilyChange={(v) => { markUserSelected(); snapshotSelection(activeSession.id, { modelFamily: v }); setSelectedModelFamily(v); }}
+                onReasoningEffortChange={(v) => { markUserSelected(); snapshotSelection(activeSession.id, { reasoningEffort: v }); setReasoningEffort(v); }}
                 onResolveApproval={(decision) => void resolveApproval(decision)}
                 onSendMessage={() => void sendMessage()}
                 onStopTurn={() => void stopCurrentTurn()}
