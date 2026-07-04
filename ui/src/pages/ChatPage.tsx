@@ -292,10 +292,15 @@ export function ChatPage() {
       } catch (error) {
         console.error("Failed to load session capabilities:", error);
         if (!cancelled) {
+          // 优先使用会话绑定的 agent，其次 fallback 到全局 activeAdapter
+          const fallbackAgentId = sessionAgent?.id
+            ?? (await loadAgentRuntimeSettings().then(s => s.activeAdapter).catch(() => null));
           try {
             const runtimeSettings = await loadAgentRuntimeSettings();
             if (cancelled) return;
-            const runtime = runtimeSettings.runtimes.find((item) => item.adapter === runtimeSettings.activeAdapter);
+            const runtime = runtimeSettings.runtimes.find(
+              (item) => item.adapter === (fallbackAgentId || runtimeSettings.activeAdapter)
+            );
             if (runtime) {
               setActiveAgent({
                 configMode: runtime.configMode,
@@ -306,15 +311,23 @@ export function ChatPage() {
               });
               setAccessMode(runtime.mode || "read-only");
 
-              const fallbackModes = runtime.id === "codex"
+              const isCodex = runtime.id === "codex";
+              const isClaude = runtime.id === "claude_code";
+              const fallbackModes = isCodex
                 ? [
                     { id: "read-only", label: "只读", isDefault: runtime.mode === "read-only" },
                     { id: "agent", label: "Agent", isDefault: runtime.mode === "agent" },
                     { id: "agent-full-access", label: "完全访问", isDefault: runtime.mode === "agent-full-access" },
                   ]
+                : isClaude
+                ? [
+                    { id: "ask", label: "Ask", isDefault: runtime.mode === "ask" },
+                    { id: "code", label: "Code", isDefault: runtime.mode === "code" },
+                    { id: "plan", label: "Plan", isDefault: runtime.mode === "plan" },
+                  ]
                 : [{ id: runtime.mode || "workspace", label: runtime.mode || "工作区", isDefault: true }];
 
-              const fallbackConfigOptions = runtime.id === "codex"
+              const fallbackConfigOptions = isCodex
                 ? [{
                     id: "reasoning_effort",
                     label: "思考强度",
