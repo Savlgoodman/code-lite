@@ -463,7 +463,10 @@ export function ChatPage() {
             selectedConfig: {},
             ...patch,
           };
-      return { ...prev, [activeSessionId]: next };
+      const result = { ...prev, [activeSessionId]: next };
+      // 同步更新 ref，确保后续事件处理器立即读取到最新值
+      configBySessionRef.current = result;
+      return result;
     });
   }
 
@@ -690,7 +693,10 @@ export function ChatPage() {
             if (prev[nextSessionId]) {
               return prev;
             }
-            return { ...prev, [nextSessionId]: draftCfg };
+            const result = { ...prev, [nextSessionId]: draftCfg };
+            // 同步更新 ref
+            configBySessionRef.current = result;
+            return result;
           });
         }
       }
