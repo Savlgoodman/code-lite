@@ -24,6 +24,7 @@ def create_agent_adapter(
             runtime_config=runtime_config,
             approvals=approvals,
             agent_runtime_config_store=agent_runtime_config_store,
+            runtime_manager=runtime_manager,
         )
     if name == "nanobot":
         return NanobotAgentAdapter(runtime_config=runtime_config, approvals=approvals)
