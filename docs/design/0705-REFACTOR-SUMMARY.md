@@ -192,3 +192,256 @@ e35b231 docs: create unified agent protocol architecture document
 ---
 
 **重构完成**！整个系统因为本次重构而变得**更稳定、更健壮、更易扩展**。
+
+---
+
+## 7. Modes 完整数据流（详细分析）
+
+### 7.1 ACP 协议层
+
+ACP `session/new` 返回的 `SessionModeState` 结构：
+
+```python
+class SessionModeState(BaseModel):
+    available_modes: List[SessionMode]  # alias: "availableModes"
+    current_mode_id: str                # alias: "currentModeId"
+
+class SessionMode(BaseModel):
+    id: str          # 唯一标识
+    name: str        # 显示名称
+    description: Optional[str] = None
+```
+
+### 7.2 后端处理流程
+
+**1. 提取和序列化**（`runtime_manager.py`）：
+```python
+session_data = to_jsonable(session_result)  # Pydantic → dict
+binding = AcpSessionBinding(..., capabilities=session_data)
+```
+
+**2. 构建 capabilities**（`session.py` `_build_modes()`）：
+- **优先级 1**：`configOptions.mode.values`（Claude Code 把 modes 放在这里）
+- **优先级 2**：`session_result.modes.availableModes`（ACP 标准返回）
+- **优先级 3**：`default_mode` fallback（从 `RuntimeDescriptor` 获取）
+
+**3. Mode 映射差异处理**（`adapter.py` `_resolve_mode()`）：
+
+| Runtime | Mode 列表 | 映射策略 |
+|---------|-----------|----------|
+| **Codex** | `read-only` / `agent` / `agent-full-access` | `CODEX_MODE_MAP` 映射（实际是恒等映射） |
+| **Claude Code** | `ask` / `code` / `plan` | **直接透传**（前端传什么就用什么） |
+
+### 7.3 前端渲染流程
+
+**1. 接收 capabilities**：
+```typescript
+const caps = await initializeSession(conversationId);
+// caps.modes: [{id: "read-only", label: "只读", isDefault: true}, ...]
+```
+
+**2. 提取默认 config**：
+```typescript
+function buildDefaultConfig(caps: SessionCapabilities): SessionConfig {
+  const defaultMode = caps.modes.find(m => m.isDefault);
+  const accessMode = defaultMode?.id ?? caps.modes[0]?.id ?? "read-only";
+  return { modelFamily, accessMode, reasoningEffort, selectedConfig };
+}
+```
+
+**3. ChatComposer 渲染**：
+```typescript
+{modes.length > 1 && (
+  <div className="access-mode-menu">
+    {modes.map(mode => (
+      <button
+        key={mode.id}
+        className={`access-mode-item ${mode.id === accessMode ? "selected" : ""}`}
+        onClick={() => onAccessModeChange(mode.id)}
+      >
+        {accessModeIcon(mode.id)}
+        <span>{accessModeLabel(mode)}</span>
+      </button>
+    ))}
+  </div>
+)}
+```
+
+**4. 用户选择**：
+```typescript
+onAccessModeChange(modeId) → updateSessionConfig({ accessMode: modeId })
+```
+
+### 7.4 发送流程
+
+**1. sendMessage() 读取 config**：
+```typescript
+const cfg = configBySession[sessionId] ?? currentConfig;
+await streamAgentTurn({
+  accessMode: cfg?.accessMode,  // ← mode 在这里传递
+  ...
+});
+```
+
+**2. 后端接收**：
+```python
+requested_access_mode = str(body.get("accessMode") or "").strip() or None
+run_request = AgentRunRequest(..., access_mode=requested_access_mode, ...)
+```
+
+**3. 后端应用**：
+```python
+mode = self._resolve_mode(request.access_mode)  # 按 runtime 分别处理
+if mode:
+    await conn.set_session_mode(session_id=session_id, mode_id=mode)
+```
+
+### 7.5 关键设计要点
+
+1. **前端不感知 runtime 差异**：前端只看到 `SessionMode[]` 列表，统一渲染
+2. **后端集中转换**：`_resolve_mode()` 在 adapter 层处理 runtime 差异
+3. **Runtime 原生优先**：Claude Code 直接透传，不做不必要的映射
+4. **三源合并**：`configOptions.mode.values` > `session_result.modes` > `default_mode`
+5. **Per-session 隔离**：每个会话的 `accessMode` 独立存储在 `configBySession`
+
+---
+
+## 8. 验证清单
+
+### 8.1 功能验证
+
+- [x] **TypeScript 编译通过**
+- [x] **ChatPage per-session state 隔离**
+  - [x] 移除全局 state（selectedModelFamily/accessMode/reasoningEffort/selectedConfig/sessionCapabilities）
+  - [x] 新增 per-session maps（capabilitiesBySession/configBySession）
+  - [x] ChatComposer props 从 currentConfig/currentCapabilities 读取
+  - [x] updateSessionConfig() 辅助函数实现
+- [x] **Capabilities Caching**
+  - [x] _persist_binding() 持久化 capabilities 到 native-session.json
+  - [x] load_binding_from_disk() 从磁盘读取 capabilities
+  - [x] ensure_session() 恢复策略优化（优先使用缓存）
+- [x] **Modes 统一处理**
+  - [x] 后端 _build_modes() 三源合并
+  - [x] 前端 ChatComposer 统一渲染 modes 列表
+  - [x] 后端 _resolve_mode() 按 runtime 分别处理
+  - [x] Claude Code 直接透传 mode id
+
+### 8.2 端到端测试建议
+
+1. **切换会话测试**：
+   - 创建 Codex 会话 → 选择 model/mode/effort → 发送消息
+   - 创建 Claude Code 会话 → 选择不同 model/mode/effort → 发送消息
+   - 切换回 Codex 会话 → 验证配置保持不变
+   - 切换回 Claude Code 会话 → 验证配置保持不变
+
+2. **Capabilities 缓存测试**：
+   - 首次进入 Codex 会话 → 观察日志（应调用 session/new）
+   - 切换到其他会话 → 再切换回 Codex 会话 → 观察日志（应从缓存读取）
+   - 验证 capabilities 缓存命中后，切换速度提升
+
+3. **Draft → Real ID 迁移测试**：
+   - 创建新会话（draft） → 选择 agent → 发送首条消息
+   - 验证 draft session 的 capabilities 和 config 迁移到 real id
+   - 验证切换回该会话时配置保持不变
+
+### 8.3 性能测试建议
+
+1. **会话切换时间对比**：
+   - 有缓存：从磁盘读取 capabilities（应 < 100ms）
+   - 无缓存：调用 session/new（应 > 500ms）
+
+2. **ACP 调用次数监控**：
+   - 同一会话的多轮 turn 应复用连接和 session
+   - 切换回已有会话应复用 capabilities 缓存
+
+### 8.4 用户体验优化（可选）
+
+1. **accessModeIcon() 支持 Claude Code modes**：
+   - `default` → `<Hand />`（当前已支持）
+   - `plan` → `<FileText />`（计划模式）
+   - `acceptEdits` → `<Check />`（接受编辑）
+
+2. **Loading 状态**：
+   - 首次加载 capabilities 时显示 loading spinner
+   - 缓存命中时直接显示（无 loading）
+
+---
+
+## 9. 后续扩展方向
+
+### 9.1 连接池负载均衡（混合策略）
+
+**触发条件**：用户同时打开 5+ 个活跃会话，或明确反馈资源占用过高
+
+**实现方案**：
+```python
+class AcpRuntimeManager:
+    MAX_CONCURRENT_SESSIONS_PER_CONNECTION = 3
+    
+    async def ensure_connection(self, workspace, conversation_id, ...):
+        # 1. 查找该 workspace 的所有连接
+        workspace_connections = [
+            conn for conn in self._connections.values()
+            if conn.key.workspace == workspace and conn.is_ready
+        ]
+        
+        # 2. 找到负载最轻的连接
+        for conn in sorted(workspace_connections, key=lambda c: len(c.sessions)):
+            if len(conn.sessions) < self.MAX_CONCURRENT_SESSIONS_PER_CONNECTION:
+                return conn  # 复用现有连接
+        
+        # 3. 所有连接都满了，spawn 新连接
+        return await self._spawn_new_connection(...)
+```
+
+**收益**：兼顾内存占用和并发度（2 个活跃会话 → 1 个进程，5 个活跃会话 → 2 个进程）
+
+**代价**：需恢复事件路由（~200 行代码）
+
+### 9.2 配置持久化到 localStorage
+
+**实现方案**：
+```typescript
+// 初始化时从 localStorage 恢复
+useEffect(() => {
+  const stored = localStorage.getItem("sessionConfigs");
+  if (stored) {
+    try {
+      setConfigBySession(JSON.parse(stored));
+    } catch {}
+  }
+}, []);
+
+// 配置变化时写入 localStorage
+useEffect(() => {
+  localStorage.setItem("sessionConfigs", JSON.stringify(configBySession));
+}, [configBySession]);
+```
+
+**收益**：用户在会话 A 选了 haiku，关闭应用重新打开，会话 A 仍是 haiku
+
+### 9.3 Capabilities TTL 机制
+
+**当前问题**：如果 ACP capabilities 变化（如新增模型），缓存可能过期
+
+**实现方案**：
+```python
+@dataclass
+class AcpSessionBinding:
+    ...
+    capabilities_fetched_at: float  # 时间戳
+
+async def ensure_session(self, ...):
+    existing = self._session_bindings.get(conversation_id)
+    if existing and existing.capabilities:
+        # 检查 TTL（如 24 小时）
+        if time.time() - existing.capabilities_fetched_at < 86400:
+            return existing  # 缓存有效
+        # 缓存过期，重新获取
+```
+
+**收益**：确保 capabilities 不会永久过期
+
+---
+
+**重构完成**！整个系统因为本次重构而变得**更稳定、更健壮、更易扩展**。
