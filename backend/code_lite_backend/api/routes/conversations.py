@@ -105,13 +105,15 @@ async def update_conversation_config(
     payload: dict[str, Any],
     services: AppServices = Depends(get_services),
 ) -> JSONResponse:
-    """保存会话配置（modelFamily/accessMode/reasoningEffort/selectedConfig）。
+    """保存会话配置和上下文使用量。
 
-    body: { "config": { "modelFamily": "sonnet", "accessMode": "auto", ... } }
+    body: {
+      "config": { "modelFamily": "sonnet", ... },          # 可选
+      "contextUsage": { "contextUsedTokens": 1234, ... }   # 可选
+    }
     """
     config = payload.get("config")
-    if not isinstance(config, dict):
-        return JSONResponse({"error": "config must be a dict"}, status_code=400)
+    context_usage = payload.get("contextUsage")
 
     try:
         session = services.conversation_store._read_session(conversation_id)
@@ -121,10 +123,13 @@ async def update_conversation_config(
     if session is None:
         return JSONResponse({"error": "conversation not found"}, status_code=404)
 
-    updated = services.conversation_store.save_session(
-        conversation_id,
-        {**session, "config": config},
-    )
+    updates = {**session}
+    if isinstance(config, dict):
+        updates["config"] = config
+    if isinstance(context_usage, dict):
+        updates["contextUsage"] = context_usage
+
+    updated = services.conversation_store.save_session(conversation_id, updates)
     return JSONResponse({"session": updated})
 
 

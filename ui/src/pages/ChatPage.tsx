@@ -185,6 +185,19 @@ export function ChatPage() {
     configBySessionRef.current = configBySession;
   }, [configBySession]);
 
+  // ─── context usage 变化时 debounce 保存到后端 ───
+  useEffect(() => {
+    for (const [sessionId, usage] of Object.entries(contextUsageBySession)) {
+      if (isDraftSessionId(sessionId)) continue;
+      const prevTimer = contextUsageSaveTimerRef.current[sessionId];
+      if (prevTimer) window.clearTimeout(prevTimer);
+      contextUsageSaveTimerRef.current[sessionId] = window.setTimeout(() => {
+        saveConversationConfig(sessionId, { contextUsage: usage } as unknown as Record<string, unknown>)
+          .catch((err) => console.error("Failed to save context usage:", err));
+      }, 2000); // context usage 变化频繁，2s debounce
+    }
+  }, [contextUsageBySession]);
+
   // ─── 向后兼容：draft session 时仍用全局 activeAgent ───
   // draft session 的 capabilities 通过 __probe__ 获取，存储到 draft id 下
   // 一旦 draft → real id，会把 draft 的 caps/config 迁移到 real id
@@ -193,6 +206,7 @@ export function ChatPage() {
   const runningSessionIdsRef = useRef<Set<string>>(new Set());
   const streamFlushTimerRef = useRef<number | null>(null);
   const configSaveTimerRef = useRef<Record<string, number>>({});
+  const contextUsageSaveTimerRef = useRef<Record<string, number>>({});
   // per-session stream state
   const activeAssistantMessageIdBySessionRef = useRef<Record<string, string>>({});
   const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
@@ -245,10 +259,13 @@ export function ChatPage() {
               sessions: remoteSessions
             });
 
-            // 恢复所有会话的保存配置（从 listConversations 返回的 session 中读取）
+            // 恢复所有会话的保存配置和 context usage
             const restoredConfigs: Record<string, SessionConfig> = {};
+            const restoredContextUsage: Record<string, UsageStats> = {};
             for (const session of remoteSessions) {
-              const savedConfig = (session as unknown as Record<string, unknown>).config;
+              const sessionObj = session as unknown as Record<string, unknown>;
+              // 恢复 config
+              const savedConfig = sessionObj.config;
               if (savedConfig && typeof savedConfig === "object") {
                 const cfg = savedConfig as Partial<SessionConfig>;
                 restoredConfigs[session.id] = {
@@ -258,9 +275,17 @@ export function ChatPage() {
                   selectedConfig: (cfg.selectedConfig as Record<string, string | number | boolean>) ?? {},
                 };
               }
+              // 恢复 context usage
+              const savedUsage = sessionObj.contextUsage;
+              if (savedUsage && typeof savedUsage === "object") {
+                restoredContextUsage[session.id] = savedUsage as UsageStats;
+              }
             }
             if (Object.keys(restoredConfigs).length > 0) {
               setConfigBySession(restoredConfigs);
+            }
+            if (Object.keys(restoredContextUsage).length > 0) {
+              setContextUsageBySession(restoredContextUsage);
             }
           } else {
             const draftSession = createDraftSession();
@@ -465,6 +490,10 @@ export function ChatPage() {
       }
       // 清理所有 config save timers
       for (const timer of Object.values(configSaveTimerRef.current)) {
+        window.clearTimeout(timer);
+      }
+      // 清理所有 context usage save timers
+      for (const timer of Object.values(contextUsageSaveTimerRef.current)) {
         window.clearTimeout(timer);
       }
     };
