@@ -195,43 +195,83 @@ class AcpRuntimeManager:
 
         # 2. 尝试从磁盘恢复
         saved_binding = self.load_binding_from_disk(conversation_id)
-        if saved_binding is not None and self._supports_load_session(connection):
-            try:
-                logger.info(
-                    "Attempting session/load for %s (native: %s)",
-                    conversation_id[:12],
-                    saved_binding.native_session_id[:12],
-                )
-                result = await asyncio.wait_for(
-                    connection.sdk_connection.load_session(
-                        cwd=saved_binding.workspace or str(workspace),
-                        session_id=saved_binding.native_session_id,
-                    ),
-                    timeout=self._session_timeout,
-                )
-                # load 成功 — 复用 saved binding 并更新
-                saved_binding.updated_at = _now_iso()
-                # 尝试从 load result 获取 capabilities
-                from code_lite_backend.agents.acp.mapper import to_jsonable
-                session_data = to_jsonable(result)
-                if session_data:
-                    saved_binding.capabilities = session_data
-                connection.sessions[conversation_id] = saved_binding.native_session_id
-                self._session_bindings[conversation_id] = saved_binding
-                self._persist_binding(saved_binding)
-                connection.touch()
-                logger.info(
-                    "Successfully loaded native session %s for conversation %s",
-                    saved_binding.native_session_id[:12],
-                    conversation_id[:12],
-                )
-                return saved_binding
-            except Exception as exc:
-                logger.warning(
-                    "session/load failed for %s: %s — falling back to session/new",
-                    conversation_id[:12],
-                    exc,
-                )
+        if saved_binding is not None:
+            # 如果磁盘绑定的 capabilities 已缓存且 runtime 支持 loadSession，尝试恢复
+            if saved_binding.capabilities and self._supports_load_session(connection):
+                try:
+                    logger.info(
+                        "Attempting session/load for %s (native: %s, caps: cached)",
+                        conversation_id[:12],
+                        saved_binding.native_session_id[:12],
+                    )
+                    result = await asyncio.wait_for(
+                        connection.sdk_connection.load_session(
+                            cwd=saved_binding.workspace or str(workspace),
+                            session_id=saved_binding.native_session_id,
+                        ),
+                        timeout=self._session_timeout,
+                    )
+                    # load 成功 — 复用 saved binding 并更新
+                    saved_binding.updated_at = _now_iso()
+                    # 尝试从 load result 获取更新的 capabilities
+                    from code_lite_backend.agents.acp.mapper import to_jsonable
+                    session_data = to_jsonable(result)
+                    if session_data:
+                        saved_binding.capabilities = session_data
+                    connection.sessions[conversation_id] = saved_binding.native_session_id
+                    self._session_bindings[conversation_id] = saved_binding
+                    self._persist_binding(saved_binding)
+                    connection.touch()
+                    logger.info(
+                        "Successfully loaded native session %s for conversation %s",
+                        saved_binding.native_session_id[:12],
+                        conversation_id[:12],
+                    )
+                    return saved_binding
+                except Exception as exc:
+                    logger.warning(
+                        "session/load failed for %s: %s — falling back to session/new",
+                        conversation_id[:12],
+                        exc,
+                    )
+            # 如果磁盘绑定没有 capabilities 或 load 失败，但 native_session_id 存在
+            # 则尝试 session/load（即使没有缓存的 capabilities）
+            elif saved_binding.native_session_id and self._supports_load_session(connection):
+                try:
+                    logger.info(
+                        "Attempting session/load for %s (native: %s, caps: none)",
+                        conversation_id[:12],
+                        saved_binding.native_session_id[:12],
+                    )
+                    result = await asyncio.wait_for(
+                        connection.sdk_connection.load_session(
+                            cwd=saved_binding.workspace or str(workspace),
+                            session_id=saved_binding.native_session_id,
+                        ),
+                        timeout=self._session_timeout,
+                    )
+                    # load 成功 — 获取 capabilities
+                    from code_lite_backend.agents.acp.mapper import to_jsonable
+                    session_data = to_jsonable(result)
+                    if session_data:
+                        saved_binding.capabilities = session_data
+                    saved_binding.updated_at = _now_iso()
+                    connection.sessions[conversation_id] = saved_binding.native_session_id
+                    self._session_bindings[conversation_id] = saved_binding
+                    self._persist_binding(saved_binding)
+                    connection.touch()
+                    logger.info(
+                        "Successfully loaded native session %s for conversation %s",
+                        saved_binding.native_session_id[:12],
+                        conversation_id[:12],
+                    )
+                    return saved_binding
+                except Exception as exc:
+                    logger.warning(
+                        "session/load failed for %s: %s — falling back to session/new",
+                        conversation_id[:12],
+                        exc,
+                    )
 
         # 3/4. session/new
         logger.info("[session] calling new_session for %s...", conversation_id[:12])
@@ -339,18 +379,19 @@ class AcpRuntimeManager:
         if self._conversation_store is None:
             return
         try:
-            self._conversation_store.save_native_session(
-                binding.conversation_id,
-                {
-                    "conversationId": binding.conversation_id,
-                    "runtimeId": binding.runtime_id,
-                    "nativeSessionId": binding.native_session_id,
-                    "workspace": binding.workspace,
-                    "configMode": binding.config_mode,
-                    "createdAt": binding.created_at,
-                    "updatedAt": binding.updated_at,
-                },
-            )
+            data = {
+                "conversationId": binding.conversation_id,
+                "runtimeId": binding.runtime_id,
+                "nativeSessionId": binding.native_session_id,
+                "workspace": binding.workspace,
+                "configMode": binding.config_mode,
+                "createdAt": binding.created_at,
+                "updatedAt": binding.updated_at,
+            }
+            # 缓存 capabilities（首次 session/new 后写入，后续从磁盘读取）
+            if binding.capabilities is not None:
+                data["capabilities"] = binding.capabilities
+            self._conversation_store.save_native_session(binding.conversation_id, data)
         except Exception as exc:
             logger.warning("Failed to persist native session binding: %s", exc)
 
