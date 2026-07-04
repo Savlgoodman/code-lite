@@ -463,8 +463,6 @@ export function ChatPage() {
             selectedConfig: {},
             ...patch,
           };
-      // 同步更新 ref，确保 sendMessage 读取到最新值
-      configBySessionRef.current = { ...prev, [activeSessionId]: next };
       return { ...prev, [activeSessionId]: next };
     });
   }
