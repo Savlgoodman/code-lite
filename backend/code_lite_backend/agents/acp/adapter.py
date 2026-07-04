@@ -20,7 +20,6 @@ from code_lite_backend.agents.runtimes import (
     RuntimeDescriptor,
     claude_env,
     codex_env,
-    resolve_claude_mode,
     resolve_codex_mode,
 )
 from code_lite_backend.agents.runtimes import CODEX_DESCRIPTOR
@@ -314,37 +313,48 @@ class AcpAgentAdapter:
         # 设置模式
         mode = self._resolve_mode(request.access_mode)
         if mode:
-            with contextlib.suppress(Exception):
+            try:
                 await asyncio.wait_for(
                     conn.set_session_mode(session_id=session_id, mode_id=mode),
                     timeout=10,
                 )
+                logger.info("[configure] set_session_mode(%s) OK", mode)
+            except Exception as exc:
+                logger.warning("[configure] set_session_mode(%s) failed: %s", mode, exc)
 
         # 设置模型
         model = str(
             request.runtime_model or request.model_metadata.get("model") or ""
         ).strip()
         if model:
-            with contextlib.suppress(Exception):
+            try:
                 await asyncio.wait_for(
                     conn.set_session_model(session_id=session_id, model_id=model),
                     timeout=10,
                 )
+                logger.info("[configure] set_session_model(%s) OK", model)
+            except Exception as exc:
+                logger.warning("[configure] set_session_model(%s) failed: %s", model, exc)
 
-        # 设置 reasoning effort（通用 config option）
+        # 设置 reasoning effort（config id 因 runtime 而异：
+        # Codex 用 reasoning_effort，Claude Code 用 effort）
         reasoning_effort = (
             request.reasoning_effort or request.model_metadata.get("reasoningEffort") or ""
         ).strip()
         if reasoning_effort and reasoning_effort != "none":
-            with contextlib.suppress(Exception):
+            effort_config_id = "effort" if self.name == "claude_code" else "reasoning_effort"
+            try:
                 await asyncio.wait_for(
                     conn.set_config_option(
                         session_id=session_id,
-                        config_id="reasoning_effort",
+                        config_id=effort_config_id,
                         value=reasoning_effort,
                     ),
                     timeout=10,
                 )
+                logger.info("[configure] set_config_option(%s=%s) OK", effort_config_id, reasoning_effort)
+            except Exception as exc:
+                logger.warning("[configure] set_config_option(%s=%s) failed: %s", effort_config_id, reasoning_effort, exc)
 
     def _resolve_command(self) -> list[str]:
         """解析当前 runtime 的可执行命令。"""
@@ -384,7 +394,9 @@ class AcpAgentAdapter:
         if self.name == "codex":
             return resolve_codex_mode(fallback)
         if self.name == "claude_code":
-            return resolve_claude_mode(fallback)
+            # 前端发送的是 Claude Code 真实的 mode id（default/plan/acceptEdits/...），
+            # 直接透传即可，不要用 CLAUDE_MODE_MAP 映射（会错误映射成 ask）
+            return str(fallback).strip() if fallback else None
         return None
 
     async def _drain_stderr(self, process: Any, client: AcpClientHandler) -> None:

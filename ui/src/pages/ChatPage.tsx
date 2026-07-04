@@ -800,10 +800,19 @@ export function ChatPage() {
     abortControllerRef.current = abortController;
 
     try {
-      // 拼接完整模型 ID：模型族[推理强度]
-      const fullModelId = selectedModelFamily && reasoningEffort
-        ? `${selectedModelFamily}[${reasoningEffort}]`
-        : selectedModelFamily || undefined;
+      // 解析模型 ID：
+      // - Codex 用 "模型族[推理强度]" 格式（模型 id 本身含括号）
+      // - Claude Code 用完整模型 id（如 claude-sonnet-4-5），推理强度走 selectedConfig
+      const models = sessionCapabilities?.models ?? [];
+      const usesBracketFormat = models.some((m) => /\[.*\]$/.test(m.id));
+      let fullModelId: string | undefined;
+      if (usesBracketFormat && selectedModelFamily && reasoningEffort) {
+        fullModelId = `${selectedModelFamily}[${reasoningEffort}]`;
+      } else if (selectedModelFamily) {
+        // 直接匹配完整模型 id（Claude Code）或用模型族
+        const exact = models.find((m) => m.id === selectedModelFamily);
+        fullModelId = exact?.id ?? selectedModelFamily;
+      }
       await streamAgentTurn({
         accessMode,
         conversationId,

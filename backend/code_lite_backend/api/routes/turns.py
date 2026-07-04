@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Request
@@ -12,8 +13,13 @@ from code_lite_backend.schemas.agent import AgentRunRequest
 from code_lite_backend.services.model_config import ModelConfigError
 from code_lite_backend.services.runtime import AppServices
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# ACP runtime adapters 使用 runtime 原生模型（从 session/new 获取），
+# 不查产品级 model_config。nanobot 是唯一的产品级模型 adapter。
+_ACP_RUNTIME_IDS = {"codex", "claude_code", "opencode"}
 
 
 @router.post("/turns/{turn_id}/cancel")
@@ -52,17 +58,23 @@ async def stream_turn(
             persisted_agent = str(raw_agent.get("id") or "").strip() or None
     agent_id = services.agent_runtime_config_store.resolve_adapter(persisted_agent)
     agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
+    logger.info(
+        "POST /turns/stream — conversation=%s turn=%s agent=%s model=%s mode=%s effort=%s prompt_len=%d",
+        conversation_id, turn_id, agent_id, requested_model_id,
+        requested_access_mode, requested_reasoning_effort, len(prompt),
+    )
     resolved_model = None
     runtime_model = None
     model_metadata: dict[str, object] = {}
-    if agent_id == "codex":
+    if agent_id in _ACP_RUNTIME_IDS:
+        # ACP runtime：使用 runtime 原生模型（不查产品级 model_config）
         runtime_model = requested_model_id
         if runtime_model:
             model_metadata = {
                 "model": runtime_model,
                 "label": runtime_model,
                 "runtimeModel": runtime_model,
-                "source": "codex-acp",
+                "source": f"{agent_id}-acp",
                 "reasoningEffort": requested_reasoning_effort or "none",
             }
     else:
@@ -75,6 +87,7 @@ async def stream_turn(
                 resolved_model = services.model_config_store.effective_default_model()
         except ModelConfigError as error:
             error_message = str(error)
+            logger.warning("Model config error for agent=%s: %s", agent_id, error_message)
 
             async def error_stream():
                 yield encode_ndjson_event(
@@ -125,7 +138,11 @@ async def stream_turn(
         runtime_id = agent_id  # runtime identifier for events
         native_session_id: str | None = None
 
+        if not prompt:
+            logger.warning("event_stream: empty prompt, nothing to do")
+
         if prompt:
+            logger.info("event_stream: start_turn for conversation=%s", conversation_id)
             turn_record = services.conversation_recorder.start_turn(
                 conversation_id=conversation_id,
                 prompt=prompt,
@@ -147,6 +164,7 @@ async def stream_turn(
                 await event_store.append_event(
                     conversation_id, started_event, runtime=runtime_id,
                 )
+            logger.info("event_stream: yielding conversation.turn.started")
             yield encode_ndjson_event(started_event)
 
         completed = False
@@ -186,7 +204,9 @@ async def stream_turn(
                 yield encode_ndjson_event(event)
                 if event.get("type") in {"agent.run.completed", "agent.run.failed"}:
                     completed = True
+                    logger.info("event_stream: turn %s finished with %s", turn_id, event.get("type"))
         except asyncio.CancelledError:
+            logger.info("event_stream: turn %s cancelled by client", turn_id)
             cancel_event = {
                 "type": "agent.run.failed",
                 "conversationId": conversation_id,
@@ -207,8 +227,12 @@ async def stream_turn(
                     )
                 completed = True
             raise
+        except Exception:
+            logger.exception("event_stream: unexpected error in turn %s", turn_id)
+            raise
         finally:
             if assistant_message_id and not completed:
+                logger.warning("event_stream: turn %s discarded (not completed)", turn_id)
                 services.conversation_recorder.discard_turn(conversation_id)
 
     return StreamingResponse(
