@@ -215,7 +215,7 @@
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: var(--orange);
+  color: #3f454d;
   cursor: pointer;
   font-size: 13px;
   transition: all 0.15s ease;
@@ -224,8 +224,74 @@
 
 .access-mode-chip:hover {
   border-color: #e4e1dd;
-  background: #fff4ef;
+  background: #f5f5f3;
+  color: #20242b;
+}
+
+.access-mode-chip.access-mode-tone-codex-full-access,
+.access-mode-item.access-mode-tone-codex-full-access {
   color: #db4f1d;
+}
+
+.access-mode-chip.access-mode-tone-codex-full-access:hover,
+.access-mode-item.access-mode-tone-codex-full-access:hover {
+  background: #fff4ef;
+  color: #c84516;
+}
+
+.access-mode-chip.access-mode-tone-claude-bypass-permissions,
+.access-mode-item.access-mode-tone-claude-bypass-permissions {
+  color: #a6322a;
+}
+
+.access-mode-chip.access-mode-tone-claude-bypass-permissions:hover,
+.access-mode-item.access-mode-tone-claude-bypass-permissions:hover {
+  background: #fff1ef;
+  color: #8f241f;
+}
+
+.access-mode-chip.access-mode-tone-claude-accept-edits,
+.access-mode-item.access-mode-tone-claude-accept-edits {
+  color: #6f3fb5;
+}
+
+.access-mode-chip.access-mode-tone-claude-accept-edits:hover,
+.access-mode-item.access-mode-tone-claude-accept-edits:hover {
+  background: #f5f0ff;
+  color: #5d30a1;
+}
+
+.access-mode-chip.access-mode-tone-claude-plan,
+.access-mode-item.access-mode-tone-claude-plan {
+  color: #1478c8;
+}
+
+.access-mode-chip.access-mode-tone-claude-plan:hover,
+.access-mode-item.access-mode-tone-claude-plan:hover {
+  background: #edf7ff;
+  color: #0e67b0;
+}
+
+.access-mode-chip.access-mode-tone-claude-auto,
+.access-mode-item.access-mode-tone-claude-auto {
+  color: #0d766e;
+}
+
+.access-mode-chip.access-mode-tone-claude-auto:hover,
+.access-mode-item.access-mode-tone-claude-auto:hover {
+  background: #eefaf8;
+  color: #075e58;
+}
+
+.access-mode-chip.access-mode-tone-claude-dont-ask,
+.access-mode-item.access-mode-tone-claude-dont-ask {
+  color: #8a5a16;
+}
+
+.access-mode-chip.access-mode-tone-claude-dont-ask:hover,
+.access-mode-item.access-mode-tone-claude-dont-ask:hover {
+  background: #fff7e8;
+  color: #72460b;
 }
 
 .access-mode-chip span {
@@ -236,6 +302,7 @@
 
 .access-mode-chip svg {
   flex: 0 0 auto;
+  color: currentColor;
 }
 
 .access-mode-menu {
@@ -287,7 +354,7 @@
 
 .access-mode-item svg {
   flex: 0 0 auto;
-  color: #4a4f56;
+  color: currentColor;
 }
 
 .send-button {

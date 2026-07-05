@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Check, ChevronDown, Hand, Paperclip, Send, ShieldAlert, ShieldCheck, Square } from "lucide-react";
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  FastForward,
+  FileText,
+  Hand,
+  Paperclip,
+  Send,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  Square
+} from "lucide-react";
 
 import type {
   AgentSummary,
@@ -30,6 +43,17 @@ interface ModelFamily {
   label: string;     // 如 "GPT-5.5"
   models: SessionModel[];
 }
+
+type RuntimeTone = "claude" | "codex" | "default";
+
+type AccessModeTone =
+  | "claude-accept-edits"
+  | "claude-auto"
+  | "claude-bypass-permissions"
+  | "claude-dont-ask"
+  | "claude-plan"
+  | "codex-full-access"
+  | "default";
 
 interface ChatComposerProps {
   accessMode: string;
@@ -110,6 +134,7 @@ export function ChatComposer({
   const hasReasoningPicker = reasoningValues.length > 0;
   const hasAnyControls = hasModelPicker || hasReasoningPicker;
   const currentMode = modes.find((mode) => mode.id === accessMode) ?? modes.find((mode) => mode.isDefault) ?? modes[0];
+  const runtimeTone = agentRuntimeTone(agent);
 
   useEffect(() => {
     if (!isAccessMenuOpen && !isStatusMenuOpen) return;
@@ -138,11 +163,107 @@ export function ChatComposer({
     return mode ? labels[mode.id] ?? mode.label : "权限";
   }
 
-  function accessModeIcon(modeId: string, size = 15) {
-    if (modeId === "agent-full-access") {
+  function agentRuntimeTone(agentInfo?: AgentSummary | null): RuntimeTone {
+    const value = `${agentInfo?.runtimeId ?? ""} ${agentInfo?.id ?? ""} ${agentInfo?.label ?? ""}`.toLowerCase();
+    if (value.includes("claude")) {
+      return "claude";
+    }
+    if (value.includes("codex") || value.includes("openai")) {
+      return "codex";
+    }
+    return "default";
+  }
+
+  function normalizeAccessMode(mode: SessionMode | string | undefined) {
+    const id = typeof mode === "string" ? mode : mode?.id ?? "";
+    const label = typeof mode === "string" ? "" : mode?.label ?? "";
+    const text = `${id} ${label}`.toLowerCase();
+    const compact = text.replace(/[\s_-]+/g, "");
+
+    if (id === "agent-full-access" || compact.includes("agentfullaccess") || compact.includes("fullaccess")) {
+      return "full-access";
+    }
+    if (id === "agent") {
+      return "agent";
+    }
+    if (id === "read-only" || compact.includes("readonly")) {
+      return "read-only";
+    }
+    if (compact.includes("bypasspermissions") || text.includes("bypass permission")) {
+      return "bypass-permissions";
+    }
+    if (compact.includes("acceptedits") || text.includes("accept edit")) {
+      return "accept-edits";
+    }
+    if (compact === "plan" || compact.includes("planmode") || text.includes("plan mode")) {
+      return "plan";
+    }
+    if (compact.includes("dontask") || compact.includes("donotask") || text.includes("don't ask")) {
+      return "dont-ask";
+    }
+    if (compact === "auto" || compact.includes("automode")) {
+      return "auto";
+    }
+    if (compact === "default") {
+      return "default";
+    }
+    return id || "default";
+  }
+
+  function accessModeTone(mode: SessionMode | string | undefined): AccessModeTone {
+    const normalized = normalizeAccessMode(mode);
+    if (runtimeTone === "claude") {
+      if (normalized === "accept-edits") {
+        return "claude-accept-edits";
+      }
+      if (normalized === "bypass-permissions") {
+        return "claude-bypass-permissions";
+      }
+      if (normalized === "plan") {
+        return "claude-plan";
+      }
+      if (normalized === "dont-ask") {
+        return "claude-dont-ask";
+      }
+      if (normalized === "auto") {
+        return "claude-auto";
+      }
+      return "default";
+    }
+    if (runtimeTone === "codex" && normalized === "full-access") {
+      return "codex-full-access";
+    }
+    return "default";
+  }
+
+  function accessModeClass(mode: SessionMode | string | undefined) {
+    return `access-mode-tone-${accessModeTone(mode)}`;
+  }
+
+  function accessModeIcon(mode: SessionMode | string | undefined, size = 15) {
+    const normalized = normalizeAccessMode(mode);
+    if (runtimeTone === "claude") {
+      if (normalized === "accept-edits") {
+        return <FastForward size={size} />;
+      }
+      if (normalized === "bypass-permissions") {
+        return <ShieldAlert size={size} />;
+      }
+      if (normalized === "plan") {
+        return <FileText size={size} />;
+      }
+      if (normalized === "dont-ask") {
+        return <Ban size={size} />;
+      }
+      if (normalized === "auto") {
+        return <Sparkles size={size} />;
+      }
+      return <Hand size={size} />;
+    }
+    if (normalized === "full-access") {
       return <ShieldAlert size={size} />;
     }
-    if (modeId === "agent") {
+    if (normalized === "agent") {
       return <ShieldCheck size={size} />;
     }
     return <Hand size={size} />;
@@ -220,12 +341,12 @@ export function ChatComposer({
                   <button
                     aria-expanded={isAccessMenuOpen}
                     aria-haspopup="menu"
-                    className="access-mode-chip"
+                    className={`access-mode-chip ${accessModeClass(currentMode ?? accessMode)}`}
                     onClick={toggleAccessMenu}
                     title={`${agent?.label ?? "Agent"} 访问权限`}
                     type="button"
                   >
-                    {accessModeIcon(currentMode?.id ?? accessMode)}
+                    {accessModeIcon(currentMode ?? accessMode)}
                     <span>{accessModeLabel(currentMode)}</span>
                     <ChevronDown size={13} />
                   </button>
@@ -234,12 +355,12 @@ export function ChatComposer({
                       {modes.map((mode) => (
                         <button
                           key={mode.id}
-                          className={`access-mode-item ${mode.id === accessMode ? "selected" : ""}`}
+                          className={`access-mode-item ${accessModeClass(mode)} ${mode.id === accessMode ? "selected" : ""}`}
                           onClick={() => selectAccessMode(mode.id)}
                           role="menuitem"
                           type="button"
                         >
-                          {accessModeIcon(mode.id, 16)}
+                          {accessModeIcon(mode, 16)}
                           <span>{accessModeLabel(mode)}</span>
                           {mode.id === accessMode ? <Check size={14} /> : null}
                         </button>
