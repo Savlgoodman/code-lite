@@ -1,4 +1,5 @@
 import type { UsageStats } from "../../types";
+import "./ContextRing.css";
 
 interface ContextRingProps {
   usage: UsageStats | null;

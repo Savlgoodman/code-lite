@@ -23,7 +23,9 @@
   align-items: center;
   gap: 10px;
   padding: 0 10px;
+  border: 0;
   border-radius: 8px;
+  background: transparent;
   color: #373c44;
   text-align: left;
 }

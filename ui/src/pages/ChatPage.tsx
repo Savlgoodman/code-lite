@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ChatComposer } from "../features/chat/ChatComposer";
-import { ConversationHeader } from "../features/chat/ConversationHeader";
-import { MessageList } from "../features/chat/MessageList";
 import { AgentSelectionPanel } from "../features/chat/AgentSelectionPanel";
+import { ChatWorkspace } from "../features/chat/ChatWorkspace";
+import type { ChatConfigValue, SessionConfig } from "../features/chat/chatTypes";
 import {
   createEmptySession,
   createId,
-  createInitialState,
   normalizeStoredState,
   type PendingMessageDelta,
   type StoredState,
@@ -25,15 +23,13 @@ import {
   saveConversationConfig,
   updateConversationArchiveState
 } from "../services/conversationStore";
-import { loadAgentRuntimeModels, loadAgentRuntimeSettings, loadModelSettings } from "../services/settingsStore";
+import { loadAgentRuntimeModels, loadAgentRuntimeSettings } from "../services/settingsStore";
 import type {
   AgentEvent,
   AgentRuntimeModel,
   AgentSummary,
   ApprovalRequest,
   ChatMessage,
-  ChatModelOption,
-  ConfiguredModel,
   Session,
   SessionCapabilities,
   SessionConfigOption,
@@ -41,20 +37,11 @@ import type {
   ToolCallItem,
   UsageStats
 } from "../types";
-import "./ChatPage.css";
 
 const DRAFT_SESSION_ID = "__draft_session__";
 const STREAM_DELTA_FLUSH_MS = 60;
 type ActiveView = "chat" | "overview" | "settings";
 type PendingApprovalState = ApprovalRequest & { conversationId: string };
-
-/** 每个会话独立的配置：模型、权限模式、思考强度、其他选项 */
-interface SessionConfig {
-  modelFamily: string;
-  accessMode: string;
-  reasoningEffort: string;
-  selectedConfig: Record<string, string | number | boolean>;
-}
 
 function createDraftSession(): Session {
   return {
@@ -121,30 +108,6 @@ function mergeLoadedSession(loadedSession: Session, cachedSession: Session | und
     ...cachedSession,
     updatedAt: Math.max(loadedSession.updatedAt, cachedSession.updatedAt)
   };
-}
-
-function configuredModelOptions(models: ConfiguredModel[]): ChatModelOption[] {
-  return models.map((model) => ({
-    id: model.id,
-    label: model.label,
-    model: model.model,
-    providerId: model.providerId,
-    providerName: model.providerName,
-    reasoningEffort: model.generation.reasoningEffort,
-    source: "product-config"
-  }));
-}
-
-function runtimeModelOptions(agent: AgentSummary, models: AgentRuntimeModel[]): ChatModelOption[] {
-  return models.map((model) => ({
-    id: model.id,
-    label: model.label || model.id,
-    model: model.id,
-    providerId: agent.runtimeId ?? agent.id,
-    providerName: agent.label,
-    reasoningEffort: model.id.match(/\[(.*?)\]$/)?.[1] ?? undefined,
-    source: "agent-runtime"
-  }));
 }
 
 export function ChatPage() {
@@ -258,7 +221,7 @@ export function ChatPage() {
                   modelFamily: String(cfg.modelFamily ?? ""),
                   accessMode: String(cfg.accessMode ?? ""),
                   reasoningEffort: String(cfg.reasoningEffort ?? "medium"),
-                  selectedConfig: (cfg.selectedConfig as Record<string, string | number | boolean>) ?? {},
+                  selectedConfig: (cfg.selectedConfig as Record<string, ChatConfigValue>) ?? {},
                 };
               }
               // 恢复 context usage
@@ -441,7 +404,7 @@ export function ChatPage() {
       const reasoningEffort = reasoningOpt?.currentValue ? String(reasoningOpt.currentValue) : "medium";
 
       // 提取其他 configOptions 默认值
-      const selectedConfig: Record<string, string | number | boolean> = {};
+      const selectedConfig: Record<string, ChatConfigValue> = {};
       for (const opt of caps.configOptions) {
         if (opt.currentValue != null) {
           selectedConfig[opt.id] = opt.currentValue;
@@ -1148,40 +1111,36 @@ export function ChatPage() {
           {activeView === "overview" ? (
             <OverviewPage />
           ) : (
-            <main className="main-panel">
-              <ConversationHeader agent={sessionAgent} isRunning={isActiveSessionRunning} title={activeSession.title} />
-              <MessageList
-                isRunning={isActiveSessionRunning}
-                messages={activeMessages}
-                sessionId={activeSession.id}
-                updatedAt={activeSession.updatedAt}
-              />
-              <ChatComposer
-                activeTurnId={isActiveSessionRunning ? activeTurnId : null}
-                configOptions={currentCapabilities?.configOptions ?? []}
-                contextUsage={contextUsage}
-                draft={draft}
-                accessMode={currentConfig?.accessMode ?? ""}
-                agent={sessionAgent}
-                modes={currentCapabilities?.modes ?? []}
-                models={currentCapabilities?.models ?? []}
-                onAccessModeChange={(v) => updateSessionConfig({ accessMode: v })}
-                onConfigChange={(optionId, value) => {
-                  const next = { ...(currentConfig?.selectedConfig ?? {}), [optionId]: value };
-                  updateSessionConfig({ selectedConfig: next });
-                }}
-                onDraftChange={setDraft}
-                onModelFamilyChange={(v) => updateSessionConfig({ modelFamily: v })}
-                onReasoningEffortChange={(v) => updateSessionConfig({ reasoningEffort: v })}
-                onResolveApproval={(decision) => void resolveApproval(decision)}
-                onSendMessage={() => void sendMessage()}
-                onStopTurn={() => void stopCurrentTurn()}
-                pendingApproval={activePendingApproval}
-                reasoningEffort={currentConfig?.reasoningEffort ?? ""}
-                selectedConfig={currentConfig?.selectedConfig ?? {}}
-                selectedModelFamily={currentConfig?.modelFamily ?? ""}
-              />
-            </main>
+            <ChatWorkspace
+              accessMode={currentConfig?.accessMode ?? ""}
+              activeTurnId={isActiveSessionRunning ? activeTurnId : null}
+              agent={sessionAgent}
+              configOptions={currentCapabilities?.configOptions ?? []}
+              contextUsage={contextUsage}
+              draft={draft}
+              isRunning={isActiveSessionRunning}
+              messages={activeMessages}
+              modes={currentCapabilities?.modes ?? []}
+              models={currentCapabilities?.models ?? []}
+              onAccessModeChange={(value) => updateSessionConfig({ accessMode: value })}
+              onConfigChange={(optionId, value) => {
+                const next = { ...(currentConfig?.selectedConfig ?? {}), [optionId]: value };
+                updateSessionConfig({ selectedConfig: next });
+              }}
+              onDraftChange={setDraft}
+              onModelFamilyChange={(value) => updateSessionConfig({ modelFamily: value })}
+              onReasoningEffortChange={(value) => updateSessionConfig({ reasoningEffort: value })}
+              onResolveApproval={(decision) => void resolveApproval(decision)}
+              onSendMessage={() => void sendMessage()}
+              onStopTurn={() => void stopCurrentTurn()}
+              pendingApproval={activePendingApproval}
+              reasoningEffort={currentConfig?.reasoningEffort ?? ""}
+              selectedConfig={currentConfig?.selectedConfig ?? {}}
+              selectedModelFamily={currentConfig?.modelFamily ?? ""}
+              sessionId={activeSession.id}
+              title={activeSession.title}
+              updatedAt={activeSession.updatedAt}
+            />
           )}
         </>
       )}

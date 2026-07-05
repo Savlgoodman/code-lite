@@ -6,6 +6,7 @@ import { formatConversationBoundaryTime } from "../../lib/formatters";
 import type { ChatMessage } from "../../types";
 import { buildAssistantInlineEntries } from "./messageTools";
 import { ToolCallGroup } from "./ToolCallViews";
+import "./MessageList.css";
 
 function AssistantMessageContent({ message }: { message: ChatMessage }) {
   const entries = buildAssistantInlineEntries(message.content, message.toolCalls);

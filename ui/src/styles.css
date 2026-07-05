@@ -47,6 +47,30 @@ button {
   -webkit-app-region: no-drag;
 }
 
+.icon-button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #4d535b;
+}
+
+.icon-button:hover {
+  background: rgba(32, 36, 40, 0.07);
+}
+
+.icon-button.muted {
+  color: #9aa0a7;
+}
+
+.eyebrow {
+  color: var(--subtle);
+  font-size: 12px;
+}
+
 .app-shell {
   width: 100vw;
   height: 100vh;
@@ -61,6 +85,16 @@ button {
   flex: 1;
   min-height: 0;
   display: flex;
+}
+
+.main-panel {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
 }
 
 .spin-icon {

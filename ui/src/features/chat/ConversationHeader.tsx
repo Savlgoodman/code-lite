@@ -1,6 +1,7 @@
 import { Bot, LayoutList, MoreHorizontal, SlidersHorizontal } from "lucide-react";
 
 import type { AgentSummary } from "../../types";
+import "./ConversationHeader.css";
 
 interface ConversationHeaderProps {
   agent?: AgentSummary | null;

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { formatRisk } from "../../lib/formatters";
 import type { ToolCallItem } from "../../types";
+import "./ToolCallViews.css";
 
 function toolResultSummary(tool: ToolCallItem) {
   const value = tool.error ?? tool.resultText ?? "";

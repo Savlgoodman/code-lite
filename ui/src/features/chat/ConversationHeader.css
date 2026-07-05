@@ -1,0 +1,64 @@
+.conversation-header {
+  height: 48px;
+  flex: 0 0 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 16px 0 18px;
+  border-bottom: 1px solid #e7e4e0;
+  background: rgba(251, 251, 250, 0.94);
+}
+
+.conversation-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conversation-title h1 {
+  margin: 0;
+  overflow: hidden;
+  color: #20242b;
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.outline-action {
+  height: 32px;
+  max-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #e0ddd9;
+  border-radius: 8px;
+  background: #fff;
+  color: #343a42;
+}
+
+.outline-action:hover {
+  background: #f5f5f3;
+}
+
+.outline-action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 780px) {
+  .outline-action {
+    display: none;
+  }
+}

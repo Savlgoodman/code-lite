@@ -1,6 +1,8 @@
 import { memo, type ComponentProps } from "react";
 import { Streamdown, type AnimateOptions, type Components, type ExtraProps } from "streamdown";
 
+import "./MessageRenderer.css";
+
 interface MessageRendererProps {
   content: string;
   streaming?: boolean;

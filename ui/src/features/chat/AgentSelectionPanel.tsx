@@ -2,6 +2,8 @@ import { useState } from "react";
 
 import { Bot, ChevronRight, FolderOpen, Shield, ShieldAlert, ShieldCheck, Zap } from "lucide-react";
 
+import "./AgentSelectionPanel.css";
+
 interface AgentOption {
   id: string;
   label: string;

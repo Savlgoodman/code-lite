@@ -12,6 +12,8 @@ import type {
 } from "../../types";
 import { ApprovalCard } from "./ApprovalCard";
 import { ContextRing } from "./ContextRing";
+import type { ChatConfigValue } from "./chatTypes";
+import "./ChatComposer.css";
 
 /** 从模型 ID 提取模型族和推理强度 */
 function parseModelId(modelId: string): { family: string; effort: string | null } {
@@ -39,7 +41,7 @@ interface ChatComposerProps {
   models: SessionModel[];
   modes: SessionMode[];
   onAccessModeChange: (value: string) => void;
-  onConfigChange: (optionId: string, value: string) => void;
+  onConfigChange: (optionId: string, value: ChatConfigValue) => void;
   onDraftChange: (value: string) => void;
   onModelFamilyChange: (familyId: string) => void;
   onReasoningEffortChange: (value: string) => void;
@@ -48,7 +50,7 @@ interface ChatComposerProps {
   onStopTurn: () => void;
   pendingApproval: ApprovalRequest | null;
   reasoningEffort: string;
-  selectedConfig: Record<string, string | number | boolean>;
+  selectedConfig: Record<string, ChatConfigValue>;
   selectedModelFamily: string;
 }
 
