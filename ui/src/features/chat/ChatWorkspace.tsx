@@ -88,6 +88,7 @@ export function ChatWorkspace({
         configOptions={configOptions}
         contextUsage={contextUsage}
         draft={draft}
+        messages={messages}
         modes={modes}
         models={models}
         onAccessModeChange={onAccessModeChange}

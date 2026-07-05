@@ -18,6 +18,7 @@ import {
 import type {
   AgentSummary,
   ApprovalRequest,
+  ChatMessage,
   SessionConfigOption,
   SessionModel,
   SessionMode,
@@ -65,6 +66,7 @@ interface ChatComposerProps {
   configOptions: SessionConfigOption[];
   contextUsage: UsageStats | null;
   draft: string;
+  messages: ChatMessage[];
   models: SessionModel[];
   modes: SessionMode[];
   onAccessModeChange: (value: string) => void;
@@ -89,6 +91,7 @@ export function ChatComposer({
   configOptions,
   contextUsage,
   draft,
+  messages,
   models,
   modes,
   onAccessModeChange,
@@ -525,7 +528,8 @@ export function ChatComposer({
       </div>
     </div>
     <TokenUsageModal
-      usage={contextUsage}
+      messages={messages}
+      contextUsage={contextUsage}
       open={isTokenModalOpen}
       onClose={() => setIsTokenModalOpen(false)}
     />
