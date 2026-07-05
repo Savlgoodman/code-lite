@@ -22,6 +22,25 @@
   max-width: 90vw;
   max-height: 80vh;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(105, 112, 121, 0.28) transparent;
+}
+
+.token-modal::-webkit-scrollbar {
+  width: 4px;
+}
+
+.token-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.token-modal::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(105, 112, 121, 0.28);
+}
+
+.token-modal::-webkit-scrollbar-thumb:hover {
+  background: rgba(105, 112, 121, 0.45);
 }
 
 .token-modal-header {
