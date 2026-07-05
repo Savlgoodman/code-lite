@@ -18,6 +18,28 @@
   margin-bottom: 0;
 }
 
+.streamdown-body a,
+.markdown-link {
+  border: 0;
+  background: transparent;
+  color: #0b63ce;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.streamdown-body a:hover,
+.markdown-link:hover {
+  color: #084a9b;
+  text-decoration: underline;
+}
+
+.streamdown-body a:focus-visible,
+.markdown-link:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid rgba(11, 99, 206, 0.28);
+  outline-offset: 2px;
+}
+
 .streamdown-body pre {
   overflow-x: auto;
   margin: 8px 0 0;

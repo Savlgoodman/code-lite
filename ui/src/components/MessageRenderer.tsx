@@ -16,7 +16,16 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"tabl
   );
 }
 
+function MarkdownLink({ children, node: _node, ...props }: ComponentProps<"a"> & ExtraProps) {
+  return (
+    <a className="markdown-link" rel="noreferrer" target="_blank" {...props}>
+      {children}
+    </a>
+  );
+}
+
 const markdownComponents: Components = {
+  a: MarkdownLink,
   table: MarkdownTable
 };
 
