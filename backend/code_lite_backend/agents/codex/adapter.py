@@ -503,11 +503,7 @@ class CodexAgentAdapter:
                     "conversationId": request.conversation_id,
                     "turnId": request.turn_id,
                 })
-                await output_queue.put({
-                    "type": "agent.run.completed",
-                    "conversationId": request.conversation_id,
-                    "turnId": request.turn_id,
-                    # 获取 usage：优先使用 PromptResponse.usage（完整分项），否则 fallback 到 usage_update
+                # 获取 usage：优先使用 PromptResponse.usage（完整分项），否则 fallback 到 usage_update
                 prompt_usage = getattr(prompt_result, "usage", None)
                 if prompt_usage is not None:
                     usage_dict = _extract_prompt_response_usage(prompt_usage)
@@ -517,6 +513,11 @@ class CodexAgentAdapter:
                         usage_dict["contextWindowTokens"] = client.latest_usage.get("contextWindowTokens")
                 else:
                     usage_dict = client.latest_usage
+                await output_queue.put({
+                    "type": "agent.run.completed",
+                    "conversationId": request.conversation_id,
+                    "turnId": request.turn_id,
+                    "usage": usage_dict,
                     "result": {
                         "stopReason": getattr(prompt_result, "stop_reason", None),
                         "runtime": "codex-acp",
