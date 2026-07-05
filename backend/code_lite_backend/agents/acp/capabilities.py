@@ -5,48 +5,76 @@ from typing import Any
 from code_lite_backend.agents.acp.mapper import to_jsonable
 
 
-def parse_models_from_session_result(session_result: Any, runtime: str) -> dict[str, Any]:
-    """从 ACP session/new 结果中提取可用模型列表。"""
-    raw = to_jsonable(session_result)
-    models = raw.get("models") if isinstance(raw, dict) else None
-    if not isinstance(models, dict):
+_CLAUDE_DEFAULT_MODEL = "sonnet"
+
+
+def parse_models_from_config_option(model_config: dict[str, Any], runtime: str) -> dict[str, Any]:
+    model_values = model_config.get("values")
+    if not isinstance(model_values, list):
         return {
             "currentModelId": None,
             "models": [],
         }
-    available = models.get("availableModels") if isinstance(models.get("availableModels"), list) else []
-    parsed = []
-    for item in available:
-        if not isinstance(item, dict):
-            continue
-        model_id = str(item.get("modelId") or item.get("id") or "").strip()
-        if not model_id:
-            continue
-        parsed.append({
-            "id": model_id,
-            "label": str(item.get("name") or model_id),
-            "description": item.get("description"),
-            "source": runtime,
-        })
+
+    values = [str(value) for value in model_values if str(value).strip()]
+    labels = model_config.get("option_labels") or {}
+    descriptions = model_config.get("option_descriptions") or {}
+    current = str(model_config.get("current_value") or "")
+
+    if runtime == "claude_code":
+        values = [value for value in values if value != "default"]
+        available = set(values)
+        if current == "default" or current not in available:
+            current = _CLAUDE_DEFAULT_MODEL if _CLAUDE_DEFAULT_MODEL in available else ""
+
     return {
-        "currentModelId": models.get("currentModelId"),
-        "models": parsed,
+        "currentModelId": current or None,
+        "models": [
+            {
+                "id": value,
+                "label": str(labels.get(value) or value),
+                "description": descriptions.get(value),
+                "source": runtime,
+            }
+            for value in values
+        ],
     }
 
 
-def extract_available_model_ids(session_result: Any) -> set[str]:
-    """从 ACP session/new 结果中提取可用模型 ID 集合。"""
+def parse_models_from_session_result(session_result: Any, runtime: str) -> dict[str, Any]:
+    """从 ACP session/new 结果中提取可用模型列表。"""
     raw = to_jsonable(session_result)
     models = raw.get("models") if isinstance(raw, dict) else None
-    available = models.get("availableModels") if isinstance(models, dict) else []
-    result: set[str] = set()
-    for item in available if isinstance(available, list) else []:
-        if isinstance(item, dict):
+    if isinstance(models, dict):
+        available = models.get("availableModels") if isinstance(models.get("availableModels"), list) else []
+        parsed = []
+        for item in available:
+            if not isinstance(item, dict):
+                continue
             model_id = str(item.get("modelId") or item.get("id") or "").strip()
-            if model_id:
-                result.add(model_id)
-    return result
+            if not model_id:
+                continue
+            parsed.append({
+                "id": model_id,
+                "label": str(item.get("name") or model_id),
+                "description": item.get("description"),
+                "source": runtime,
+            })
+        if parsed:
+            return {
+                "currentModelId": models.get("currentModelId"),
+                "models": parsed,
+            }
 
+    raw_config = parse_config_options_from_session_result(session_result)
+    model_config = raw_config.get("model")
+    if isinstance(model_config, dict):
+        return parse_models_from_config_option(model_config, runtime)
+
+    return {
+        "currentModelId": None,
+        "models": [],
+    }
 
 def parse_modes_from_session_result(session_result: Any) -> list[dict[str, Any]]:
     """从 ACP session/new 结果中提取可用权限模式。"""

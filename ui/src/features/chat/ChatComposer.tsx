@@ -122,9 +122,8 @@ export function ChatComposer({
     for (const model of models) {
       const { family } = parseModelId(model.id);
       if (!familyMap.has(family)) {
-        // 从 label 提取展示名：取第一个 [ 之前的部分，去掉尾部空格
         const labelMatch = model.label.match(/^(.*?)\s*(?:\(|\[)/);
-        const familyLabel = labelMatch ? labelMatch[1].trim() : family;
+        const familyLabel = labelMatch ? labelMatch[1].trim() : model.label || family;
         familyMap.set(family, { id: family, label: familyLabel, models: [] });
       }
       familyMap.get(family)!.models.push(model);

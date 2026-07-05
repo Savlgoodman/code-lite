@@ -13,6 +13,7 @@ export interface StartTurnOptions {
   conversationId?: string;
   input: string;
   modelId?: string | null;
+  modelLabel?: string | null;
   reasoningEffort?: string | null;
   selectedConfig?: Record<string, string | number | boolean>;
   signal?: AbortSignal;
@@ -104,6 +105,7 @@ export async function streamAgentTurn(options: StartTurnOptions): Promise<void> 
       ...(options.accessMode ? { accessMode: options.accessMode } : {}),
       input: options.input,
       ...(options.modelId ? { modelId: options.modelId } : {}),
+      ...(options.modelLabel ? { modelLabel: options.modelLabel } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
       ...(options.selectedConfig ? { selectedConfig: options.selectedConfig } : {}),
       turnId: options.turnId

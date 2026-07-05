@@ -21,6 +21,48 @@ router = APIRouter()
 # ACP runtime adapters 使用 runtime 原生模型（从 session/new 获取），
 # 不查产品级 model_config。nanobot 是唯一的产品级模型 adapter。
 _ACP_RUNTIME_IDS = {"codex", "claude_code", "opencode"}
+_CLAUDE_DEFAULT_MODEL = "sonnet"
+
+
+def _clean_label(value: str | None) -> str | None:
+    label = str(value or "").strip()
+    return label or None
+
+
+def _normalize_claude_runtime_model(runtime_model: str | None) -> str:
+    model = str(runtime_model or "").strip()
+    if not model or model == "default":
+        return _CLAUDE_DEFAULT_MODEL
+    return model
+
+
+def _claude_model_label(
+    services: AppServices,
+    conversation_id: str,
+    runtime_model: str | None,
+    fallback_label: str | None = None,
+) -> str | None:
+    if not runtime_model or runtime_model == "default":
+        return None
+    fallback = _clean_label(fallback_label)
+    binding = services.conversation_store.load_native_session(conversation_id)
+    capabilities = binding.get("capabilities") if isinstance(binding, dict) else None
+    config_options = capabilities.get("configOptions") if isinstance(capabilities, dict) else None
+    if not isinstance(config_options, list):
+        return fallback
+    for item in config_options:
+        if not isinstance(item, dict) or item.get("id") != "model":
+            continue
+        options = item.get("options")
+        if not isinstance(options, list):
+            return fallback
+        for option in options:
+            if not isinstance(option, dict):
+                continue
+            if str(option.get("value") or "") == runtime_model:
+                name = str(option.get("name") or "").strip()
+                return name or fallback
+    return fallback
 
 
 @router.post("/turns/{turn_id}/cancel")
@@ -45,6 +87,7 @@ async def stream_turn(
     turn_id = str(body.get("turnId") or f"turn-{uuid.uuid4().hex}")
     prompt = str(body.get("input") or "").strip()
     requested_model_id = str(body.get("modelId") or "").strip() or None
+    requested_model_label = str(body.get("modelLabel") or "").strip() or None
     requested_access_mode = str(body.get("accessMode") or "").strip() or None
     requested_reasoning_effort = str(body.get("reasoningEffort") or "").strip() or None
     selected_config = body.get("selectedConfig") if isinstance(body.get("selectedConfig"), dict) else None
@@ -73,10 +116,22 @@ async def stream_turn(
     if agent_id in _ACP_RUNTIME_IDS:
         # ACP runtime：使用 runtime 原生模型（不查产品级 model_config）
         runtime_model = requested_model_id
+        if agent_id == "claude_code":
+            runtime_model = _normalize_claude_runtime_model(runtime_model)
         if runtime_model:
+            label = (
+                _claude_model_label(
+                    services,
+                    conversation_id,
+                    runtime_model,
+                    requested_model_label,
+                )
+                if agent_id == "claude_code"
+                else None
+            ) or runtime_model
             model_metadata = {
-                "model": runtime_model,
-                "label": runtime_model,
+                "model": label,
+                "label": label,
                 "runtimeModel": runtime_model,
                 "source": f"{agent_id}-acp",
                 "reasoningEffort": requested_reasoning_effort or "none",

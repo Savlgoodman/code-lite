@@ -358,16 +358,13 @@ export function ChatPage() {
           : [];
 
         let fallbackModels: SessionModel[] = [];
-        const agentId = runtime.adapter;
-        if (agentId === "codex") {
-          try {
-            const runtimeModels = await loadAgentRuntimeModels(runtime.id ?? "codex");
-            fallbackModels = runtimeModels.models.map((m: AgentRuntimeModel) => ({
-              id: m.id, label: m.label, description: m.description,
-              isCurrent: m.id === runtimeModels.currentModelId,
-            }));
-          } catch { /* ignore */ }
-        }
+        try {
+          const runtimeModels = await loadAgentRuntimeModels(runtime.id ?? runtime.adapter);
+          fallbackModels = runtimeModels.models.map((m: AgentRuntimeModel) => ({
+            id: m.id, label: m.label, description: m.description,
+            isCurrent: m.id === runtimeModels.currentModelId,
+          }));
+        } catch { /* ignore */ }
 
         const fallbackCaps: SessionCapabilities = {
           agent: {
@@ -994,19 +991,23 @@ export function ChatPage() {
       const agentRuntimeId = sessionAgent?.runtimeId ?? sessionAgent?.id ?? "";
       const isCodex = agentRuntimeId === "codex";
       let fullModelId: string | undefined;
+      let modelLabel: string | undefined;
       if (isCodex && cfg?.modelFamily && cfg.reasoningEffort) {
         // Codex: 用 bracket 格式 "family[effort]"
         fullModelId = `${cfg.modelFamily}[${cfg.reasoningEffort}]`;
+        modelLabel = fullModelId;
       } else if (cfg?.modelFamily) {
         // Claude Code 等：直接用模型 id，推理强度通过 effort config 传递
         const exact = models.find((m) => m.id === cfg.modelFamily);
         fullModelId = exact?.id ?? cfg.modelFamily;
+        modelLabel = exact?.label;
       }
       await streamAgentTurn({
         accessMode: cfg?.accessMode,
         conversationId,
         input: text,
         modelId: fullModelId,
+        modelLabel,
         onEvent: (event) => handleAgentEvent(sessionId, event),
         signal: abortController.signal,
         reasoningEffort: cfg?.reasoningEffort,

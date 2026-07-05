@@ -10,7 +10,6 @@ import acp
 from acp import schema as acp_schema
 
 from code_lite_backend.agents.acp.capabilities import (
-    extract_available_model_ids,
     parse_models_from_session_result,
 )
 from code_lite_backend.agents.acp.client import AcpClientHandler

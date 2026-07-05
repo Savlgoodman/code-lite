@@ -168,6 +168,26 @@ def _build_modes(
     ]
 
 
+def _build_runtime_models_from_config(
+    *,
+    runtime: str,
+    model_config: dict[str, Any],
+) -> list[SessionModel]:
+    from code_lite_backend.agents.acp.capabilities import parse_models_from_config_option
+
+    models_data = parse_models_from_config_option(model_config, runtime)
+    current_model_id = str(models_data.get("currentModelId") or "")
+    return [
+        SessionModel(
+            id=m["id"],
+            label=m.get("label") or m["id"],
+            description=m.get("description"),
+            is_current=(m["id"] == current_model_id),
+        )
+        for m in models_data.get("models", [])
+    ]
+
+
 # 命令 ID → 中文展示名映射
 _COMMAND_LABELS: dict[str, str] = {
     "compact": "压缩",
@@ -289,21 +309,10 @@ def build_session_capabilities(
     if not models:
         model_config = raw_config.get("model")
         if isinstance(model_config, dict):
-            model_values = model_config.get("values")
-            model_labels = model_config.get("option_labels") or {}
-            model_descs = model_config.get("option_descriptions") or {}
-            model_current = str(model_config.get("current_value") or "")
-            if isinstance(model_values, list):
-                current_model_id = model_current
-                models = [
-                    SessionModel(
-                        id=str(v),
-                        label=str(model_labels.get(str(v)) or v),
-                        description=model_descs.get(str(v)),
-                        is_current=(str(v) == model_current),
-                    )
-                    for v in model_values
-                ]
+            models = _build_runtime_models_from_config(
+                runtime=runtime,
+                model_config=model_config,
+            )
 
     # 思考强度别名：Claude Code 用 "effort"，Codex 用 "reasoning_effort"，统一暴露
     THOUGHT_LEVEL_IDS = {"reasoning_effort", "effort"}
