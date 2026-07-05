@@ -89,6 +89,7 @@ class ConversationRecorder:
             "role": "user",
             "content": prompt,
             "createdAt": timestamp,
+            "updatedAt": timestamp,
             "agent": session.get("agent"),
             "model": model_metadata or None,
             "toolCalls": [],
@@ -98,6 +99,7 @@ class ConversationRecorder:
             "role": "assistant",
             "content": "",
             "createdAt": timestamp,
+            "updatedAt": timestamp,
             "agent": session.get("agent"),
             "model": model_metadata or None,
             "streaming": True,
@@ -201,11 +203,13 @@ class ConversationRecorder:
             self._update_active_session(conversation_id, {"status": "approval"})
         elif event_type == "agent.run.completed":
             assistant["streaming"] = False
+            assistant["updatedAt"] = now_ms()
             if isinstance(event.get("usage"), dict):
                 assistant["usage"] = event["usage"]
             session_patch = {"status": "idle"}
         elif event_type == "agent.run.failed":
             assistant["streaming"] = False
+            assistant["updatedAt"] = now_ms()
             assistant["error"] = event.get("error") or "Agent 运行失败"
             session_patch = {"status": "error"}
 

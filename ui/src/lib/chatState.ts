@@ -62,6 +62,7 @@ export function normalizeStoredState(value: StoredState): StoredState {
       items.map((message) => ({
         ...message,
         createdAt: typeof message.createdAt === "number" ? message.createdAt : now,
+        updatedAt: typeof message.updatedAt === "number" ? message.updatedAt : undefined,
         streaming: false,
         toolCalls: message.toolCalls ?? []
       }))
@@ -83,6 +84,7 @@ export function createAssistantMessage(id: string): ChatMessage {
     role: "assistant",
     content: "",
     createdAt: Date.now(),
+    updatedAt: Date.now(),
     streaming: true,
     toolCalls: []
   };

@@ -920,6 +920,7 @@ export function ChatPage() {
 
     if (event.type === "agent.run.completed") {
       flushQueuedMessageDeltas();
+      const completedAt = Date.now();
       setSessionRunning(targetSessionId, false);
       // 从 final usage 更新 context（如果 turn 结束时携带了 context 数据）
       if (typeof event.usage === "object" && event.usage) {
@@ -938,24 +939,27 @@ export function ChatPage() {
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
           streaming: false,
+          updatedAt: completedAt,
           usage: typeof event.usage === "object" && event.usage ? (event.usage as ChatMessage["usage"]) : message.usage
         }))
       );
-      updateSession(targetSessionId, (session) => event.session ?? { ...session, status: "idle", updatedAt: Date.now() });
+      updateSession(targetSessionId, (session) => event.session ?? { ...session, status: "idle", updatedAt: completedAt });
       return;
     }
 
     if (event.type === "agent.run.failed") {
       flushQueuedMessageDeltas();
+      const failedAt = Date.now();
       setSessionRunning(targetSessionId, false);
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
           error: event.error ?? "Agent 运行失败",
-          streaming: false
+          streaming: false,
+          updatedAt: failedAt
         }))
       );
-      updateSession(targetSessionId, (session) => event.session ?? { ...session, status: "error", updatedAt: Date.now() });
+      updateSession(targetSessionId, (session) => event.session ?? { ...session, status: "error", updatedAt: failedAt });
     }
   }
 

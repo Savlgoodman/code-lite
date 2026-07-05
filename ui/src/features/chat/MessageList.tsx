@@ -48,7 +48,23 @@ function AssistantMessageContent({ message }: { message: ChatMessage }) {
   );
 }
 
-const MessageItem = memo(function MessageItem({ message }: { message: ChatMessage }) {
+function shouldShowTurnEndTime(message: ChatMessage, index: number, messages: ChatMessage[], isRunning: boolean) {
+  if (message.role !== "assistant" || message.streaming) {
+    return false;
+  }
+
+  return !isRunning || index < messages.length - 1;
+}
+
+const MessageItem = memo(function MessageItem({
+  message,
+  showTurnEndTime,
+  turnEndTime
+}: {
+  message: ChatMessage;
+  showTurnEndTime: boolean;
+  turnEndTime: number;
+}) {
   const isThinking = message.role === "assistant" && Boolean(message.streaming) && !message.content.trim();
 
   return (
@@ -74,6 +90,12 @@ const MessageItem = memo(function MessageItem({ message }: { message: ChatMessag
         ) : null}
 
         {message.error ? <p className="message-error">{message.error}</p> : null}
+
+        {showTurnEndTime ? (
+          <div className="conversation-boundary-time">
+            {formatConversationBoundaryTime(turnEndTime)}
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -166,14 +188,14 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
     <>
       <section className="chat-scroll" ref={scrollRef}>
         <div className="chat-content">
-          {messages.map((message) => (
-            <MessageItem key={`${sessionId}-${message.id}`} message={message} />
+          {messages.map((message, index) => (
+            <MessageItem
+              key={`${sessionId}-${message.id}`}
+              message={message}
+              showTurnEndTime={shouldShowTurnEndTime(message, index, messages, isRunning)}
+              turnEndTime={message.updatedAt ?? (index === messages.length - 1 ? updatedAt : message.createdAt)}
+            />
           ))}
-          {messages.length > 0 && !isRunning ? (
-            <div className="conversation-boundary-time">
-              {formatConversationBoundaryTime(updatedAt)}
-            </div>
-          ) : null}
         </div>
       </section>
       {scrollbarState.visible ? (
