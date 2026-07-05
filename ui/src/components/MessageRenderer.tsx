@@ -1,5 +1,6 @@
 import { memo, type ComponentProps } from "react";
-import { Streamdown, type AnimateOptions, type Components, type ExtraProps } from "streamdown";
+import { code } from "@streamdown/code";
+import { Streamdown, type AnimateOptions, type Components, type ControlsConfig, type ExtraProps } from "streamdown";
 
 import "./MessageRenderer.css";
 
@@ -29,6 +30,14 @@ const markdownComponents: Components = {
   table: MarkdownTable
 };
 
+const streamdownControls: ControlsConfig = {
+  code: {
+    copy: true,
+    download: false
+  },
+  table: false
+};
+
 const streamdownAnimation: AnimateOptions = {
   animation: "fadeIn",
   duration: 150,
@@ -47,8 +56,11 @@ export const MessageRenderer = memo(function MessageRenderer({ content, streamin
         caret={isStreaming ? "block" : undefined}
         className="streamdown-body"
         components={markdownComponents}
+        controls={streamdownControls}
         isAnimating={isStreaming}
+        lineNumbers={false}
         mode="streaming"
+        plugins={{ code }}
       >
         {content}
       </Streamdown>

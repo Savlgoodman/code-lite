@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 import type { UsageStats } from "../../types";
 import "./ContextRing.css";
 
@@ -12,6 +14,7 @@ function getUsageColor(ratio: number): string {
 }
 
 export function ContextRing({ usage }: ContextRingProps) {
+  const tooltipId = useId();
   const used = usage?.contextUsedTokens ?? usage?.totalTokens;
   const total = usage?.contextWindowTokens;
 
@@ -27,13 +30,15 @@ export function ContextRing({ usage }: ContextRingProps) {
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference * (1 - ratio);
 
-  const tooltip = `${used.toLocaleString()} / ${total.toLocaleString()} tokens (${percent}%)`;
+  const usedLabel = used.toLocaleString();
+  const totalLabel = total.toLocaleString();
 
   return (
     <div
       className="context-ring"
-      title={tooltip}
       role="img"
+      tabIndex={0}
+      aria-describedby={tooltipId}
       aria-label={`上下文使用 ${percent}%`}
     >
       <svg width="24" height="24" viewBox="0 0 24 24">
@@ -66,6 +71,11 @@ export function ContextRing({ usage }: ContextRingProps) {
         style={{ color }}
       >
         {percent}
+      </span>
+      <span className="context-ring-tooltip" id={tooltipId} role="tooltip">
+        <strong>上下文窗口</strong>
+        <span>{percent}% 已使用</span>
+        <small>{usedLabel} / {totalLabel} tokens</small>
       </span>
     </div>
   );
