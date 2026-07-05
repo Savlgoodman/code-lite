@@ -197,28 +197,52 @@ _COMMAND_DESCRIPTIONS: dict[str, str] = {
 }
 
 
-def _build_commands(raw: dict[str, Any]) -> list[SlashCommand]:
-    """从 ACP session/new 结果中提取可用命令列表。"""
-    raw_commands = []
-    # 从 session_result 中的 metadata 或 modes 提取
+def _build_commands(raw: dict[str, Any], runtime: str) -> list[SlashCommand]:
+    """从 ACP session/new 结果中提取可用命令列表。
+
+    优先从 session_result 中的 availableCommands 提取，
+    否则根据 runtime 类型提供静态 fallback 列表。
+    """
+    raw_commands: list[dict[str, Any]] = []
     if isinstance(raw, dict):
-        # ACP 可能通过 available_commands_update 推送，但 session/new 也可能包含
         for item in raw.get("availableCommands", []):
             if isinstance(item, dict):
                 raw_commands.append(item)
 
-    commands: list[SlashCommand] = []
-    for cmd in raw_commands:
-        cmd_name = str(cmd.get("name") or "").strip()
-        if not cmd_name:
-            continue
-        commands.append(SlashCommand(
-            id=cmd_name,
-            label=_COMMAND_LABELS.get(cmd_name, cmd_name),
-            description=_COMMAND_DESCRIPTIONS.get(cmd_name, str(cmd.get("description") or "")),
-            command=f"/{cmd_name}",
-        ))
-    return commands
+    # 如果 ACP 返回了可用命令，优先使用
+    if raw_commands:
+        commands: list[SlashCommand] = []
+        for cmd in raw_commands:
+            cmd_name = str(cmd.get("name") or "").strip()
+            if not cmd_name:
+                continue
+            commands.append(SlashCommand(
+                id=cmd_name,
+                label=_COMMAND_LABELS.get(cmd_name, cmd_name),
+                description=_COMMAND_DESCRIPTIONS.get(cmd_name, str(cmd.get("description") or "")),
+                command=f"/{cmd_name}",
+            ))
+        return commands
+
+    # Fallback: 根据 runtime 类型提供静态命令列表
+    if runtime == "claude_code":
+        cmd_ids = ["compact", "goal", "init", "resume", "review", "context"]
+    elif runtime == "codex":
+        cmd_ids = ["compact", "goal", "mcp", "skills", "status", "review", "logout"]
+    elif runtime == "opencode":
+        cmd_ids = ["compact"]
+    else:
+        return []
+
+    return [
+        SlashCommand(
+            id=cmd_id,
+            label=_COMMAND_LABELS.get(cmd_id, cmd_id),
+            description=_COMMAND_DESCRIPTIONS.get(cmd_id, ""),
+            command=f"/{cmd_id}",
+        )
+        for cmd_id in cmd_ids
+    ]
 
 
 def build_session_capabilities(
@@ -324,7 +348,7 @@ def build_session_capabilities(
         modes=modes,
         models=models,
         config_options=config_options,
-        commands=_build_commands(raw),
+        commands=_build_commands(raw, runtime),
     )
 
 

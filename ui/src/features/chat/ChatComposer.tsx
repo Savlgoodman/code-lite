@@ -522,11 +522,11 @@ export function ChatComposer({
           </div>
         </div>
       </div>
-      <TokenUsageModal
-        usage={contextUsage}
-        open={isTokenModalOpen}
-        onClose={() => setIsTokenModalOpen(false)}
-      />
     </div>
+    <TokenUsageModal
+      usage={contextUsage}
+      open={isTokenModalOpen}
+      onClose={() => setIsTokenModalOpen(false)}
+    />
   );
 }
