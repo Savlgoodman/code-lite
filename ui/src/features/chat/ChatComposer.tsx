@@ -522,7 +522,6 @@ export function ChatComposer({
           </div>
         </div>
       </div>
-    </div>
       <TokenUsageModal
         usage={contextUsage}
         open={isTokenModalOpen}
