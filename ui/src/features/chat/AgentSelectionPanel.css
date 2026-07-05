@@ -68,6 +68,8 @@
 .agent-card-glyph {
   width: 40px;
   height: 40px;
+  --agent-icon-size: 40px;
+  --agent-icon-padding: 10px;
   flex-shrink: 0;
   display: flex;
   align-items: center;

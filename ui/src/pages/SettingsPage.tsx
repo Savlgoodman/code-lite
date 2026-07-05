@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { AgentIcon } from "../components/AgentIcon";
 import { formatTimeLabel } from "../lib/formatters";
 import {
   addProviderModels,
@@ -238,22 +239,6 @@ function configuredCommandDetail(runtime: AgentRuntimeConfig) {
   return commandText(runtime);
 }
 
-function runtimeGlyph(runtimeId: string) {
-  if (runtimeId === "codex") {
-    return "Cx";
-  }
-  if (runtimeId === "claude_code") {
-    return "Cl";
-  }
-  if (runtimeId === "opencode") {
-    return "Op";
-  }
-  if (runtimeId === "nanobot") {
-    return "Nb";
-  }
-  return "Ag";
-}
-
 function runtimeChecks(
   runtime: AgentRuntimeConfig,
   settings: AgentRuntimeSettingsState | null,
@@ -384,7 +369,7 @@ function AgentRuntimeSettings() {
             title={runtime.label}
             type="button"
           >
-            <span>{runtimeGlyph(runtime.id)}</span>
+            <AgentIcon label={runtime.label} runtimeId={runtime.id} size="sm" />
             <i className={runtime.detected.ok ? "ok" : ""} />
           </button>
         ))}
@@ -395,7 +380,12 @@ function AgentRuntimeSettings() {
 
       {selectedRuntime ? (
         <div className="settings-runtime-title-row">
-          <div className="runtime-large-icon">{runtimeGlyph(selectedRuntime.id)}</div>
+          <AgentIcon
+            className="runtime-large-icon"
+            label={selectedRuntime.label}
+            runtimeId={selectedRuntime.id}
+            size="lg"
+          />
           <div>
             <div className="settings-runtime-title">
               <h1>{selectedRuntime.label}</h1>

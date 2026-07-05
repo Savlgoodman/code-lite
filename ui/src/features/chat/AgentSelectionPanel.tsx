@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Bot, ChevronRight, FolderOpen, Shield, ShieldAlert, ShieldCheck, Zap } from "lucide-react";
 
+import { AgentIcon } from "../../components/AgentIcon";
 import "./AgentSelectionPanel.css";
 
 interface AgentOption {
   id: string;
   label: string;
-  glyph: string;
   status: "available" | "experimental" | "planned" | "needs_setup";
   description: string;
   defaultMode?: string;
@@ -15,6 +15,7 @@ interface AgentOption {
 
 interface AgentSelectionPanelProps {
   availableAgents: AgentOption[];
+  initialWorkspace?: string;
   onSelect: (agentId: string, workspace: string) => void;
   onCancel: () => void;
 }
@@ -41,13 +42,22 @@ function statusLabel(status: string) {
   }
 }
 
-export function AgentSelectionPanel({ availableAgents, onSelect, onCancel }: AgentSelectionPanelProps) {
+export function AgentSelectionPanel({
+  availableAgents,
+  initialWorkspace = "",
+  onSelect,
+  onCancel
+}: AgentSelectionPanelProps) {
   const [selectedId, setSelectedId] = useState<string>(
     availableAgents.find((a) => a.status === "available")?.id
     ?? availableAgents[0]?.id
     ?? ""
   );
-  const [workspace, setWorkspace] = useState<string>("");
+  const [workspace, setWorkspace] = useState<string>(initialWorkspace);
+
+  useEffect(() => {
+    setWorkspace(initialWorkspace);
+  }, [initialWorkspace]);
 
   const selected = availableAgents.find((a) => a.id === selectedId);
   const canStart = Boolean(selectedId) && selected?.status !== "needs_setup" && selected?.status !== "planned";
@@ -76,7 +86,12 @@ export function AgentSelectionPanel({ availableAgents, onSelect, onCancel }: Age
               onClick={() => setSelectedId(agent.id)}
               type="button"
             >
-              <div className="agent-card-glyph">{agent.glyph}</div>
+              <AgentIcon
+                className="agent-card-glyph"
+                label={agent.label}
+                runtimeId={agent.id}
+                size="md"
+              />
               <div className="agent-card-info">
                 <strong>{agent.label}</strong>
                 <span className={`agent-card-status ${agent.status}`}>

@@ -1,5 +1,6 @@
-import { Bot, LayoutList, MoreHorizontal, SlidersHorizontal } from "lucide-react";
+import { LayoutList, MoreHorizontal, SlidersHorizontal } from "lucide-react";
 
+import { AgentIcon } from "../../components/AgentIcon";
 import type { AgentSummary } from "../../types";
 import "./ConversationHeader.css";
 
@@ -19,8 +20,8 @@ export function ConversationHeader({ agent, isRunning, title }: ConversationHead
         </button>
       </div>
       <div className="header-actions">
-        <button className="outline-action">
-          <Bot size={15} />
+        <button className="outline-action header-agent-action">
+          <AgentIcon agent={agent} className="header-agent-icon" label={agent?.label ?? "Agent"} size="sm" />
           <span>{isRunning ? `${agent?.label ?? "Agent"} 运行中` : agent?.label ?? "Agent"}</span>
         </button>
         <button className="icon-button" aria-label="布局">

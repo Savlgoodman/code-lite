@@ -1,0 +1,66 @@
+.agent-icon {
+  --agent-icon-size: 24px;
+  --agent-icon-padding: 4px;
+  --agent-icon-color: #303640;
+  width: var(--agent-icon-size);
+  height: var(--agent-icon-size);
+  flex: 0 0 var(--agent-icon-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: #303640;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.agent-icon-mask {
+  width: calc(var(--agent-icon-size) - var(--agent-icon-padding) * 2);
+  height: calc(var(--agent-icon-size) - var(--agent-icon-padding) * 2);
+  display: block;
+  background: var(--agent-icon-color);
+  mask: var(--agent-icon-url) center / contain no-repeat;
+  -webkit-mask: var(--agent-icon-url) center / contain no-repeat;
+}
+
+.agent-icon-image {
+  width: calc(var(--agent-icon-size) - var(--agent-icon-padding) * 2);
+  height: calc(var(--agent-icon-size) - var(--agent-icon-padding) * 2);
+  display: block;
+  object-fit: contain;
+}
+
+.agent-icon-sm {
+  --agent-icon-size: 22px;
+  --agent-icon-padding: 4px;
+}
+
+.agent-icon-md {
+  --agent-icon-size: 32px;
+  --agent-icon-padding: 7px;
+}
+
+.agent-icon-lg {
+  --agent-icon-size: 56px;
+  --agent-icon-padding: 14px;
+  border: 1px solid #d9dde2;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.agent-icon-codex {
+  --agent-icon-color: #20242b;
+}
+
+.agent-icon-claude_code {
+  --agent-icon-color: #d97757;
+}
+
+.agent-icon-opencode {
+  --agent-icon-color: #211e1e;
+}
+
+.agent-icon-nanobot {
+  --agent-icon-color: #3d6f9f;
+}

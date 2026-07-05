@@ -134,6 +134,7 @@ export function ChatPage() {
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
   const [contextUsageBySession, setContextUsageBySession] = useState<Record<string, UsageStats>>({});
   const [showAgentSelection, setShowAgentSelection] = useState(false);
+  const [newSessionWorkspace, setNewSessionWorkspace] = useState("");
 
   // ─── Per-session 状态：每个会话独立的 capabilities 和 config ───
   const [capabilitiesBySession, setCapabilitiesBySession] = useState<Record<string, SessionCapabilities>>({});
@@ -491,13 +492,15 @@ export function ChatPage() {
     setRunningSessionIds(next);
   }
 
-  function createSession(nextView: ActiveView = "chat") {
+  function createSession(workspace = "") {
     // 显示 Agent 选择面板，让用户选择要使用的 agent
+    setNewSessionWorkspace(workspace);
     setShowAgentSelection(true);
   }
 
   async function confirmAgentSelection(agentId: string, workspace: string) {
     setShowAgentSelection(false);
+    setNewSessionWorkspace("");
     try {
       const result = await createConversation({
         agentId,
@@ -1077,12 +1080,16 @@ export function ChatPage() {
       {showAgentSelection ? (
         <AgentSelectionPanel
           availableAgents={[
-            { id: "codex", label: "Codex", glyph: "Cx", status: "available", description: "OpenAI Codex，通过 ACP 协议接入。支持代码生成、工具调用和文件操作。" },
-            { id: "claude_code", label: "Claude Code", glyph: "Cl", status: "available", description: "Anthropic Claude Code，通过 ACP 协议接入。支持 Haiku/Sonnet/Opus 等模型等级，代码生成和分析。" },
-            { id: "opencode", label: "opencode", glyph: "Op", status: "planned", description: "opencode agent，通过 ACP 协议接入。当前为计划接入状态。" },
-            { id: "nanobot", label: "Nanobot", glyph: "Nb", status: "available", description: "Legacy agent，使用产品级模型配置。适合非代码任务。" },
+            { id: "codex", label: "Codex", status: "available", description: "OpenAI Codex，通过 ACP 协议接入。支持代码生成、工具调用和文件操作。" },
+            { id: "claude_code", label: "Claude Code", status: "available", description: "Anthropic Claude Code，通过 ACP 协议接入。支持 Haiku/Sonnet/Opus 等模型等级，代码生成和分析。" },
+            { id: "opencode", label: "opencode", status: "planned", description: "opencode agent，通过 ACP 协议接入。当前为计划接入状态。" },
+            { id: "nanobot", label: "Nanobot", status: "available", description: "Legacy agent，使用产品级模型配置。适合非代码任务。" },
           ]}
-          onCancel={() => setShowAgentSelection(false)}
+          initialWorkspace={newSessionWorkspace}
+          onCancel={() => {
+            setShowAgentSelection(false);
+            setNewSessionWorkspace("");
+          }}
           onSelect={(agentId, workspace) => void confirmAgentSelection(agentId, workspace)}
         />
       ) : null}
@@ -1099,7 +1106,7 @@ export function ChatPage() {
             activeSessionId={activeSession.id}
             activeView={activeView}
             onArchiveSession={archiveSession}
-            onCreateSession={() => createSession()}
+            onCreateSession={createSession}
             onOpenOverview={() => setActiveView("overview")}
             onOpenSettings={() => setActiveView("settings")}
             onSearchTextChange={setSearchText}

@@ -1,26 +1,22 @@
 import { useMemo, useState } from "react";
 
 import {
-  Archive,
-  ChevronDown,
-  ChevronRight,
-  Folder,
   LayoutDashboard,
-  MessageSquare,
   MessageSquarePlus,
   Search,
   Settings,
   Wrench
 } from "lucide-react";
 
-import { formatTimeLabel } from "../lib/formatters";
 import type { Session } from "../types";
+import { SidebarGroupHeader } from "./sidebar/SidebarGroupHeader";
+import { SidebarSessionItem } from "./sidebar/SidebarSessionItem";
 import "./Sidebar.css";
 
 interface SidebarProps {
   activeSessionId: string;
   activeView: "chat" | "overview";
-  onCreateSession: () => void;
+  onCreateSession: (workspace?: string) => void;
   onArchiveSession: (sessionId: string) => void;
   onOpenOverview: () => void;
   onOpenSettings: () => void;
@@ -92,18 +88,15 @@ export function Sidebar({
   searchText,
   sessions
 }: SidebarProps) {
-  const [archiveTargetId, setArchiveTargetId] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const groups = useMemo(() => groupSessions(sessions), [sessions]);
 
   function selectSession(sessionId: string) {
-    setArchiveTargetId(null);
     onSelectSession(sessionId);
   }
 
   function archiveSession(sessionId: string) {
-    setArchiveTargetId(null);
     onArchiveSession(sessionId);
   }
 
@@ -119,61 +112,6 @@ export function Sidebar({
     });
   }
 
-  function renderSession(session: Session) {
-    const isArchiveOpen = archiveTargetId === session.id;
-
-    return (
-      <div
-        key={session.id}
-        className={`session-row ${isArchiveOpen ? "archive-open" : ""}`}
-      >
-        <button
-          className="session-archive-action"
-          onClick={() => archiveSession(session.id)}
-          type="button"
-        >
-          <Archive size={14} />
-          <span>归档</span>
-        </button>
-        <div
-          className={`session-item ${session.id === activeSessionId ? "active" : ""}`}
-          onClick={() => selectSession(session.id)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              selectSession(session.id);
-            }
-          }}
-          role="button"
-          tabIndex={0}
-        >
-          <span className={`status-dot ${session.status}`} />
-          <span className="session-copy">
-            <span className="session-title">{session.title}</span>
-            {session.preview.trim() ? <span className="session-preview">{session.preview}</span> : null}
-          </span>
-          <button
-            className="session-time"
-            onClick={(event) => {
-              event.stopPropagation();
-              setArchiveTargetId(isArchiveOpen ? null : session.id);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                event.stopPropagation();
-                setArchiveTargetId(isArchiveOpen ? null : session.id);
-              }
-            }}
-            type="button"
-          >
-            {formatTimeLabel(session.updatedAt)}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <aside className="sidebar">
       <div className="sidebar-actions">
@@ -185,7 +123,7 @@ export function Sidebar({
           <LayoutDashboard size={16} />
           <span>总览</span>
         </button>
-        <button className="nav-command primary" onClick={onCreateSession}>
+        <button className="nav-command primary" onClick={() => onCreateSession()} type="button">
           <MessageSquarePlus size={16} />
           <span>新对话</span>
         </button>
@@ -208,20 +146,25 @@ export function Sidebar({
           const collapsed = collapsedGroups.has(group.key);
           return (
             <div className="session-group" key={group.key}>
-              <button
-                className="session-group-header"
-                onClick={() => toggleGroup(group.key)}
-                title={group.workspace || "普通会话（~/.code-lite/workspace）"}
-                type="button"
-              >
-                {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                {group.kind === "project" ? <Folder size={14} /> : <MessageSquare size={14} />}
-                <span className="session-group-label">{group.label}</span>
-                <span className="session-group-count">{group.sessions.length}</span>
-              </button>
+              <SidebarGroupHeader
+                collapsed={collapsed}
+                kind={group.kind}
+                label={group.label}
+                onCreateSession={() => onCreateSession(group.kind === "project" ? group.workspace : undefined)}
+                onToggle={() => toggleGroup(group.key)}
+                workspace={group.workspace}
+              />
               {collapsed ? null : (
                 <div className="session-group-body">
-                  {group.sessions.map(renderSession)}
+                  {group.sessions.map((session) => (
+                    <SidebarSessionItem
+                      active={session.id === activeSessionId}
+                      key={session.id}
+                      onArchive={() => archiveSession(session.id)}
+                      onSelect={() => selectSession(session.id)}
+                      session={session}
+                    />
+                  ))}
                 </div>
               )}
             </div>

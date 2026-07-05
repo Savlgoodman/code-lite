@@ -50,6 +50,15 @@
   background: #f5f5f3;
 }
 
+.header-agent-action {
+  gap: 7px;
+}
+
+.header-agent-icon {
+  --agent-icon-size: 18px;
+  --agent-icon-padding: 1px;
+}
+
 .outline-action span {
   min-width: 0;
   overflow: hidden;
