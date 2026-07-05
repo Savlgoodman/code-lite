@@ -247,17 +247,31 @@
 }
 
 .compaction-indicator {
-  margin-top: 6px;
-  padding: 4px 10px;
-  background: var(--color-surface-alt, #f7fafc);
-  border: 1px solid var(--color-border, #e2e8f0);
-  border-radius: 6px;
-  color: var(--color-text-secondary, #718096);
-  font-size: 12px;
-  font-weight: 500;
-  display: inline-flex;
+  width: 100%;
+  display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 7px;
+  margin: 10px 0 6px;
+  color: #737982;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.compaction-indicator::before,
+.compaction-indicator::after {
+  height: 1px;
+  flex: 1;
+  min-width: 48px;
+  content: "";
+  background: #dedbd7;
+}
+
+.compaction-indicator svg {
+  color: #737982;
+  flex: 0 0 auto;
 }
 
 .conversation-boundary-time {

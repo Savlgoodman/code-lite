@@ -1,4 +1,4 @@
-import { ArrowDown, ChevronRight } from "lucide-react";
+import { ArrowDown, ChevronRight, Minimize2 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { MessageRenderer } from "../../components/MessageRenderer";
@@ -20,7 +20,15 @@ function isCompactedMessage(message: ChatMessage): boolean {
   return COMPACT_SIGNALS.some(signal => content.includes(signal));
 }
 
-function AssistantMessageContent({ message }: { message: ChatMessage }) {
+function isCompactPrompt(value?: string): boolean {
+  return /^\/compact(?:\s|$)/i.test((value ?? "").trim());
+}
+
+function AssistantMessageContent({ isCompactTurn, message }: { isCompactTurn: boolean; message: ChatMessage }) {
+  if (isCompactTurn && !message.error) {
+    return null;
+  }
+
   const entries = buildAssistantInlineEntries(message.content, message.toolCalls);
 
   if (entries.length === 0) {
@@ -69,28 +77,33 @@ function shouldShowTurnEndTime(message: ChatMessage, index: number, messages: Ch
 }
 
 const MessageItem = memo(function MessageItem({
+  isCompactTurn,
   message,
   showTurnEndTime,
   turnEndTime
 }: {
+  isCompactTurn: boolean;
   message: ChatMessage;
   showTurnEndTime: boolean;
   turnEndTime: number;
 }) {
-  const isThinking = message.role === "assistant" && Boolean(message.streaming) && !message.content.trim();
+  const isThinking = message.role === "assistant" && Boolean(message.streaming) && (isCompactTurn || !message.content.trim());
+  const thinkingText = isCompactTurn ? "正在压缩" : "正在思考";
+  const showCompactionIndicator =
+    message.role === "assistant" && !message.streaming && !message.error && (isCompactTurn || isCompactedMessage(message));
 
   return (
     <article className={`message ${message.role}`}>
       <div className="message-body">
         {message.role === "assistant" ? (
-          <AssistantMessageContent message={message} />
+          <AssistantMessageContent isCompactTurn={isCompactTurn} message={message} />
         ) : (
           <p className="user-message-text">{message.content}</p>
         )}
 
         {isThinking ? (
-          <div className="thinking-indicator" aria-live="polite" data-text="正在思考">
-            正在思考
+          <div className="thinking-indicator" aria-live="polite" data-text={thinkingText}>
+            {thinkingText}
           </div>
         ) : null}
 
@@ -108,13 +121,14 @@ const MessageItem = memo(function MessageItem({
 
         {message.error ? <p className="message-error">{message.error}</p> : null}
 
-        {message.role === "assistant" && isCompactedMessage(message) ? (
+        {showCompactionIndicator ? (
           <div className="compaction-indicator">
-            上下文已压缩
+            <Minimize2 aria-hidden="true" size={14} strokeWidth={1.9} />
+            <span>上下文已压缩</span>
           </div>
         ) : null}
 
-        {showTurnEndTime ? (
+        {showTurnEndTime && !isCompactTurn ? (
           <div className="conversation-boundary-time">
             {formatConversationBoundaryTime(turnEndTime)}
           </div>
@@ -213,6 +227,7 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
         <div className="chat-content">
           {messages.map((message, index) => (
             <MessageItem
+              isCompactTurn={message.role === "assistant" && isCompactPrompt(messages[index - 1]?.content)}
               key={`${sessionId}-${message.id}`}
               message={message}
               showTurnEndTime={shouldShowTurnEndTime(message, index, messages, isRunning)}
