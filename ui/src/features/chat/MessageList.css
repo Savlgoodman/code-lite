@@ -183,6 +183,20 @@
   line-height: 1.6;
 }
 
+.compaction-indicator {
+  margin-top: 6px;
+  padding: 4px 10px;
+  background: var(--color-surface-alt, #f7fafc);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 6px;
+  color: var(--color-text-secondary, #718096);
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .conversation-boundary-time {
   margin: 18px 0 0;
   color: #9aa0a8;

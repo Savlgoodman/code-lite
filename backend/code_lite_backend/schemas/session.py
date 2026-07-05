@@ -38,6 +38,15 @@ class SessionConfigOption:
 
 
 @dataclass(frozen=True)
+class SlashCommand:
+    """斜杠命令定义"""
+    id: str
+    label: str
+    description: str
+    command: str
+
+
+@dataclass(frozen=True)
 class SessionCapabilities:
     """进入对话时加载的完整能力描述。
 
@@ -48,6 +57,7 @@ class SessionCapabilities:
     modes: list[SessionMode]
     models: list[SessionModel]
     config_options: list[SessionConfigOption]
+    commands: list[SlashCommand] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,6 +75,7 @@ class SessionCapabilities:
                 }
                 for opt in self.config_options
             ],
+            "commands": [asdict(c) for c in self.commands],
         }
 
 
@@ -155,6 +166,59 @@ def _build_modes(
         )
         for mode_id in mode_ids
     ]
+
+
+# 命令 ID → 中文展示名映射
+_COMMAND_LABELS: dict[str, str] = {
+    "compact": "压缩",
+    "goal": "目标",
+    "init": "初始化",
+    "resume": "恢复",
+    "review": "审查",
+    "context": "上下文",
+    "mcp": "MCP",
+    "skills": "Skills",
+    "status": "状态",
+    "logout": "登出",
+}
+
+# 命令 ID → 中文描述映射
+_COMMAND_DESCRIPTIONS: dict[str, str] = {
+    "compact": "压缩此线程的上下文",
+    "goal": "设置或清除任务目标",
+    "init": "初始化 CLAUDE.md 文件",
+    "resume": "恢复会话",
+    "review": "审查未暂存的更改",
+    "context": "显示上下文使用情况",
+    "mcp": "显示 MCP 服务器状态",
+    "skills": "列出可用技能",
+    "status": "显示会话配置和状态",
+    "logout": "退出登录",
+}
+
+
+def _build_commands(raw: dict[str, Any]) -> list[SlashCommand]:
+    """从 ACP session/new 结果中提取可用命令列表。"""
+    raw_commands = []
+    # 从 session_result 中的 metadata 或 modes 提取
+    if isinstance(raw, dict):
+        # ACP 可能通过 available_commands_update 推送，但 session/new 也可能包含
+        for item in raw.get("availableCommands", []):
+            if isinstance(item, dict):
+                raw_commands.append(item)
+
+    commands: list[SlashCommand] = []
+    for cmd in raw_commands:
+        cmd_name = str(cmd.get("name") or "").strip()
+        if not cmd_name:
+            continue
+        commands.append(SlashCommand(
+            id=cmd_name,
+            label=_COMMAND_LABELS.get(cmd_name, cmd_name),
+            description=_COMMAND_DESCRIPTIONS.get(cmd_name, str(cmd.get("description") or "")),
+            command=f"/{cmd_name}",
+        ))
+    return commands
 
 
 def build_session_capabilities(
@@ -260,6 +324,7 @@ def build_session_capabilities(
         modes=modes,
         models=models,
         config_options=config_options,
+        commands=_build_commands(raw),
     )
 
 
@@ -300,4 +365,5 @@ def build_nanobot_session_capabilities(
         modes=[SessionMode(id="workspace", label="工作区模式", is_default=True)],
         models=models,
         config_options=[],
+        commands=[],
     )

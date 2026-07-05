@@ -8,6 +8,18 @@ import { buildAssistantInlineEntries } from "./messageTools";
 import { ToolCallGroup } from "./ToolCallViews";
 import "./MessageList.css";
 
+const COMPACT_SIGNALS = [
+  "context compacted",
+  "compacting",
+  "context compressed",
+  "上下文已压缩",
+];
+
+function isCompactedMessage(message: ChatMessage): boolean {
+  const content = message.content.toLowerCase();
+  return COMPACT_SIGNALS.some(signal => content.includes(signal));
+}
+
 function AssistantMessageContent({ message }: { message: ChatMessage }) {
   const entries = buildAssistantInlineEntries(message.content, message.toolCalls);
 
@@ -90,6 +102,12 @@ const MessageItem = memo(function MessageItem({
         ) : null}
 
         {message.error ? <p className="message-error">{message.error}</p> : null}
+
+        {message.role === "assistant" && isCompactedMessage(message) ? (
+          <div className="compaction-indicator">
+            上下文已压缩
+          </div>
+        ) : null}
 
         {showTurnEndTime ? (
           <div className="conversation-boundary-time">

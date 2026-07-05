@@ -56,12 +56,21 @@ export interface SessionConfigOption {
   valueLabels?: Record<string, string> | null;
 }
 
+/** 斜杠命令 —— 来自 ACP available_commands_update */
+export interface SlashCommand {
+  id: string;
+  label: string;
+  description: string;
+  command: string;
+}
+
 /** 进入对话时加载的完整能力描述 */
 export interface SessionCapabilities {
   agent: SessionAgentInfo;
   modes: SessionMode[];
   models: SessionModel[];
   configOptions: SessionConfigOption[];
+  commands: SlashCommand[];
 }
 
 export interface ChatMessage {
@@ -105,6 +114,11 @@ export interface ApprovalRequest {
 }
 
 export interface UsageStats {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedReadTokens?: number;
+  cachedWriteTokens?: number;
+  thoughtTokens?: number;
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;

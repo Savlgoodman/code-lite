@@ -14,7 +14,7 @@ from code_lite_backend.agents.acp.capabilities import (
     parse_models_from_session_result,
 )
 from code_lite_backend.agents.acp.client import AcpClientHandler
-from code_lite_backend.agents.acp.mapper import to_jsonable
+from code_lite_backend.agents.acp.mapper import extract_prompt_response_usage, to_jsonable
 from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
 from code_lite_backend.agents.runtimes import (
     RuntimeDescriptor,
@@ -256,13 +256,17 @@ class AcpAgentAdapter:
                     "conversationId": request.conversation_id,
                     "turnId": request.turn_id,
                 })
-                # 获取 usage（handler 是 per-conversation 的，直接用）
-                handler_usage = original_handler.latest_usage if original_handler else None
-                usage_dict = (
-                    handler_usage.to_dict() if handler_usage else
-                    client.latest_usage.to_dict() if client.latest_usage else
-                    None
-                )
+                # 获取 usage：优先使用 PromptResponse.usage（包含完整分项），否则 fallback 到 usage_update
+                prompt_usage = getattr(prompt_result, "usage", None)
+                if prompt_usage is not None:
+                    usage_dict = extract_prompt_response_usage(prompt_usage).to_dict()
+                else:
+                    handler_usage = original_handler.latest_usage if original_handler else None
+                    usage_dict = (
+                        handler_usage.to_dict() if handler_usage else
+                        client.latest_usage.to_dict() if client.latest_usage else
+                        None
+                    )
                 await output_queue.put({
                     "type": "agent.run.completed",
                     "conversationId": request.conversation_id,

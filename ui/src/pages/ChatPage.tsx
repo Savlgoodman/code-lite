@@ -377,6 +377,7 @@ export function ChatPage() {
           modes: fallbackModes,
           models: fallbackModels,
           configOptions: fallbackConfigOptions,
+          commands: [],
         };
 
         setCapabilitiesBySession((prev) => ({ ...prev, [activeSessionId]: fallbackCaps }));
@@ -1126,6 +1127,7 @@ export function ChatPage() {
               accessMode={currentConfig?.accessMode ?? ""}
               activeTurnId={isActiveSessionRunning ? activeTurnId : null}
               agent={sessionAgent}
+              commands={currentCapabilities?.commands ?? []}
               configOptions={currentCapabilities?.configOptions ?? []}
               contextUsage={contextUsage}
               draft={draft}

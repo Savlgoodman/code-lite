@@ -5,6 +5,7 @@ import type {
   SessionConfigOption,
   SessionModel,
   SessionMode,
+  SlashCommand,
   UsageStats
 } from "../../types";
 import { ChatComposer } from "./ChatComposer";
@@ -17,6 +18,7 @@ interface ChatWorkspaceProps {
   accessMode: string;
   activeTurnId: string | null;
   agent?: AgentSummary | null;
+  commands: SlashCommand[];
   configOptions: SessionConfigOption[];
   contextUsage: UsageStats | null;
   draft: string;
@@ -45,6 +47,7 @@ export function ChatWorkspace({
   accessMode,
   activeTurnId,
   agent,
+  commands,
   configOptions,
   contextUsage,
   draft,
@@ -81,6 +84,7 @@ export function ChatWorkspace({
         accessMode={accessMode}
         activeTurnId={activeTurnId}
         agent={agent}
+        commands={commands}
         configOptions={configOptions}
         contextUsage={contextUsage}
         draft={draft}

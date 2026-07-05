@@ -7,7 +7,7 @@ import {
   FastForward,
   FileText,
   Hand,
-  Paperclip,
+  Plus,
   Send,
   ShieldAlert,
   ShieldCheck,
@@ -21,10 +21,12 @@ import type {
   SessionConfigOption,
   SessionModel,
   SessionMode,
+  SlashCommand,
   UsageStats,
 } from "../../types";
 import { ApprovalCard } from "./ApprovalCard";
 import { ContextRing } from "./ContextRing";
+import { TokenUsageModal } from "./TokenUsageModal";
 import type { ChatConfigValue } from "./chatTypes";
 import "./ChatComposer.css";
 
@@ -59,6 +61,7 @@ interface ChatComposerProps {
   accessMode: string;
   activeTurnId: string | null;
   agent?: AgentSummary | null;
+  commands: SlashCommand[];
   configOptions: SessionConfigOption[];
   contextUsage: UsageStats | null;
   draft: string;
@@ -82,6 +85,7 @@ export function ChatComposer({
   accessMode,
   activeTurnId,
   agent,
+  commands,
   configOptions,
   contextUsage,
   draft,
@@ -103,7 +107,10 @@ export function ChatComposer({
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
   const [isAccessMenuOpen, setIsAccessMenuOpen] = useState(false);
   const [isModelListOpen, setIsModelListOpen] = useState(false);
+  const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
+  const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const accessMenuRef = useRef<HTMLDivElement | null>(null);
+  const commandMenuRef = useRef<HTMLDivElement | null>(null);
   const statusMenuRef = useRef<HTMLDivElement | null>(null);
 
   // 从 models 中提取模型族
@@ -137,7 +144,7 @@ export function ChatComposer({
   const runtimeTone = agentRuntimeTone(agent);
 
   useEffect(() => {
-    if (!isAccessMenuOpen && !isStatusMenuOpen) return;
+    if (!isAccessMenuOpen && !isStatusMenuOpen && !isCommandMenuOpen) return;
 
     function closeOnOutside(event: MouseEvent) {
       const target = event.target as Node;
@@ -148,11 +155,14 @@ export function ChatComposer({
         setIsStatusMenuOpen(false);
         setIsModelListOpen(false);
       }
+      if (isCommandMenuOpen && !commandMenuRef.current?.contains(target)) {
+        setIsCommandMenuOpen(false);
+      }
     }
 
     window.addEventListener("mousedown", closeOnOutside);
     return () => window.removeEventListener("mousedown", closeOnOutside);
-  }, [isAccessMenuOpen, isStatusMenuOpen]);
+  }, [isAccessMenuOpen, isStatusMenuOpen, isCommandMenuOpen]);
 
   function accessModeLabel(mode: SessionMode | undefined) {
     const labels: Record<string, string> = {
@@ -332,9 +342,40 @@ export function ChatComposer({
           />
           <div className="composer-actions">
             <div className="composer-left">
-              <button className="icon-button" aria-label="添加附件">
-                <Paperclip size={17} />
-              </button>
+              {/* 快捷指令 */}
+              <div className="command-picker" ref={commandMenuRef}>
+                <button
+                  className="icon-button"
+                  aria-label="快捷指令"
+                  aria-expanded={isCommandMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => {
+                    setIsCommandMenuOpen(open => !open);
+                    setIsAccessMenuOpen(false);
+                    setIsStatusMenuOpen(false);
+                  }}
+                >
+                  <Plus size={17} />
+                </button>
+                {isCommandMenuOpen && commands.length > 0 ? (
+                  <div className="command-menu" role="menu">
+                    {commands.map(cmd => (
+                      <button
+                        key={cmd.id}
+                        className="command-menu-item"
+                        onClick={() => {
+                          onDraftChange(cmd.command);
+                          setIsCommandMenuOpen(false);
+                        }}
+                        role="menuitem"
+                      >
+                        <span className="command-label">{cmd.label}</span>
+                        <span className="command-description">{cmd.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               {/* 权限模式 */}
               {hasModes && (
                 <div className="access-mode-picker" ref={accessMenuRef}>
@@ -373,7 +414,10 @@ export function ChatComposer({
 
             <div className="composer-right">
               {/* 上下文使用圆环 */}
-              <ContextRing usage={contextUsage} />
+              <ContextRing
+                usage={contextUsage}
+                onTokenDetailsClick={() => setIsTokenModalOpen(true)}
+              />
 
               {/* 底部状态栏：模型族 + 推理强度 */}
               {hasAnyControls ? (
@@ -478,6 +522,12 @@ export function ChatComposer({
           </div>
         </div>
       </div>
+    </div>
+      <TokenUsageModal
+        usage={contextUsage}
+        open={isTokenModalOpen}
+        onClose={() => setIsTokenModalOpen(false)}
+      />
     </div>
   );
 }
