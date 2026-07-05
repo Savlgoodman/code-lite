@@ -1,76 +1,17 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { X } from "lucide-react";
 
-import type { ChatMessage, UsageStats } from "../../types";
+import type { SessionBillingSummary } from "./billing";
+import { formatNumber, formatUsd } from "./billing";
+import type { UsageStats } from "../../types";
 import "./TokenUsageModal.css";
 
 interface TokenUsageModalProps {
-  messages: ChatMessage[];
+  billingSummary: SessionBillingSummary;
   contextUsage: UsageStats | null;
   open: boolean;
   onClose: () => void;
-}
-
-interface ModelUsage {
-  modelId: string;
-  modelLabel: string;
-  inputTokens: number;
-  outputTokens: number;
-  cachedReadTokens: number;
-  cachedWriteTokens: number;
-  thoughtTokens: number;
-  totalTokens: number;
-  turnCount: number;
-}
-
-function formatNumber(n: number): string {
-  return n.toLocaleString();
-}
-
-function modelValue(value: unknown): string {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
-/** 从 messages 中按模型累计 token 用量 */
-function buildModelUsage(messages: ChatMessage[]): ModelUsage[] {
-  const map = new Map<string, ModelUsage>();
-
-  for (const msg of messages) {
-    if (msg.role !== "assistant" || !msg.usage) continue;
-
-    // 从 model 字段提取模型 ID
-    const modelInfo = msg.model as Record<string, unknown> | undefined;
-    const modelId = modelValue(modelInfo?.model) || modelValue(modelInfo?.runtimeModel) || "unknown";
-    const modelLabel = modelValue(modelInfo?.label) || (modelId === "unknown" ? "未知模型" : modelId);
-
-    const key = modelId;
-    if (!map.has(key)) {
-      map.set(key, {
-        modelId,
-        modelLabel,
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedReadTokens: 0,
-        cachedWriteTokens: 0,
-        thoughtTokens: 0,
-        totalTokens: 0,
-        turnCount: 0,
-      });
-    }
-
-    const usage = msg.usage;
-    const mu = map.get(key)!;
-    mu.inputTokens += usage.inputTokens ?? 0;
-    mu.outputTokens += usage.outputTokens ?? 0;
-    mu.cachedReadTokens += usage.cachedReadTokens ?? 0;
-    mu.cachedWriteTokens += usage.cachedWriteTokens ?? 0;
-    mu.thoughtTokens += usage.thoughtTokens ?? 0;
-    mu.totalTokens += usage.totalTokens ?? 0;
-    mu.turnCount += 1;
-  }
-
-  return Array.from(map.values());
 }
 
 const TOKEN_COLORS: Record<string, string> = {
@@ -81,7 +22,7 @@ const TOKEN_COLORS: Record<string, string> = {
   thought: "#319795",
 };
 
-export function TokenUsageModal({ messages, contextUsage, open, onClose }: TokenUsageModalProps) {
+export function TokenUsageModal({ billingSummary, contextUsage, open, onClose }: TokenUsageModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,26 +34,9 @@ export function TokenUsageModal({ messages, contextUsage, open, onClose }: Token
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  const modelUsages = useMemo(() => buildModelUsage(messages), [messages]);
-
-  const hasBreakdown = modelUsages.some(
-    m => m.inputTokens > 0 || m.outputTokens > 0 || m.cachedReadTokens > 0 || m.cachedWriteTokens > 0 || m.thoughtTokens > 0,
-  );
-
-  // 会话总计
-  const grandTotal = useMemo(() => {
-    return modelUsages.reduce(
-      (acc, m) => ({
-        input: acc.input + m.inputTokens,
-        output: acc.output + m.outputTokens,
-        cachedRead: acc.cachedRead + m.cachedReadTokens,
-        cachedWrite: acc.cachedWrite + m.cachedWriteTokens,
-        thought: acc.thought + m.thoughtTokens,
-        total: acc.total + m.totalTokens,
-      }),
-      { input: 0, output: 0, cachedRead: 0, cachedWrite: 0, thought: 0, total: 0 },
-    );
-  }, [modelUsages]);
+  const modelUsages = billingSummary.modelUsages;
+  const hasBreakdown = billingSummary.hasBreakdown;
+  const grandTotal = billingSummary.grandTotal;
 
   const used = contextUsage?.contextUsedTokens ?? contextUsage?.totalTokens;
   const total = contextUsage?.contextWindowTokens;
@@ -159,6 +83,10 @@ export function TokenUsageModal({ messages, contextUsage, open, onClose }: Token
                   <div className="token-model-header">
                     <span className="token-model-label">{mu.modelLabel}</span>
                     <span className="token-model-turns">{mu.turnCount} 轮</span>
+                  </div>
+                  <div className="token-cost-line">
+                    <span>费用</span>
+                    <strong>{mu.cost ? formatUsd(mu.cost.totalCostUsd) : "价格未知"}</strong>
                   </div>
 
                   <div className="token-rows">
@@ -210,7 +138,8 @@ export function TokenUsageModal({ messages, contextUsage, open, onClose }: Token
                   </div>
 
                   <div className="token-model-total">
-                    {formatNumber(mu.totalTokens)} tokens
+                    <span>{formatNumber(mu.totalTokens)} tokens</span>
+                    {mu.cost?.priceModelId ? <small>{mu.cost.priceModelId}</small> : null}
                   </div>
                 </div>
               ))}
@@ -254,8 +183,14 @@ export function TokenUsageModal({ messages, contextUsage, open, onClose }: Token
                   ) : null}
                 </div>
                 <div className="token-grand-total">
-                  {formatNumber(grandTotal.total)} tokens
+                  <span>{formatNumber(grandTotal.total)} tokens</span>
+                  <strong>{formatUsd(billingSummary.totalCostUsd)}</strong>
                 </div>
+                {billingSummary.unknownCostModelCount > 0 ? (
+                  <div className="token-cost-note">
+                    {billingSummary.unknownCostModelCount} 个模型暂未匹配到价格，未计入总费用。
+                  </div>
+                ) : null}
               </div>
             </>
           ) : null}

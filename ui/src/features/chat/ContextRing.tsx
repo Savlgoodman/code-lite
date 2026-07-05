@@ -1,9 +1,12 @@
 import { useId } from "react";
 
 import type { UsageStats } from "../../types";
+import type { SessionBillingSummary } from "./billing";
+import { formatUsd } from "./billing";
 import "./ContextRing.css";
 
 interface ContextRingProps {
+  billingSummary?: SessionBillingSummary;
   usage: UsageStats | null;
   onTokenDetailsClick?: () => void;
 }
@@ -14,7 +17,7 @@ function getUsageColor(ratio: number): string {
   return "var(--color-accent, #3182ce)";
 }
 
-export function ContextRing({ usage, onTokenDetailsClick }: ContextRingProps) {
+export function ContextRing({ billingSummary, usage, onTokenDetailsClick }: ContextRingProps) {
   const tooltipId = useId();
   const used = usage?.contextUsedTokens ?? usage?.totalTokens;
   const total = usage?.contextWindowTokens;
@@ -78,6 +81,9 @@ export function ContextRing({ usage, onTokenDetailsClick }: ContextRingProps) {
         <strong>上下文窗口</strong>
         <span>{percent}% 已使用</span>
         <small>{usedLabel} / {totalLabel} tokens</small>
+        {billingSummary && billingSummary.totalCostUsd > 0 ? (
+          <small>本会话约 {formatUsd(billingSummary.totalCostUsd)}</small>
+        ) : null}
       </span>
     </div>
   );

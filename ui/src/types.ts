@@ -127,6 +127,26 @@ export interface UsageStats {
   source?: string;
 }
 
+export interface BillingModelPrice {
+  cachedReadCostPerToken?: number;
+  cachedWriteCostPerToken?: number;
+  currency: "USD" | string;
+  inputCostPerToken?: number;
+  litellmProvider?: string;
+  mode?: string;
+  outputCostPerToken?: number;
+  sourceModelId: string;
+}
+
+export interface BillingPricesResult {
+  currency: "USD" | string;
+  expiresAt: number | null;
+  fetchedAt: number | null;
+  models: Record<string, BillingModelPrice>;
+  source: string;
+  stale: boolean;
+}
+
 export interface SystemProfileItem {
   label: string;
   value: string;

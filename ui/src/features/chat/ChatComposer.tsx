@@ -18,6 +18,7 @@ import {
 import type {
   AgentSummary,
   ApprovalRequest,
+  BillingPricesResult,
   ChatMessage,
   SessionConfigOption,
   SessionModel,
@@ -25,7 +26,9 @@ import type {
   SlashCommand,
   UsageStats,
 } from "../../types";
+import { loadBillingPrices } from "../../services/billingStore";
 import { ApprovalCard } from "./ApprovalCard";
+import { buildSessionBillingSummary } from "./billing";
 import { ContextRing } from "./ContextRing";
 import { TokenUsageModal } from "./TokenUsageModal";
 import type { ChatConfigValue } from "./chatTypes";
@@ -116,6 +119,7 @@ export function ChatComposer({
   const [isModelListOpen, setIsModelListOpen] = useState(false);
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const [billingPrices, setBillingPrices] = useState<BillingPricesResult | null>(null);
   const accessMenuRef = useRef<HTMLDivElement | null>(null);
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
   const statusMenuRef = useRef<HTMLDivElement | null>(null);
@@ -148,6 +152,24 @@ export function ChatComposer({
   const hasAnyControls = hasModelPicker || hasReasoningPicker;
   const currentMode = modes.find((mode) => mode.id === accessMode) ?? modes.find((mode) => mode.isDefault) ?? modes[0];
   const runtimeTone = agentRuntimeTone(agent);
+  const billingSummary = useMemo(
+    () => buildSessionBillingSummary(messages, billingPrices),
+    [messages, billingPrices],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadBillingPrices()
+      .then((prices) => {
+        if (!cancelled) {
+          setBillingPrices(prices);
+        }
+      })
+      .catch((error) => console.error("Failed to load billing prices:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isAccessMenuOpen && !isStatusMenuOpen && !isCommandMenuOpen) return;
@@ -427,6 +449,7 @@ export function ChatComposer({
             <div className="composer-right">
               {/* 上下文使用圆环 */}
               <ContextRing
+                billingSummary={billingSummary}
                 usage={contextUsage}
                 onTokenDetailsClick={() => setIsTokenModalOpen(true)}
               />
@@ -542,7 +565,7 @@ export function ChatComposer({
       </div>
     </div>
     <TokenUsageModal
-      messages={messages}
+      billingSummary={billingSummary}
       contextUsage={contextUsage}
       open={isTokenModalOpen}
       onClose={() => setIsTokenModalOpen(false)}
