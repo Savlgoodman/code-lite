@@ -10,7 +10,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
-DEFAULT_TITLE = "新的维修会话"
+DEFAULT_TITLE = "新会话"
 DEFAULT_PREVIEW = ""
 
 

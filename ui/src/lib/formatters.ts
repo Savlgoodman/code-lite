@@ -43,7 +43,7 @@ export function formatConversationBoundaryTime(value: number) {
 export function titleFromInput(input: string) {
   const text = input.trim().replace(/\s+/g, " ");
   if (!text) {
-    return "新的维修会话";
+    return "新会话";
   }
   return text.length > 24 ? `${text.slice(0, 24)}...` : text;
 }

@@ -24,7 +24,7 @@ export function createEmptySession(): Session {
   const now = Date.now();
   return {
     id: createId("session"),
-    title: "新的维修会话",
+    title: "新会话",
     preview: "",
     createdAt: now,
     updatedAt: now,
