@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Bot, ChevronRight, Shield, ShieldAlert, ShieldCheck, Zap } from "lucide-react";
+import { Bot, ChevronRight, FolderOpen, Shield, ShieldAlert, ShieldCheck, Zap } from "lucide-react";
 
 interface AgentOption {
   id: string;
@@ -13,7 +13,7 @@ interface AgentOption {
 
 interface AgentSelectionPanelProps {
   availableAgents: AgentOption[];
-  onSelect: (agentId: string) => void;
+  onSelect: (agentId: string, workspace: string) => void;
   onCancel: () => void;
 }
 
@@ -45,8 +45,17 @@ export function AgentSelectionPanel({ availableAgents, onSelect, onCancel }: Age
     ?? availableAgents[0]?.id
     ?? ""
   );
+  const [workspace, setWorkspace] = useState<string>("");
 
   const selected = availableAgents.find((a) => a.id === selectedId);
+  const canStart = Boolean(selectedId) && selected?.status !== "needs_setup" && selected?.status !== "planned";
+
+  function handleStart() {
+    if (!canStart) {
+      return;
+    }
+    onSelect(selectedId, workspace.trim());
+  }
 
   return (
     <div className="agent-selection-overlay" onClick={onCancel}>
@@ -81,6 +90,28 @@ export function AgentSelectionPanel({ availableAgents, onSelect, onCancel }: Age
           <p className="agent-selection-description">{selected.description}</p>
         ) : null}
 
+        <label className="agent-selection-workspace">
+          <span className="workspace-label">
+            <FolderOpen size={14} />
+            工作区路径
+          </span>
+          <input
+            value={workspace}
+            onChange={(event) => setWorkspace(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleStart();
+              }
+            }}
+            placeholder="留空则为普通会话（~/.code-lite/workspace）"
+            spellCheck={false}
+          />
+          <span className="workspace-hint">
+            指定项目目录后，此会话的所有操作都固定在该目录进行，且会按工作区在侧栏归类。
+          </span>
+        </label>
+
         <div className="agent-selection-footer">
           <button
             className="agent-selection-cancel"
@@ -91,8 +122,8 @@ export function AgentSelectionPanel({ availableAgents, onSelect, onCancel }: Age
           </button>
           <button
             className="agent-selection-confirm"
-            disabled={!selectedId || selected?.status === "needs_setup" || selected?.status === "planned"}
-            onClick={() => onSelect(selectedId)}
+            disabled={!canStart}
+            onClick={handleStart}
             type="button"
           >
             开始会话

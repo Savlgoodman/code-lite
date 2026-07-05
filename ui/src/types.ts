@@ -17,6 +17,10 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   status: SessionStatus;
+  /** 会话绑定的工作区绝对路径（普通会话指向 ~/.code-lite/workspace） */
+  workspace?: string;
+  /** "general" = 普通会话；"project" = 用户指定的项目工作区 */
+  workspaceKind?: "general" | "project" | string;
 }
 
 /** 进入对话时加载的 agent 信息 */

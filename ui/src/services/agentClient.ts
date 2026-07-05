@@ -58,6 +58,7 @@ export async function createConversation(options: {
   agentId: string;
   title?: string;
   preview?: string;
+  workspace?: string;
 }): Promise<{ session: Session; messages: unknown[] }> {
   const baseUrl = await ensureBackend();
   const response = await fetch(`${baseUrl}/api/conversations`, {

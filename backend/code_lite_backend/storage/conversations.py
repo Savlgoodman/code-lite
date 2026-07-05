@@ -60,7 +60,14 @@ class ConversationStore:
                 sessions.append(session)
         return sorted(sessions, key=lambda item: int(item.get("updatedAt") or 0), reverse=True)
 
-    def create_session(self, *, title: str | None = None, preview: str | None = None) -> dict[str, Any]:
+    def create_session(
+        self,
+        *,
+        title: str | None = None,
+        preview: str | None = None,
+        workspace: str | None = None,
+        workspace_kind: str | None = None,
+    ) -> dict[str, Any]:
         conversation_id = create_conversation_id()
         timestamp = now_ms()
         session = {
@@ -70,6 +77,8 @@ class ConversationStore:
             "createdAt": timestamp,
             "updatedAt": timestamp,
             "status": "idle",
+            "workspace": workspace or "",
+            "workspaceKind": workspace_kind or "general",
             "schemaVersion": SCHEMA_VERSION,
         }
         directory = self._conversation_dir(conversation_id)

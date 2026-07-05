@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -52,10 +53,17 @@ async def stream_turn(
         requested_reasoning_effort = str(selected_config["reasoning_effort"] or "").strip() or None
     persisted = None if not conversation_id else services.conversation_store.get_conversation(conversation_id)
     persisted_agent = None
+    session_workspace: str | None = None
     if persisted and isinstance(persisted.get("session"), dict):
         raw_agent = persisted["session"].get("agent")
         if isinstance(raw_agent, dict):
             persisted_agent = str(raw_agent.get("id") or "").strip() or None
+        raw_workspace = persisted["session"].get("workspace")
+        if isinstance(raw_workspace, str) and raw_workspace.strip():
+            session_workspace = raw_workspace.strip()
+
+    # 会话绑定的工作区（固定），未记录则回退到全局默认工作区
+    workspace = Path(session_workspace) if session_workspace else services.workspace
     agent_id = services.agent_runtime_config_store.resolve_adapter(persisted_agent)
     agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
     resolved_model = None
@@ -117,7 +125,7 @@ async def stream_turn(
         conversation_id=conversation_id,
         turn_id=turn_id,
         prompt=prompt,
-        workspace=services.workspace,
+        workspace=workspace,
         model_id=resolved_model.model_id if resolved_model else None,
         model_preset_id=resolved_model.model_preset_id if resolved_model else None,
         runtime_model=runtime_model,
@@ -131,11 +139,12 @@ async def stream_turn(
     # 详细日志：记录完整请求参数，帮助排查模型选择问题
     prompt_preview = prompt[:80] + ("..." if len(prompt) > 80 else "")
     logger.info(
-        "POST /turns/stream [%s] conversation=%s turn=%s agent=%s(%s) model=%s runtime_model=%s mode=%s effort=%s selectedConfig=%s prompt_len=%d prompt=%s",
+        "POST /turns/stream [%s] conversation=%s turn=%s agent=%s(%s) model=%s runtime_model=%s mode=%s effort=%s workspace=%s selectedConfig=%s prompt_len=%d prompt=%s",
         "ACP" if agent_id in _ACP_RUNTIME_IDS else "product",
         conversation_id, turn_id, agent_id, agent_metadata.get("label"),
         requested_model_id, runtime_model,
         requested_access_mode, requested_reasoning_effort,
+        workspace,
         selected_config,
         len(prompt), prompt_preview,
     )

@@ -533,10 +533,13 @@ export function ChatPage() {
     setShowAgentSelection(true);
   }
 
-  async function confirmAgentSelection(agentId: string) {
+  async function confirmAgentSelection(agentId: string, workspace: string) {
     setShowAgentSelection(false);
     try {
-      const result = await createConversation({ agentId });
+      const result = await createConversation({
+        agentId,
+        ...(workspace ? { workspace } : {})
+      });
       const session = result.session;
       setArchivedSessionIds((current) => {
         if (!current.has(DRAFT_SESSION_ID)) {
@@ -1117,7 +1120,7 @@ export function ChatPage() {
             { id: "nanobot", label: "Nanobot", glyph: "Nb", status: "available", description: "Legacy agent，使用产品级模型配置。适合非代码任务。" },
           ]}
           onCancel={() => setShowAgentSelection(false)}
-          onSelect={(agentId) => void confirmAgentSelection(agentId)}
+          onSelect={(agentId, workspace) => void confirmAgentSelection(agentId, workspace)}
         />
       ) : null}
       {activeView === "settings" ? (

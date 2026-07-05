@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -10,6 +11,34 @@ from code_lite_backend.services.runtime import AppServices
 
 
 router = APIRouter()
+
+
+def _resolve_general_workspace(services: AppServices) -> Path:
+    """普通会话的默认工作区：~/.code-lite/workspace。"""
+    return (services.runtime_config.data_dir / "workspace").resolve()
+
+
+def _normalize_workspace(
+    raw_workspace: str | None, services: AppServices
+) -> tuple[str, str]:
+    """解析请求中的工作区路径。
+
+    返回 (workspace_path, workspace_kind)。
+    - 用户提供路径 → ("<abs path>", "project")
+    - 未提供 → ("<~/.code-lite/workspace>", "general")
+    """
+    candidate = (raw_workspace or "").strip()
+    if candidate:
+        resolved = Path(candidate).expanduser()
+        try:
+            resolved = resolved.resolve()
+        except OSError:
+            resolved = resolved.absolute()
+        return str(resolved), "project"
+
+    general = _resolve_general_workspace(services)
+    general.mkdir(parents=True, exist_ok=True)
+    return str(general), "general"
 
 
 @router.get("/conversations")
@@ -34,8 +63,14 @@ async def create_conversation(
 
     title = str(payload.get("title") or "").strip() or None
     preview = str(payload.get("preview") or "").strip() or None
+    workspace, workspace_kind = _normalize_workspace(payload.get("workspace"), services)
 
-    session = services.conversation_store.create_session(title=title, preview=preview)
+    session = services.conversation_store.create_session(
+        title=title,
+        preview=preview,
+        workspace=workspace,
+        workspace_kind=workspace_kind,
+    )
 
     # 绑定 agent 到 session
     agent_metadata = services.agent_runtime_config_store.agent_summary(agent_id)
