@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, Fragment } from "react";
 
 import {
   Ban,
@@ -323,6 +323,7 @@ export function ChatComposer({
   }
 
   return (
+    <Fragment>
     <div className="composer-wrap">
       <div className="composer-stack">
         {pendingApproval ? <ApprovalCard approval={pendingApproval} onResolve={onResolveApproval} /> : null}
@@ -528,5 +529,6 @@ export function ChatComposer({
       open={isTokenModalOpen}
       onClose={() => setIsTokenModalOpen(false)}
     />
+    </Fragment>
   );
 }
