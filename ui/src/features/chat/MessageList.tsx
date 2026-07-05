@@ -1,4 +1,4 @@
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, ChevronRight } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { MessageRenderer } from "../../components/MessageRenderer";
@@ -96,8 +96,13 @@ const MessageItem = memo(function MessageItem({
 
         {message.reasoning ? (
           <details className="reasoning-block">
-            <summary>思考过程</summary>
-            <p>{message.reasoning}</p>
+            <summary className="reasoning-summary">
+              <span>思考过程</span>
+              <ChevronRight aria-hidden="true" className="reasoning-summary-icon" size={13} strokeWidth={2.2} />
+            </summary>
+            <div className="reasoning-content">
+              <MessageRenderer content={message.reasoning} />
+            </div>
           </details>
         ) : null}
 
