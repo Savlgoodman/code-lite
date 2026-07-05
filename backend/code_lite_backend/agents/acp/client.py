@@ -25,10 +25,10 @@ from code_lite_backend.services.approvals import ApprovalBroker
 
 
 class AcpClientHandler:
-    """通用 ACP client handler。
+    """Per-conversation ACP client handler。
 
-    接收 ACP SDK 的回调，通过 AcpEventMapper 映射为 code-lite AgentEvent，
-    并推送到 output queue。
+    每个 ACP connection 对应一个 handler，只服务于一个 conversation。
+    不需要多路复用——connection 隔离保证了事件不会串。
     """
 
     def __init__(
@@ -48,7 +48,7 @@ class AcpClientHandler:
         self.mapper = AcpEventMapper(runtime=runtime)
         self.native_session_id: str | None = None
         self.latest_usage: UsageSnapshot | None = None
-        self.stderr_tail: deque[str] = deque(maxlen=20)
+        self.stderr_tail: deque[str] = deque(maxlen=50)
 
     @property
     def context(self) -> EventContext:
@@ -78,6 +78,13 @@ class AcpClientHandler:
 
         if kind == "usage_update":
             self.latest_usage = extract_usage(update)
+            # 推送 agent.context.updated 事件（供前端 ContextRing 实时更新）
+            usage_dict = self.latest_usage.to_dict()
+            if usage_dict:
+                await self._put({
+                    "type": "agent.context.updated",
+                    "context": usage_dict,
+                })
             return
 
         event = self.mapper.map_update(update, self.context)

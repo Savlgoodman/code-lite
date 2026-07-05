@@ -93,9 +93,11 @@ def parse_config_options_from_session_result(session_result: Any) -> dict[str, A
             options = item.get("options")
             values = None
             option_labels = None
+            option_descriptions = None
             if isinstance(options, list):
                 values = []
                 option_labels = {}
+                option_descriptions = {}
                 for opt in options:
                     if isinstance(opt, dict):
                         val = str(opt.get("value") or "").strip()
@@ -103,8 +105,14 @@ def parse_config_options_from_session_result(session_result: Any) -> dict[str, A
                             values.append(val)
                             name = str(opt.get("name") or val)
                             option_labels[val] = name
+                            desc = opt.get("description")
+                            if desc:
+                                option_descriptions[val] = str(desc)
+            # ACP type "select" -> 前端 "enum"；"boolean" 保持
+            raw_type = str(item.get("type") or "enum")
+            normalized_type = "enum" if raw_type == "select" else raw_type
             parsed: dict[str, Any] = {
-                "type": str(item.get("type") or "enum"),
+                "type": normalized_type,
                 "current_value": item.get("currentValue"),
                 "name": item.get("name"),
                 "description": item.get("description"),
@@ -114,6 +122,8 @@ def parse_config_options_from_session_result(session_result: Any) -> dict[str, A
                 parsed["values"] = values
             if option_labels:
                 parsed["option_labels"] = option_labels
+            if option_descriptions:
+                parsed["option_descriptions"] = option_descriptions
             result[config_id] = parsed
         return result
 

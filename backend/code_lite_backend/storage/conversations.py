@@ -60,7 +60,14 @@ class ConversationStore:
                 sessions.append(session)
         return sorted(sessions, key=lambda item: int(item.get("updatedAt") or 0), reverse=True)
 
-    def create_session(self, *, title: str | None = None, preview: str | None = None) -> dict[str, Any]:
+    def create_session(
+        self,
+        *,
+        title: str | None = None,
+        preview: str | None = None,
+        workspace: str | None = None,
+        workspace_kind: str | None = None,
+    ) -> dict[str, Any]:
         conversation_id = create_conversation_id()
         timestamp = now_ms()
         session = {
@@ -70,6 +77,8 @@ class ConversationStore:
             "createdAt": timestamp,
             "updatedAt": timestamp,
             "status": "idle",
+            "workspace": workspace or "",
+            "workspaceKind": workspace_kind or "general",
             "schemaVersion": SCHEMA_VERSION,
         }
         directory = self._conversation_dir(conversation_id)
@@ -151,6 +160,30 @@ class ConversationStore:
         messages.append(message)
         return self.save_messages(conversation_id, messages)
 
+    # ─── Native session binding ─────────────────────────────────────────
+
+    def save_native_session(
+        self, conversation_id: str, binding: dict[str, Any]
+    ) -> dict[str, Any]:
+        """保存 UI conversation -> native ACP session 绑定。"""
+        atomic_write_json(self._native_session_path(conversation_id), binding)
+        return binding
+
+    def load_native_session(self, conversation_id: str) -> dict[str, Any] | None:
+        """加载 native session 绑定，不存在则返回 None。"""
+        path = self._native_session_path(conversation_id)
+        if not path.exists():
+            return None
+        data = read_json(path, {})
+        return data if data.get("conversationId") else None
+
+    def delete_native_session(self, conversation_id: str) -> bool:
+        path = self._native_session_path(conversation_id)
+        if path.exists():
+            path.unlink()
+            return True
+        return False
+
     def _conversation_dirs(self) -> list[Path]:
         return [path for path in self.record_dir.iterdir() if path.is_dir()]
 
@@ -164,6 +197,9 @@ class ConversationStore:
 
     def _messages_path(self, conversation_id: str) -> Path:
         return self._conversation_dir(conversation_id) / "messages.json"
+
+    def _native_session_path(self, conversation_id: str) -> Path:
+        return self._conversation_dir(conversation_id) / "native-session.json"
 
     def _read_session(self, conversation_id: str) -> dict[str, Any] | None:
         path = self._session_path(conversation_id)

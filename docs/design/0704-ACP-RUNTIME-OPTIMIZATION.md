@@ -787,7 +787,94 @@ conversation_projection_snapshots
 
 ---
 
-## 12. 上下文窗口占用展示：Context Ring
+## 12. 架构演进：从共享连接到会话隔离
+
+### 12.1 问题背景
+
+在实现 AcpRuntimeManager 常驻连接后，遇到严重的**多会话流式串连**问题：
+
+1. **内容串流**：两个并发 Codex 会话互相显示对方的回复
+2. **页面卡死**：一个会话结束后，另一个会话停在"思考中"无法切换
+3. **会话 id 冲突**：sidebar 中两个不同会话显示相同 id
+4. **模型错乱**：Claude Code 会话显示 Codex 的模型列表
+
+### 12.2 根因分析
+
+尝试了三次打补丁修复，每次只解决了表象：
+
+| 修复尝试 | 修复内容 | 结果 |
+|----------|----------|------|
+| 第 1 次 | per-session `contextUsage` 和 `activeTurnId` map | 解决 context ring 覆盖，但流式仍串 |
+| 第 2 次 | per-session `activeAssistantMessageIdRef` 和 `activeStreamSessionIdRef` | 解决 ref 覆盖，但 draft→real id 转换仍导致路由错误 |
+| 第 3 次 | `event.conversationId` 优先路由 | 解决了 draft 转换问题，但并发场景仍不稳定 |
+
+**根本原因**：所有会话共享同一个 ACP 子进程连接。`AcpClientHandler` 通过 `session_id` 做事件多路复用路由，但以下因素导致路由天然脆弱：
+
+1. **SDK 回调参数有限**：`session_update(session_id, update)` 只有一个 `session_id`，无法区分是哪个 conversation 的事件
+2. **draft session → 真实 session 转换**：`conversation.turn.started` 事件携带真实 `conversationId`，但 `sendMessage` 闭包捕获的是 `__draft_session__`，后续事件路由需要额外映射
+3. **handler 状态竞争**：多个 turn 同时调用 `original_handler.output_queue = output_queue` 覆盖路由表
+4. **前端 ref 单例**：`activeAssistantMessageIdRef` 等 ref 在并发会话间互相覆盖
+
+### 12.3 根治方案：会话级连接隔离
+
+**设计决策**：每个 conversation 一个独立的 ACP 子进程连接，彻底消除多路复用需求。
+
+```text
+之前（共享连接）：
+  AcpRuntimeManager
+    connections: {ConnectionKey(runtime, workspace) -> AcpRuntimeConnection}
+    └── 一个 connection 服务所有 conversations
+    └── handler 需要 TurnRoute 多路复用表
+    └── 事件按 session_id 路由（脆弱）
+
+之后（会话隔离）：
+  AcpRuntimeManager
+    connections: {ConnectionKey(runtime, workspace, conversation_id) -> AcpRuntimeConnection}
+    └── 每个 conversation 一个独立 connection + handler
+    └── handler 直接写入 output_queue（无需路由）
+    └── 事件天然隔离，不可能串
+```
+
+### 12.4 具体改动
+
+**ConnectionKey 增加 `conversation_id`**：
+
+```python
+@dataclass(frozen=True)
+class ConnectionKey:
+    runtime_id: str
+    workspace: str
+    config_mode: str
+    conversation_id: str  # 新增：每个会话独立隔离
+    command_fingerprint: str
+    env_fingerprint: str
+```
+
+**AcpClientHandler 简化**：移除 `TurnRoute`、`register_turn()`、`update_route_session()`、`_put_to()` 等多路复用代码。回到简单的 per-connection 设计，每个 handler 只服务一个 conversation。
+
+**adapter._run_turn 简化**：不再需要 `register_turn()`，直接更新 handler 的 `conversation_id`/`turn_id`/`output_queue`（因为 handler 是 per-conversation 的，没有并发冲突）。新增 `mapper.reset_dedup()` 在新 turn 开始时重置文本去重状态。
+
+### 12.5 代价与收益
+
+**代价**：每个活跃会话多一个 ACP 子进程。对于桌面应用，同时 2-3 个活跃会话的资源开销可接受。同一会话的多轮对话仍复用连接，不会重复 spawn。
+
+**收益**：
+1. **彻底消除流式串连**：事件物理隔离，不可能路由到错误的会话
+2. **代码量减少**：移除 ~120 行多路复用代码，handler 从 260 行减到 150 行
+3. **前端简化**：不再需要 per-session ref map，`handleAgentEvent` 直接用 `event.conversationId` 路由
+4. **调试简单**：每个连接的 stderr ring buffer 只包含一个会话的日志
+5. **取消隔离**：取消一个会话不会影响其他会话
+
+### 12.6 设计教训
+
+1. **并发隔离优于 multiplexing**：对于异步流式事件，物理隔离比逻辑路由更可靠。multiplexing 的复杂度随并发数线性增长，而隔离的复杂度是常数。
+2. **SDK 回调参数决定路由能力**：ACP SDK 的 `session_update(session_id, update)` 只传 `session_id`，不足以区分 conversation。如果用 `conversation_id` 做回调参数，multiplexing 会简单得多。
+3. **draft session 是路由隐患**：`__draft_session__` → 真实 id 的转换发生在流式中间，导致发送时和接收时的 session id 不一致。应避免在流式过程中改变路由 key。
+4. **打三次补丁不如重构**：每次补丁都引入了新的状态层（per-session map），但没有解决根本的架构问题。根治方案反而更简单。
+
+---
+
+## 13. 上下文窗口占用展示：Context Ring
 
 ### 12.1 设计目标
 
@@ -914,7 +1001,7 @@ function ContextRing({ usedTokens, windowTokens }: ContextRingProps) {
 
 ---
 
-## 13. 新会话创建流程：Agent 选择前置
+## 14. 新会话创建流程：Agent 选择前置
 
 ### 13.1 当前问题
 
@@ -1115,7 +1202,7 @@ async function confirmAgentSelection(agentId: string) {
 
 ---
 
-## 14. 移除 "启用 Agent" 机制
+## 15. 移除 "启用 Agent" 机制
 
 ### 14.1 当前实现
 
@@ -1169,7 +1256,513 @@ POST /api/agent-runtimes/{runtime_id}/activate
 
 ---
 
-## 15. 风险与待验证项
+## 16. 统一前后端协议：面向多 Agent 的适配架构
+
+### 16.1 核心问题
+
+当前架构面临的挑战：
+
+1. **前端需要统一的显示协议**：同一套 UI 要适配 Codex、Claude Code、opencode、nanobot 等多个 agent，但每个 agent 的能力模型、配置选项、模型命名都不同。
+2. **后端需要统一的转发机制**：前端选择的模型/思考/权限如何转换为各 agent 的 ACP 配置？如何避免为每个 agent 写一套转换逻辑？
+3. **连接池统一管理**：所有 ACP agent 应该共享同一个连接池 (`AcpRuntimeManager`)，而不是每个 adapter 自己 spawn。
+4. **会话隔离保证**：如何保证多会话并发时不会事件串流、上下文冲突？
+5. **数据完整性**：前端发送的数据到底有哪些？ACP 返回的数据又有哪些？如何保证前后端理解一致？
+
+### 16.2 统一协议设计：请求体与返回体
+
+#### 16.2.1 前端 → 后端：Turn 请求体
+
+前端通过 `POST /api/turns/stream` 发送对话请求，请求体结构：
+
+```typescript
+interface TurnRequest {
+  // ─── 会话标识 ───
+  conversationId?: string;  // 如为空，后端生成新会话 id
+  turnId: string;           // 前端生成的 turn uuid
+
+  // ─── 用户输入 ───
+  input: string;            // 用户消息内容
+
+  // ─── 模型与配置（前端选择的"显示值"）───
+  modelId?: string | null;        // 模型 id，如 "gpt-5.5[xhigh]" / "claude-sonnet-4-5"
+  accessMode?: string | null;     // 权限模式，如 "code" / "plan" / "default"
+  reasoningEffort?: string | null; // 思考强度，如 "high" / "medium" / "low"
+  selectedConfig?: Record<string, string | number | boolean>; // 其他配置选项，如 { fast: true }
+}
+```
+
+**关键设计点**：
+
+- **产品层模型 vs Runtime 原生模型**：前端只需要传递用户选择的模型 id（来自 `SessionCapabilities.models`），不需要知道这是 Codex 的 bracket 格式还是 Claude Code 的 plain id。
+- **统一的配置字段**：`reasoningEffort` 是产品层统一名称。后端负责转换为各 runtime 的 config id（Codex 用 `reasoning_effort`，Claude Code 用 `effort`）。
+- **selectedConfig 兜底**：如果某个 runtime 有特殊配置项（如 Claude Code 的 `fast` mode），前端通过 `selectedConfig` 直接传递，后端直接转发。
+
+#### 16.2.2 后端 → 前端：Turn 事件流
+
+后端返回 `application/x-ndjson` 流式事件，每行一个事件 JSON：
+
+```typescript
+type AgentEvent =
+  | ConversationTurnStartedEvent  // 对话开始
+  | AgentTextDeltaEvent           // 文本流式输出
+  | AgentReasoningDeltaEvent      // 思考过程流式输出
+  | AgentToolDeltaEvent           // 工具调用增量
+  | AgentToolApprovalEvent        // 工具调用权限请求
+  | AgentContextUpdatedEvent      // 上下文窗口占用更新
+  | AgentRunCompletedEvent        // 对话完成
+  | AgentRunFailedEvent;          // 对话失败
+
+// 每个事件的通用字段
+interface BaseAgentEvent {
+  type: string;              // 事件类型
+  conversationId: string;    // 会话 id（用于前端路由）
+  turnId: string;            // turn id
+  metadata?: {
+    runtime: string;         // runtime 标识，如 "codex" / "claude_code"
+    nativeSessionId?: string; // ACP 原生 session id（调试用）
+  };
+}
+
+// 对话开始事件
+interface ConversationTurnStartedEvent extends BaseAgentEvent {
+  type: "conversation.turn.started";
+  session: Session;              // 会话信息（包含 agent 绑定）
+  userMessage: ChatMessage;      // 用户消息
+  assistantMessage: ChatMessage; // 助手消息（初始状态）
+}
+
+// 文本流式输出
+interface AgentTextDeltaEvent extends BaseAgentEvent {
+  type: "agent.text.delta";
+  delta: string;  // 增量文本
+}
+
+// 思考过程流式输出
+interface AgentReasoningDeltaEvent extends BaseAgentEvent {
+  type: "agent.reasoning.delta";
+  delta: string;  // 思考增量
+}
+
+// 上下文窗口占用更新（新增）
+interface AgentContextUpdatedEvent extends BaseAgentEvent {
+  type: "agent.context.updated";
+  context: {
+    contextUsedTokens: number;    // 已用 token
+    contextWindowTokens: number;  // 总窗口大小
+  };
+}
+
+// 对话完成
+interface AgentRunCompletedEvent extends BaseAgentEvent {
+  type: "agent.run.completed";
+  usage?: UsageStats;  // token 使用统计
+  session?: Session;   // 更新后的会话信息
+}
+```
+
+**关键设计点**：
+
+- **`conversationId` 必含**：每个事件都带 `conversationId`，前端用它路由到正确的会话，即使 draft session → real id 转换也不会串。
+- **metadata.runtime 标识来源**：前端可以根据 runtime 做不同的 UI 渲染（如 Codex 显示蓝色标签，Claude Code 显示橙色标签）。
+- **agent.context.updated 实时推送**：每次 ACP `usage_update` 触发时立即推送，前端 Context Ring 实时更新。
+
+#### 16.2.3 初始化：SessionCapabilities
+
+前端进入会话时调用 `POST /api/sessions/{conversationId}/initialize`，后端返回：
+
+```typescript
+interface SessionCapabilities {
+  agent: {
+    id: string;          // agent id，如 "codex" / "claude_code"
+    label: string;       // 显示名称，如 "Codex (Cx)" / "Claude Code (Cl)"
+    adapterKind: "acp" | "nanobot";
+    status: "available" | "experimental" | "missing_dependency";
+  };
+  modes: SessionMode[];       // 权限模式列表
+  models: SessionModel[];     // 模型列表
+  configOptions: SessionConfigOption[]; // 其他配置选项
+}
+
+interface SessionMode {
+  id: string;      // mode id，如 "code" / "plan" / "default"
+  label: string;   // 显示名称，如 "Code" / "Plan" / "Ask"
+  isDefault: boolean;
+}
+
+interface SessionModel {
+  id: string;           // 模型 id（runtime 原生 id）
+  label: string;        // 显示名称（从 ACP 获取，非产品层映射）
+  description?: string; // 模型描述
+  isCurrent: boolean;   // 是否为当前默认模型
+}
+
+interface SessionConfigOption {
+  id: string;       // 配置项 id，如 "reasoning_effort" / "fast"
+  label: string;    // 显示名称
+  type: "enum" | "boolean" | "number";
+  values?: string[];  // 枚举值列表（type=enum 时）
+  currentValue?: string | number | boolean;  // 当前值
+  valueLabels?: Record<string, string>;  // 枚举值的显示名称映射
+}
+```
+
+**关键设计点**：
+
+- **Runtime 原生模型 id**：`models[].id` 是 runtime 原生 id，不做产品层映射。前端选择后直接传回后端。
+- **统一的 configOptions 结构**：无论是 Codex 的 `reasoning_effort` 还是 Claude Code 的 `effort`，都归一化为 `configOptions`，前端用统一的下拉框渲染。
+- **label 直接来自 ACP**：后端不篡改 runtime 返回的 label（如 Codex 的 "GPT-5.5 (xhigh)" 和 Claude Code 的 "Sonnet"）。
+
+### 16.3 统一适配层架构
+
+#### 16.3.1 后端架构
+
+```text
+┌────────────────────────────────────────────────────────────────┐
+│                        POST /api/turns/stream                   │
+│  解析 conversationId / agent / modelId / accessMode / effort   │
+└─────────────────────────┬──────────────────────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  AgentRouterAdapter   │  ← 路由到具体 adapter
+              │   - 产品级 model vs   │
+              │     runtime 原生 model│
+              │   - 懒加载 ACP adapter│
+              └───────────┬───────────┘
+                          │
+              ┌───────────┴──────────┐
+              │                      │
+              ▼                      ▼
+   ┌──────────────────┐    ┌──────────────────┐
+   │ AcpAgentAdapter  │    │ NanobotAdapter   │
+   │ (codex/claude/   │    │ (产品级模型)     │
+   │  opencode)       │    └──────────────────┘
+   └────────┬─────────┘
+            │
+            ▼
+   ┌──────────────────────────────────────┐
+   │      AcpRuntimeManager (连接池)       │
+   │  - ensure_connection(conv_id)        │
+   │  - ensure_session(conv_id)           │
+   │  - connections: per-conversation 隔离 │
+   └────────┬─────────────────────────────┘
+            │
+            ▼
+   ┌──────────────────────────────────────┐
+   │   AcpRuntimeConnection (per-conv)    │
+   │    - process: ACP 子进程              │
+   │    - sdk_connection: ClientSideConn  │
+   │    - handler: AcpClientHandler       │
+   └────────┬─────────────────────────────┘
+            │
+            ▼
+   ┌──────────────────────────────────────┐
+   │      AcpClientHandler (per-conv)     │
+   │  - session_update() → map to event   │
+   │  - request_permission()              │
+   │  - output_queue → event stream       │
+   └────────┬─────────────────────────────┘
+            │
+            ▼
+   ┌──────────────────────────────────────┐
+   │       AcpEventMapper                 │
+   │  - 标准化 ACP update → AgentEvent     │
+   │  - 去重文本 delta                     │
+   │  - 提取 usage                        │
+   └──────────────────────────────────────┘
+```
+
+**关键分层**：
+
+1. **AgentRouterAdapter**：决定使用产品级模型（nanobot）还是 runtime 原生模型（ACP runtimes）。
+2. **AcpAgentAdapter**：ACP 协议的统一适配层，处理 Codex、Claude Code、opencode 的**共性**。
+3. **Runtime-specific logic**：在 adapter 内部通过 `if self.name == "claude_code"` 做特判（如 effort config id、mode 映射）。
+4. **AcpRuntimeManager**：统一的连接池，所有 ACP adapter 共享。
+5. **Per-conversation 隔离**：每个会话一个独立连接，彻底避免事件串流。
+
+#### 16.3.2 Runtime 特判示例
+
+**模型 id 格式差异**：
+
+```python
+# Codex：gpt-5.5[xhigh] — bracket 格式
+# Claude Code：claude-sonnet-4-5 — plain id
+# 前端传回的 runtime_model 就是原生 id，后端直接转发，不做映射
+
+# turns.py
+if agent_id in _ACP_RUNTIME_IDS:
+    runtime_model = requested_model_id  # 直接使用 runtime 原生 id
+```
+
+**Effort 配置项 id 差异**：
+
+```python
+# adapter.py _configure_session()
+effort_config_id = "effort" if self.name == "claude_code" else "reasoning_effort"
+result = await self.sdk_connection.set_configuration(
+    session_id=native_session_id,
+    configuration_id=effort_config_id,
+    value=effort_value,
+)
+```
+
+**Mode 映射差异**：
+
+```python
+# Codex 的 mode 是 "code" / "plan" / "ask"
+# Claude Code 的 mode 是 "default" / "plan" / "acceptEdits"
+# descriptors.py
+CLAUDE_MODE_MAP = {
+    "code": "default",
+    "plan": "plan",
+    "ask": "default",
+}
+
+def resolve_claude_mode(product_mode: str) -> str:
+    return CLAUDE_MODE_MAP.get(product_mode, "default")
+```
+
+**关键原则**：
+
+- **前端不知道差异**：前端只传 `accessMode="code"`，后端根据 runtime 做映射。
+- **后端集中转换**：所有特判集中在 adapter 或 descriptors，不分散到各处。
+- **Runtime 原生优先**：能直接转发就转发（如模型 id），不做不必要的映射。
+
+### 16.4 连接池统一管理
+
+**当前实现**：`AcpRuntimeManager` 已实现统一连接池，但需要明确以下设计：
+
+#### 16.4.1 连接复用键
+
+```python
+@dataclass(frozen=True)
+class ConnectionKey:
+    runtime_id: str           # "codex" / "claude_code" / "opencode"
+    workspace: str            # 工作目录路径
+    config_mode: str          # "user-native" / "package-isolated" / ...
+    conversation_id: str      # 会话 id（隔离键）
+    command_fingerprint: str  # 命令 hash（避免命令变化时复用旧连接）
+    env_fingerprint: str      # 环境变量 key hash（避免泄露 secret）
+```
+
+**设计决策**：`conversation_id` 是隔离键，每个会话一个独立连接。同一会话的多轮对话复用同一连接。
+
+#### 16.4.2 连接生命周期
+
+```text
+ensure_connection(conversation_id)
+  ├── key = ConnectionKey(runtime, workspace, conversation_id, ...)
+  ├── existing = connections.get(key)
+  ├── if existing and existing.is_ready:
+  │     return existing  ← 复用
+  └── else:
+        spawn ACP process
+        initialize()
+        mark ready
+        connections[key] = connection
+        return connection
+```
+
+**关键点**：
+
+- **Per-conversation 连接**：两个会话（即使用同一个 runtime）也是独立连接，互不干扰。
+- **Session 绑定**：`ensure_session(conversation_id)` 绑定 native ACP session，持久化到 `native-session.json`。
+- **Turn 串行化**：同一会话的多轮 turn 通过 `turn_locks[conversation_id]` 串行，避免并发搞乱 session 状态。
+
+#### 16.4.3 连接清理策略
+
+```text
+当前：连接不主动清理（常驻），backend 退出时清理所有
+后续：可增加 idle timeout（如 30 分钟无活动则关闭连接）
+```
+
+### 16.5 会话隔离保证
+
+#### 16.5.1 问题回顾
+
+之前共享连接时的问题：
+
+- **事件串流**：会话 A 的 `agent.text.delta` 显示在会话 B 中
+- **会话 id 冲突**：多个会话显示相同 id
+- **模型错乱**：Claude Code 会话显示 Codex 的模型列表
+
+**根因**：所有会话共享一个 ACP 连接，`AcpClientHandler` 通过 `session_id` 做事件多路复用，但 SDK 回调参数有限，路由天然脆弱。
+
+#### 16.5.2 根治方案
+
+**Per-conversation 连接隔离**：
+
+```python
+# 之前（共享）
+connections: {
+  ConnectionKey(runtime="codex", workspace="H:/codex-lite"): AcpRuntimeConnection
+}
+# 一个连接服务所有会话，handler 需要路由表
+
+# 之后（隔离）
+connections: {
+  ConnectionKey(..., conversation_id="conv-123"): AcpRuntimeConnection,
+  ConnectionKey(..., conversation_id="conv-456"): AcpRuntimeConnection,
+}
+# 每个会话一个连接，handler 直接写入 output_queue，无需路由
+```
+
+**收益**：
+
+1. **物理隔离**：事件不可能路由错，因为每个连接只服务一个会话。
+2. **代码简化**：移除 ~120 行多路复用代码。
+3. **前端简化**：不再需要 per-session ref map，`event.conversationId` 足够路由。
+4. **调试简单**：每个连接的 stderr 只包含一个会话的日志。
+
+**代价**：每个活跃会话多一个 ACP 子进程（对于桌面应用，2-3 个活跃会话的资源开销可接受）。
+
+### 16.6 前后端数据示例
+
+#### 16.6.1 前端发送 Turn 请求
+
+```json
+{
+  "conversationId": "conv-123",
+  "turnId": "turn-abc",
+  "input": "请分析这个项目的架构",
+  "modelId": "gpt-5.5[xhigh]",
+  "accessMode": "code",
+  "reasoningEffort": "high",
+  "selectedConfig": {}
+}
+```
+
+**后端接收后的处理**：
+
+1. **解析 agent**：从 `conv-123` 的 `session.agent` 读取 `agent_id="codex"`。
+2. **路由到 ACP adapter**：因为 `agent_id in _ACP_RUNTIME_IDS`，使用 runtime 原生模型。
+3. **获取连接**：`ensure_connection(conversation_id="conv-123")` 复用或创建连接。
+4. **获取 session**：`ensure_session(conversation_id="conv-123")` 复用或创建 native session。
+5. **配置 session**：
+   - `set_mode(session_id, mode="code")`（Codex 直接用 "code"）
+   - `set_configuration(session_id, "reasoning_effort", "high")`
+6. **发送 prompt**：`prompt(session_id, "请分析这个项目的架构")`
+
+#### 16.6.2 后端返回事件流
+
+```ndjson
+{"type":"conversation.turn.started","conversationId":"conv-123","turnId":"turn-abc","session":{...},"userMessage":{...},"assistantMessage":{...}}
+{"type":"agent.text.delta","conversationId":"conv-123","turnId":"turn-abc","delta":"这个","metadata":{"runtime":"codex","nativeSessionId":"native-xyz"}}
+{"type":"agent.text.delta","conversationId":"conv-123","turnId":"turn-abc","delta":"项目","metadata":{...}}
+{"type":"agent.context.updated","conversationId":"conv-123","turnId":"turn-abc","context":{"contextUsedTokens":1234,"contextWindowTokens":100000},"metadata":{...}}
+{"type":"agent.text.delta","conversationId":"conv-123","turnId":"turn-abc","delta":"采用了","metadata":{...}}
+{"type":"agent.run.completed","conversationId":"conv-123","turnId":"turn-abc","usage":{"promptTokens":100,"completionTokens":50,"contextUsedTokens":1234,"contextWindowTokens":100000},"metadata":{...}}
+```
+
+**前端处理**：
+
+1. **`conversation.turn.started`**：创建 user message 和 assistant message，更新 session。
+2. **`agent.text.delta`**：追加文本到 assistant message。
+3. **`agent.context.updated`**：更新 Context Ring 显示（实时）。
+4. **`agent.run.completed`**：标记 turn 完成，显示最终 usage。
+
+#### 16.6.3 SessionCapabilities 示例
+
+**Codex**：
+
+```json
+{
+  "agent": {
+    "id": "codex",
+    "label": "Codex (Cx)",
+    "adapterKind": "acp",
+    "status": "available"
+  },
+  "modes": [
+    { "id": "code", "label": "Code", "isDefault": true },
+    { "id": "plan", "label": "Plan", "isDefault": false },
+    { "id": "ask", "label": "Ask", "isDefault": false }
+  ],
+  "models": [
+    { "id": "gpt-5.5[high]", "label": "GPT-5.5 (high)", "isCurrent": false },
+    { "id": "gpt-5.5[xhigh]", "label": "GPT-5.5 (xhigh)", "isCurrent": true },
+    { "id": "gpt-6[medium]", "label": "GPT-6 (medium)", "isCurrent": false }
+  ],
+  "configOptions": [
+    {
+      "id": "reasoning_effort",
+      "label": "Reasoning Effort",
+      "type": "enum",
+      "values": ["low", "medium", "high", "xhigh"],
+      "currentValue": "xhigh",
+      "valueLabels": { "low": "Low", "medium": "Medium", "high": "High", "xhigh": "XHigh" }
+    }
+  ]
+}
+```
+
+**Claude Code**：
+
+```json
+{
+  "agent": {
+    "id": "claude_code",
+    "label": "Claude Code (Cl)",
+    "adapterKind": "acp",
+    "status": "available"
+  },
+  "modes": [
+    { "id": "default", "label": "Default", "isDefault": true },
+    { "id": "plan", "label": "Plan", "isDefault": false }
+  ],
+  "models": [
+    { "id": "claude-haiku-4-5", "label": "Haiku", "isCurrent": false },
+    { "id": "claude-sonnet-4-5", "label": "Sonnet", "isCurrent": false },
+    { "id": "claude-opus-4-8", "label": "Opus", "isCurrent": true },
+    { "id": "claude-fable-5", "label": "Fable", "isCurrent": false }
+  ],
+  "configOptions": [
+    {
+      "id": "effort",
+      "label": "Reasoning Effort",
+      "type": "enum",
+      "values": ["low", "medium", "high", "xhigh", "max"],
+      "currentValue": "high",
+      "valueLabels": { "low": "Low", "medium": "Medium", "high": "High", "xhigh": "XHigh", "max": "Max" }
+    },
+    {
+      "id": "fast",
+      "label": "Fast Mode",
+      "type": "boolean",
+      "currentValue": false
+    }
+  ]
+}
+```
+
+**关键差异**：
+
+- **模型 id 格式**：Codex 用 bracket，Claude Code 用 plain id。
+- **Effort config id**：Codex 用 `reasoning_effort`，Claude Code 用 `effort`。
+- **Mode 数量**：Claude Code 没有 "ask" mode，只有 "default" / "plan"。
+- **额外配置**：Claude Code 有 `fast` boolean，Codex 没有。
+
+**前端处理**：前端用统一的 `SessionCapabilities` 结构渲染，不关心这些差异。后端负责转换。
+
+### 16.7 核心设计原则
+
+1. **前端显示协议统一**：前端只需要理解 `SessionCapabilities`、`AgentEvent`、`TurnRequest` 三个结构，不需要知道各 runtime 的差异。
+2. **后端转换集中**：所有 runtime 差异转换集中在 `AcpAgentAdapter` 和 `RuntimeDescriptor`，不分散到各处。
+3. **Runtime 原生优先**：模型 id、mode id 尽量使用 runtime 原生值，不做不必要的映射（如模型 id 直接透传）。
+4. **Per-conversation 隔离**：每个会话一个独立 ACP 连接，彻底避免事件串流。
+5. **连接池统一管理**：所有 ACP adapter 共享 `AcpRuntimeManager`，不各自 spawn。
+6. **Event-first 存储**：`events.ndjson` 作为真相来源，`messages.json` 作为投影（兼容现有 UI）。
+
+### 16.8 待优化项
+
+1. **连接池 idle timeout**：当前连接永不清理，后续可增加 30 分钟 idle timeout。
+2. **Session capabilities 缓存**：当前每次 `initialize` 都调用 `session/new`，可缓存到连接对象。
+3. **前端 model label 映射**：如果要统一显示"Sonnet"而非"claude-sonnet-4-5"，需要在前端维护映射表（当前是直接用 ACP 返回的 label）。
+4. **Error message 本地化**：当前 error 直接用 Python exception message，后续可统一错误码。
+
+---
+
+## 17. 风险与待验证项
 
 | 风险 | 说明 | 建议 |
 |------|------|------|
@@ -1187,7 +1780,7 @@ POST /api/agent-runtimes/{runtime_id}/activate
 
 ---
 
-## 16. 核心结论
+## 18. 核心结论
 
 1. **优先修复每轮临时 spawn ACP + 每轮新 session**：这是当前"慢"和"不像连续对话"的主要原因。建议把 VibeX 的 ACP runtime 生命周期设计作为下一轮重构重点，优先实现 Python 版常驻 `AcpRuntimeManager`。
 
@@ -1208,9 +1801,13 @@ POST /api/agent-runtimes/{runtime_id}/activate
 
 8. **移除 "启用 Agent"**：设置页回归纯配置管理，不再有 "激活/启用" 概念。用户通过创建新会话时选择 agent 来决定使用哪个 runtime。
 
+9. **统一前后端协议**：建立统一的 `TurnRequest`、`AgentEvent`、`SessionCapabilities` 协议，前端不感知各 runtime 差异，后端集中转换。所有 ACP adapter 共享 `AcpRuntimeManager` 连接池，per-conversation 隔离保证事件不串流。
+
+10. **Per-conversation 连接隔离**：每个会话一个独立 ACP 连接，彻底消除多路复用需求。代价是每个活跃会话多一个子进程，收益是物理隔离（不可能串流）、代码简化（移除 ~120 行路由代码）、调试简单。
+
 ---
 
-## 17. 参考
+## 19. 参考
 
 1. `docs/research/0703-VIBEX-ACP-RESEARCH.md` — VibeX ACP Runtime 与会话存储借鉴研究
 2. `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` — ACP Agent Adapter 实施设计

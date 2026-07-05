@@ -110,6 +110,7 @@ def _build_modes(
 
     mode_ids: list[str] = []
     mode_labels: dict[str, str] = {}
+    config_current_mode = ""
 
     # 来源 1: configOptions.mode
     mode_config = raw_config.get("mode")
@@ -121,6 +122,8 @@ def _build_modes(
         option_labels = mode_config.get("option_labels")
         if isinstance(option_labels, dict):
             mode_labels = {str(k): str(v) for k, v in option_labels.items()}
+        # configOptions.mode.current_value 是 runtime 声明的当前默认模式
+        config_current_mode = str(mode_config.get("current_value") or "")
 
     # 来源 2: session_result.modes（补充来源 1 中可能缺失的）
     if not mode_ids:
@@ -135,6 +138,10 @@ def _build_modes(
     # 来源 3: fallback
     if not mode_ids:
         mode_ids = [default_mode]
+
+    # 默认模式：优先用 configOptions.mode 声明的 current_value，其次用传入的 default_mode
+    if config_current_mode and config_current_mode in mode_ids:
+        default_mode = config_current_mode
 
     # 确保 default_mode 在列表中
     if default_mode and default_mode not in mode_ids:
@@ -177,7 +184,8 @@ def build_session_capabilities(
     # 其次从 session_result.modes 获取，最后 fallback 到 default_mode
     modes = _build_modes(raw_config, session_result, default_mode)
 
-    # 解析 models
+    # 解析 models —— 优先从顶层 models.availableModels（Codex），
+    # 其次从 configOptions.model（Claude Code 把模型放在 configOptions 里）
     models_data = parse_models_from_session_result(session_result, runtime)
     current_model_id = str(models_data.get("currentModelId") or "")
     models = [
@@ -189,6 +197,28 @@ def build_session_capabilities(
         )
         for m in models_data.get("models", [])
     ]
+    # fallback: 从 configOptions.model 提取（Claude Code）
+    if not models:
+        model_config = raw_config.get("model")
+        if isinstance(model_config, dict):
+            model_values = model_config.get("values")
+            model_labels = model_config.get("option_labels") or {}
+            model_descs = model_config.get("option_descriptions") or {}
+            model_current = str(model_config.get("current_value") or "")
+            if isinstance(model_values, list):
+                current_model_id = model_current
+                models = [
+                    SessionModel(
+                        id=str(v),
+                        label=str(model_labels.get(str(v)) or v),
+                        description=model_descs.get(str(v)),
+                        is_current=(str(v) == model_current),
+                    )
+                    for v in model_values
+                ]
+
+    # 思考强度别名：Claude Code 用 "effort"，Codex 用 "reasoning_effort"，统一暴露
+    THOUGHT_LEVEL_IDS = {"reasoning_effort", "effort"}
 
     # 解析 config options（排除 mode 和 model，因为它们已通过 modes/models 提供）
     config_options = []
@@ -203,14 +233,16 @@ def build_session_capabilities(
             config_values = [str(v) for v in config_values]
         else:
             config_values = None
+        # 思考强度统一用 reasoning_effort 作为前端 id（前端只认这个）
+        effective_id = "reasoning_effort" if config_id in THOUGHT_LEVEL_IDS else config_id
         # 优先使用 ACP 返回的 option_labels，其次用内置映射
-        option_labels = config_def.get("option_labels") or _CONFIG_VALUE_LABELS.get(config_id)
+        option_labels = config_def.get("option_labels") or _CONFIG_VALUE_LABELS.get(effective_id)
         # 优先使用 ACP 返回的 name 作为 label
         acp_name = config_def.get("name")
-        label = _CONFIG_OPTION_LABELS.get(config_id, acp_name or config_id)
+        label = _CONFIG_OPTION_LABELS.get(effective_id, acp_name or effective_id)
         current_value = config_def.get("current_value")
         config_options.append(SessionConfigOption(
-            id=config_id,
+            id=effective_id,
             label=label,
             type=config_type,
             values=config_values,

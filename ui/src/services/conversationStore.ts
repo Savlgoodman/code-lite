@@ -56,3 +56,14 @@ export async function updateConversationArchiveState(
   });
   return response.session;
 }
+
+export async function saveConversationConfig(
+  sessionId: string,
+  config: Record<string, unknown>,
+): Promise<Session> {
+  const response = await requestJson<{ session: Session }>(`/api/conversations/${sessionId}/config`, {
+    body: JSON.stringify({ config }),
+    method: "PATCH"
+  });
+  return response.session;
+}

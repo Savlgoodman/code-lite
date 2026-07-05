@@ -8,8 +8,10 @@ import type {
   SessionConfigOption,
   SessionModel,
   SessionMode,
+  UsageStats,
 } from "../../types";
 import { ApprovalCard } from "./ApprovalCard";
+import { ContextRing } from "./ContextRing";
 
 /** 从模型 ID 提取模型族和推理强度 */
 function parseModelId(modelId: string): { family: string; effort: string | null } {
@@ -32,6 +34,7 @@ interface ChatComposerProps {
   activeTurnId: string | null;
   agent?: AgentSummary | null;
   configOptions: SessionConfigOption[];
+  contextUsage: UsageStats | null;
   draft: string;
   models: SessionModel[];
   modes: SessionMode[];
@@ -54,6 +57,7 @@ export function ChatComposer({
   activeTurnId,
   agent,
   configOptions,
+  contextUsage,
   draft,
   models,
   modes,
@@ -245,6 +249,9 @@ export function ChatComposer({
             </div>
 
             <div className="composer-right">
+              {/* 上下文使用圆环 */}
+              <ContextRing usage={contextUsage} />
+
               {/* 底部状态栏：模型族 + 推理强度 */}
               {hasAnyControls ? (
                 <div className="composer-status-bar">

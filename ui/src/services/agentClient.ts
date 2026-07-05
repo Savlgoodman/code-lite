@@ -20,7 +20,7 @@ export interface StartTurnOptions {
   onEvent: (event: AgentEvent) => void;
 }
 
-const FALLBACK_BACKEND_URL = "http://127.0.0.1:8765";
+const FALLBACK_BACKEND_URL = "http://127.0.0.1:18765";
 
 function hasTauri() {
   return "__TAURI_INTERNALS__" in window;
@@ -52,6 +52,48 @@ export async function initializeSession(conversationId: string): Promise<Session
   }
 
   return response.json() as Promise<SessionCapabilities>;
+}
+
+export async function createConversation(options: {
+  agentId: string;
+  title?: string;
+  preview?: string;
+  workspace?: string;
+}): Promise<{ session: Session; messages: unknown[] }> {
+  const baseUrl = await ensureBackend();
+  const response = await fetch(`${baseUrl}/api/conversations`, {
+    body: JSON.stringify(options),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+
+  return response.json() as Promise<{ session: Session; messages: unknown[] }>;
+}
+
+export interface ConversationEventsResult {
+  events: Array<Record<string, unknown>>;
+}
+
+export async function getConversationEvents(
+  conversationId: string,
+  afterSequence = 0,
+): Promise<ConversationEventsResult> {
+  const baseUrl = await ensureBackend();
+  const params = afterSequence > 0 ? `?after=${afterSequence}` : "";
+  const response = await fetch(
+    `${baseUrl}/api/conversations/${encodeURIComponent(conversationId)}/events${params}`,
+    { headers: { "Content-Type": "application/json" } },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+
+  return response.json() as Promise<ConversationEventsResult>;
 }
 
 export async function streamAgentTurn(options: StartTurnOptions): Promise<void> {

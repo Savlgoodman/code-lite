@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -14,8 +15,10 @@ from code_lite_backend.agents.acp.capabilities import (
 )
 from code_lite_backend.agents.acp.client import AcpClientHandler
 from code_lite_backend.agents.acp.mapper import to_jsonable
+from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
 from code_lite_backend.agents.runtimes import (
     RuntimeDescriptor,
+    claude_env,
     codex_env,
     resolve_codex_mode,
 )
@@ -29,12 +32,16 @@ from code_lite_backend.schemas.agent import (
 from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigStore
 from code_lite_backend.services.approvals import ApprovalBroker
 
+logger = logging.getLogger(__name__)
+
 
 class AcpAgentAdapter:
     """通用 ACP agent adapter。
 
     所有 ACP runtime（Codex、Claude Code、opencode）共用此 adapter。
     差异通过 RuntimeDescriptor 隔离。
+
+    使用 AcpRuntimeManager 管理常驻连接，实现跨 turn 复用。
     """
 
     def __init__(
@@ -45,6 +52,7 @@ class AcpAgentAdapter:
         runtime_config: RuntimeConfig,
         approvals: ApprovalBroker,
         agent_runtime_config_store: AgentRuntimeConfigStore,
+        runtime_manager: AcpRuntimeManager | None = None,
     ) -> None:
         self.name = runtime
         self.descriptor = descriptor
@@ -52,6 +60,7 @@ class AcpAgentAdapter:
         self._approvals = approvals
         self._agent_runtime_config_store = agent_runtime_config_store
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
+        self._runtime_manager = runtime_manager or AcpRuntimeManager()
 
     @property
     def capabilities(self) -> AgentAdapterCapabilities:
@@ -168,8 +177,15 @@ class AcpAgentAdapter:
     ) -> None:
         command = self._resolve_command()
         env = self._resolve_env()
-        stderr_task: asyncio.Task[None] | None = None
-        process: Any | None = None
+        logger.info(
+            "Starting turn %s for conversation %s (runtime=%s, command=%s)",
+            request.turn_id, request.conversation_id, self.name, command[0],
+        )
+        logger.info(
+            "[_run_turn] model_id=%s runtime_model=%s access_mode=%s reasoning_effort=%s model_metadata=%s",
+            request.model_id, request.runtime_model, request.access_mode,
+            request.reasoning_effort, request.model_metadata,
+        )
         try:
             await output_queue.put({
                 "type": "agent.run.started",
@@ -181,46 +197,72 @@ class AcpAgentAdapter:
                     "command": command,
                 },
             })
-            async with acp.spawn_agent_process(
-                client,
-                command[0],
-                *command[1:],
+
+            # 使用 RuntimeManager 确保连接存在（每个 conversation 独立连接）
+            connection = await self._runtime_manager.ensure_connection(
+                descriptor=self.descriptor,
+                command=command,
                 env=env,
-                cwd=str(request.workspace),
-                observers=[client.observe_stream],
-                use_unstable_protocol=True,
-            ) as (conn, process):
-                stderr_task = asyncio.create_task(self._drain_stderr(process, client))
-                initialize_result = await asyncio.wait_for(
-                    conn.initialize(
-                        protocol_version=acp.PROTOCOL_VERSION,
-                        client_capabilities=_build_client_capabilities(),
-                        client_info=acp_schema.Implementation(
-                            name="code-lite",
-                            title="code-lite",
-                            version="0.1.4",
-                        ),
-                    ),
-                    timeout=30,
+                workspace=request.workspace,
+                conversation_id=request.conversation_id,
+                approvals=self._approvals,
+            )
+            logger.info("Connection ready for %s (conversation=%s)", self.name, request.conversation_id[:12])
+
+            # 获取 conversation lock（串行化同一会话的 prompt）
+            lock = self._runtime_manager.get_turn_lock(request.conversation_id)
+            async with lock:
+                connection_sdk = connection.sdk_connection
+                original_handler = connection._client_handler
+
+                # 直接更新 handler 状态（不需要多路复用——每个 connection 只有一个 handler，
+                # 只服务于一个 conversation）
+                if original_handler is not None:
+                    original_handler.conversation_id = request.conversation_id
+                    original_handler.turn_id = request.turn_id
+                    original_handler.output_queue = output_queue  # type: ignore[assignment]
+                    original_handler.native_session_id = None
+                    # 重置 mapper 去重状态（新 turn）
+                    original_handler.mapper.reset_dedup()
+
+                # 确保 native session 存在
+                binding = await self._runtime_manager.ensure_session(
+                    connection=connection,
+                    conversation_id=request.conversation_id,
+                    workspace=request.workspace,
                 )
-                session_result = await asyncio.wait_for(
-                    conn.new_session(cwd=str(request.workspace), mcp_servers=[]),
-                    timeout=30,
+
+                if original_handler is not None:
+                    original_handler.native_session_id = binding.native_session_id
+                client.native_session_id = binding.native_session_id
+                logger.info(
+                    "Session bound: %s -> native %s",
+                    request.conversation_id[:12], binding.native_session_id[:12],
                 )
-                client.native_session_id = str(session_result.session_id)
-                await self._configure_session(conn, session_result, request)
-                prompt_result = await conn.prompt(
-                    session_id=session_result.session_id,
+
+                # 配置 session（mode, model, reasoning effort）
+                await self._configure_session(connection_sdk, binding, request)
+
+                # 发送 prompt
+                logger.info("Sending prompt to session %s", binding.native_session_id[:12])
+                prompt_result = await connection_sdk.prompt(
+                    session_id=binding.native_session_id,
                     prompt=[acp.text_block(request.prompt)],
                 )
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(conn.close_session(session_result.session_id), timeout=5)
+                logger.info("Prompt completed for %s (stop=%s)", request.turn_id, getattr(prompt_result, "stop_reason", None))
+
                 await output_queue.put({
                     "type": "agent.text.completed",
                     "conversationId": request.conversation_id,
                     "turnId": request.turn_id,
                 })
-                usage_dict = client.latest_usage.to_dict() if client.latest_usage else None
+                # 获取 usage（handler 是 per-conversation 的，直接用）
+                handler_usage = original_handler.latest_usage if original_handler else None
+                usage_dict = (
+                    handler_usage.to_dict() if handler_usage else
+                    client.latest_usage.to_dict() if client.latest_usage else
+                    None
+                )
                 await output_queue.put({
                     "type": "agent.run.completed",
                     "conversationId": request.conversation_id,
@@ -229,11 +271,13 @@ class AcpAgentAdapter:
                     "result": {
                         "stopReason": getattr(prompt_result, "stop_reason", None),
                         "runtime": self.descriptor.id,
-                        "nativeSessionId": client.native_session_id,
-                        "agentInfo": to_jsonable(getattr(initialize_result, "agent_info", None)),
+                        "nativeSessionId": binding.native_session_id,
+                        "agentInfo": to_jsonable(getattr(connection.initialize_result, "agent_info", None)),
                     },
                 })
+
         except asyncio.CancelledError:
+            logger.info("Turn %s cancelled", request.turn_id)
             await output_queue.put({
                 "type": "agent.run.failed",
                 "conversationId": request.conversation_id,
@@ -242,6 +286,7 @@ class AcpAgentAdapter:
             })
             raise
         except FileNotFoundError as exc:
+            logger.error("ACP process not found for %s: %s", self.name, exc)
             await output_queue.put({
                 "type": "agent.run.failed",
                 "conversationId": request.conversation_id,
@@ -249,7 +294,12 @@ class AcpAgentAdapter:
                 "error": f"{self.descriptor.label} ACP 启动失败：{exc}",
             })
         except Exception as exc:
-            stderr = "\n".join(client.stderr_tail)
+            logger.exception("Turn %s failed for conversation %s", request.turn_id, request.conversation_id)
+            # 尝试从 connection 获取 stderr
+            connection = self._runtime_manager.get_connection_for_conversation(request.conversation_id)
+            stderr = ""
+            if connection is not None:
+                stderr = "\n".join(connection.stderr_ring_buffer)
             suffix = f"\n\n{self.descriptor.label} stderr:\n{stderr}" if stderr else ""
             await output_queue.put({
                 "type": "agent.run.failed",
@@ -258,61 +308,104 @@ class AcpAgentAdapter:
                 "error": f"{self.descriptor.label} ACP 运行失败：{type(exc).__name__}: {exc}{suffix}",
             })
         finally:
-            if stderr_task is not None:
-                stderr_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await stderr_task
-            if process is not None:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(process.wait(), timeout=5)
             await output_queue.put(None)
 
     async def _configure_session(
-        self, conn: Any, session_result: Any, request: AgentRunRequest
+        self, conn: Any, session_binding: Any, request: AgentRunRequest
     ) -> None:
-        session_id = str(session_result.session_id)
+        session_id = session_binding.native_session_id
 
-        # 设置模式
+        # ─── 设置模式 ───
         mode = self._resolve_mode(request.access_mode)
+        logger.info(
+            "[configure] turn=%s conversation=%s session=%s access_mode=%s -> resolved_mode=%s runtime=%s",
+            request.turn_id, request.conversation_id[:12], session_id[:12],
+            request.access_mode, mode, self.name,
+        )
         if mode:
-            with contextlib.suppress(Exception):
+            try:
                 await asyncio.wait_for(
                     conn.set_session_mode(session_id=session_id, mode_id=mode),
                     timeout=10,
                 )
+                logger.info("[configure] set_session_mode(%s) OK", mode)
+            except Exception as exc:
+                logger.warning("[configure] set_session_mode(%s) failed: %s", mode, exc)
 
-        # 设置模型
+        # ── 设置模型 ──
+        # Claude Code: 模型通过 set_config_option(config_id="model", value="haiku") 设置
+        # Codex: 模型通过 set_session_model 设置（如果支持）
         model = str(
             request.runtime_model or request.model_metadata.get("model") or ""
         ).strip()
-        available_model_ids = extract_available_model_ids(session_result)
-        if model and model in available_model_ids:
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(
-                    conn.set_session_model(session_id=session_id, model_id=model),
-                    timeout=10,
-                )
+        logger.info(
+            "[configure] turn=%s conversation=%s runtime_model=%s model_metadata.model=%s -> final_model=%s",
+            request.turn_id, request.conversation_id[:12],
+            request.runtime_model, request.model_metadata.get("model"), model,
+        )
+        if model:
+            if self.name == "claude_code":
+                # Claude Code 不支持 set_session_model，通过 config option 设置
+                try:
+                    await asyncio.wait_for(
+                        conn.set_config_option(
+                            session_id=session_id,
+                            config_id="model",
+                            value=model,
+                        ),
+                        timeout=10,
+                    )
+                    logger.info("[configure] set_config_option(model=%s) OK", model)
+                except Exception as exc:
+                    logger.warning("[configure] set_config_option(model=%s) failed: %s", model, exc)
+            else:
+                # Codex 等其他 runtime 尝试 set_session_model
+                try:
+                    await asyncio.wait_for(
+                        conn.set_session_model(session_id=session_id, model_id=model),
+                        timeout=10,
+                    )
+                    logger.info("[configure] set_session_model(%s) OK", model)
+                except Exception as exc:
+                    logger.warning("[configure] set_session_model(%s) failed: %s", model, exc)
 
-        # 设置 reasoning effort（通用 config option）
+        # ─── 设置 reasoning effort ───
         reasoning_effort = (
             request.reasoning_effort or request.model_metadata.get("reasoningEffort") or ""
         ).strip()
+        effort_config_id = "effort" if self.name == "claude_code" else "reasoning_effort"
+        logger.info(
+            "[configure] turn=%s conversation=%s reasoning_effort=%s config_id=%s runtime=%s",
+            request.turn_id, request.conversation_id[:12],
+            reasoning_effort, effort_config_id, self.name,
+        )
         if reasoning_effort and reasoning_effort != "none":
-            with contextlib.suppress(Exception):
+            try:
                 await asyncio.wait_for(
                     conn.set_config_option(
                         session_id=session_id,
-                        config_id="reasoning_effort",
+                        config_id=effort_config_id,
                         value=reasoning_effort,
                     ),
                     timeout=10,
                 )
+                logger.info("[configure] set_config_option(%s=%s) OK", effort_config_id, reasoning_effort)
+            except Exception as exc:
+                logger.warning("[configure] set_config_option(%s=%s) failed: %s", effort_config_id, reasoning_effort, exc)
+        else:
+            logger.info("[configure] skipping set_config_option (effort=%s)", reasoning_effort or "(empty)")
 
     def _resolve_command(self) -> list[str]:
         """解析当前 runtime 的可执行命令。"""
         if self.name == "codex":
             return self._agent_runtime_config_store.codex_command()
         if self.name == "claude_code":
+            runtime_settings = self._agent_runtime_config_store.load()["agentRuntimes"]
+            claude_runtime = runtime_settings.get("claude_code", {})
+            from code_lite_backend.services.agent_runtime_config import _string_list
+            command = _string_list(claude_runtime.get("command"))
+            if command:
+                return command
             return self._agent_runtime_config_store.managed_claude_command()
         return self.descriptor.default_command
 
@@ -328,6 +421,11 @@ class AcpAgentAdapter:
                 codex_home.mkdir(parents=True, exist_ok=True)
                 isolated_home = str(codex_home)
             return codex_env(codex_runtime, logs_dir=logs_dir, isolated_codex_home=isolated_home)
+        if self.name == "claude_code":
+            runtime_config = self._agent_runtime_config_store.load()
+            claude_runtime = runtime_config["agentRuntimes"].get("claude_code", {})
+            logs_dir = str(self._runtime_config.logs_dir / "claude-agent-acp")
+            return claude_env(claude_runtime, logs_dir=logs_dir)
         return dict(__import__("os").environ)
 
     def _resolve_mode(self, fallback: str | None = None) -> str | None:
@@ -335,7 +433,9 @@ class AcpAgentAdapter:
         if self.name == "codex":
             return resolve_codex_mode(fallback)
         if self.name == "claude_code":
-            return str(fallback or self.descriptor.default_mode)
+            # 前端发送的是 Claude Code 真实的 mode id（default/plan/acceptEdits/...），
+            # 直接透传即可，不要用 CLAUDE_MODE_MAP 映射（会错误映射成 ask）
+            return str(fallback).strip() if fallback else None
         return None
 
     async def _drain_stderr(self, process: Any, client: AcpClientHandler) -> None:

@@ -17,6 +17,10 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   status: SessionStatus;
+  /** 会话绑定的工作区绝对路径（普通会话指向 ~/.code-lite/workspace） */
+  workspace?: string;
+  /** "general" = 普通会话；"project" = 用户指定的项目工作区 */
+  workspaceKind?: "general" | "project" | string;
 }
 
 /** 进入对话时加载的 agent 信息 */
@@ -66,6 +70,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   createdAt: number;
+  model?: Record<string, unknown>;
   reasoning?: string;
   streaming?: boolean;
   error?: string;
@@ -102,6 +107,9 @@ export interface UsageStats {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  contextUsedTokens?: number;
+  contextWindowTokens?: number;
+  source?: string;
 }
 
 export interface SystemProfileItem {
@@ -348,6 +356,15 @@ export type AgentEvent =
       risk?: ToolCallItem["risk"];
     }
   | {
+      type: "agent.tool.delta";
+      conversationId: string;
+      turnId: string;
+      toolCallId: string;
+      name: string;
+      status?: string;
+      progress?: unknown;
+    }
+  | {
       type: "agent.tool.completed";
       conversationId: string;
       turnId: string;
@@ -379,6 +396,12 @@ export type AgentEvent =
       impact: string;
       risks: string[];
       rollback: string;
+    }
+  | {
+      type: "agent.context.updated";
+      conversationId: string;
+      turnId: string;
+      context: UsageStats;
     }
   | {
       type: "agent.run.completed";
