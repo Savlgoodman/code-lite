@@ -359,6 +359,15 @@
   background: #ffe4df;
 }
 
+.settings-danger-button.solid {
+  background: #c83b32;
+  color: #fff;
+}
+
+.settings-danger-button.solid:hover {
+  background: #b02f27;
+}
+
 .settings-primary-button:disabled,
 .settings-secondary-button:disabled,
 .settings-danger-button:disabled {
@@ -802,6 +811,10 @@
   width: min(700px, 100%);
 }
 
+.settings-delete-dialog {
+  width: min(460px, 100%);
+}
+
 .settings-modal-header {
   display: flex;
   align-items: flex-start;
@@ -826,6 +839,22 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 18px;
+}
+
+.settings-delete-dialog-body {
+  color: #4d545d;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.settings-delete-dialog-body p {
+  margin: 0;
+}
+
+.settings-delete-dialog-body strong {
+  margin: 0 3px;
+  color: #252a31;
+  font-weight: 650;
 }
 
 .settings-configured-model > div:first-child {
