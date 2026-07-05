@@ -37,10 +37,13 @@
 .token-modal::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(105, 112, 121, 0.28);
+  background-clip: content-box;
+  min-height: 30px;
 }
 
 .token-modal::-webkit-scrollbar-thumb:hover {
   background: rgba(105, 112, 121, 0.45);
+  background-clip: content-box;
 }
 
 .token-modal-header {
