@@ -168,14 +168,26 @@ def _map_tool_call_update(update: Any, ctx: EventContext) -> dict[str, Any] | No
 
 @dataclass
 class UsageSnapshot:
-    """从 ACP usage_update 提取的 usage 快照"""
+    """ACP usage 快照，合并 PromptResponse.usage 分项数据和 usage_update context window 数据。"""
+    # 来自 PromptResponse.usage 的分项数据
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_read_tokens: int | None = None
+    cached_write_tokens: int | None = None
+    thought_tokens: int | None = None
+    # 来自 UsageUpdate 的 context window 数据
     total_tokens: int | None = None
     context_used_tokens: int | None = None
     context_window_tokens: int | None = None
-    source: str = "acp.usage_update"
+    source: str = "acp"
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
+            "inputTokens": self.input_tokens,
+            "outputTokens": self.output_tokens,
+            "cachedReadTokens": self.cached_read_tokens,
+            "cachedWriteTokens": self.cached_write_tokens,
+            "thoughtTokens": self.thought_tokens,
             "totalTokens": self.total_tokens,
             "contextUsedTokens": self.context_used_tokens,
             "contextWindowTokens": self.context_window_tokens,
@@ -185,11 +197,51 @@ class UsageSnapshot:
 
 
 def _extract_usage(update: Any) -> UsageSnapshot:
+    """从 ACP usage_update 事件提取 context window 维度的 usage。"""
     return UsageSnapshot(
         total_tokens=getattr(update, "used", None),
         context_used_tokens=getattr(update, "used", None),
         context_window_tokens=getattr(update, "size", None),
+        source="acp.usage_update",
     )
+
+
+def extract_prompt_response_usage(usage: Any) -> UsageSnapshot:
+    """从 PromptResponse.usage（Usage 对象）中提取完整分项 token 数据。"""
+    return UsageSnapshot(
+        input_tokens=getattr(usage, "input_tokens", None),
+        output_tokens=getattr(usage, "output_tokens", None),
+        cached_read_tokens=getattr(usage, "cached_read_tokens", None),
+        cached_write_tokens=getattr(usage, "cached_write_tokens", None),
+        thought_tokens=getattr(usage, "thought_tokens", None),
+        total_tokens=getattr(usage, "total_tokens", None),
+        source="acp.prompt_response.usage",
+    )
+
+
+# 压缩检测关键词
+COMPACT_SIGNALS = [
+    "context compacted",
+    "compacting",
+    "context compressed",
+]
+
+
+def _detect_compaction(content: str, prev_usage: dict[str, Any] | None, curr_usage: dict[str, Any] | None) -> bool:
+    """检测是否发生了上下文压缩。
+
+    通过文本关键词匹配和 usage 骤降检测判断。
+    """
+    content_lower = content.lower()
+    if any(signal in content_lower for signal in COMPACT_SIGNALS):
+        return True
+    if prev_usage and curr_usage:
+        prev_used = prev_usage.get("contextUsedTokens") or prev_usage.get("totalTokens", 0)
+        curr_used = curr_usage.get("contextUsedTokens") or curr_usage.get("totalTokens", 0)
+        if isinstance(prev_used, (int, float)) and isinstance(curr_used, (int, float)):
+            if prev_used > 0 and curr_used < prev_used * 0.5:
+                return True
+    return False
 
 
 # 声明式映射表：ACP session_update kind → handler
@@ -282,3 +334,4 @@ to_jsonable = _to_jsonable
 text_from_content = _text_from_content
 format_json = _format_json
 extract_usage = _extract_usage
+extract_prompt_response_usage = extract_prompt_response_usage

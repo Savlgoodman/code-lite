@@ -5,6 +5,7 @@ import "./ContextRing.css";
 
 interface ContextRingProps {
   usage: UsageStats | null;
+  onTokenDetailsClick?: () => void;
 }
 
 function getUsageColor(ratio: number): string {
@@ -13,7 +14,7 @@ function getUsageColor(ratio: number): string {
   return "var(--color-accent, #3182ce)";
 }
 
-export function ContextRing({ usage }: ContextRingProps) {
+export function ContextRing({ usage, onTokenDetailsClick }: ContextRingProps) {
   const tooltipId = useId();
   const used = usage?.contextUsedTokens ?? usage?.totalTokens;
   const total = usage?.contextWindowTokens;
@@ -40,6 +41,7 @@ export function ContextRing({ usage }: ContextRingProps) {
       tabIndex={0}
       aria-describedby={tooltipId}
       aria-label={`上下文使用 ${percent}%`}
+      onClick={onTokenDetailsClick}
     >
       <svg width="24" height="24" viewBox="0 0 24 24">
         {/* 底环 */}

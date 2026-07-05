@@ -566,3 +566,63 @@
     font-size: 13px;
   }
 }
+
+/* Command picker (快捷指令面板) */
+.command-picker {
+  position: relative;
+}
+
+.command-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 100;
+  width: 240px;
+  max-width: min(240px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 7px;
+  border: 1px solid #dfdfdf;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(32, 36, 43, 0.13);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.command-menu-item {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #20242b;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+  transition: background 0.1s ease;
+}
+
+.command-menu-item:hover {
+  background: #f1f1f1;
+}
+
+.command-label {
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 48px;
+}
+
+.command-description {
+  color: #747980;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

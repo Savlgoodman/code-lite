@@ -87,6 +87,20 @@ def _usage_event_payload(update: Any) -> dict[str, Any]:
     return {key: value for key, value in usage.items() if value is not None}
 
 
+def _extract_prompt_response_usage(usage: Any) -> dict[str, Any]:
+    """从 PromptResponse.usage（Usage 对象）中提取完整分项 token 数据。"""
+    result: dict[str, Any] = {
+        "inputTokens": getattr(usage, "input_tokens", None),
+        "outputTokens": getattr(usage, "output_tokens", None),
+        "cachedReadTokens": getattr(usage, "cached_read_tokens", None),
+        "cachedWriteTokens": getattr(usage, "cached_write_tokens", None),
+        "thoughtTokens": getattr(usage, "thought_tokens", None),
+        "totalTokens": getattr(usage, "total_tokens", None),
+        "source": "acp.prompt_response.usage",
+    }
+    return {key: value for key, value in result.items() if value is not None}
+
+
 def _models_payload(session_result: Any) -> dict[str, Any]:
     raw = _to_jsonable(session_result)
     models = raw.get("models") if isinstance(raw, dict) else None
@@ -493,7 +507,16 @@ class CodexAgentAdapter:
                     "type": "agent.run.completed",
                     "conversationId": request.conversation_id,
                     "turnId": request.turn_id,
-                    "usage": client.latest_usage,
+                    # 获取 usage：优先使用 PromptResponse.usage（完整分项），否则 fallback 到 usage_update
+                prompt_usage = getattr(prompt_result, "usage", None)
+                if prompt_usage is not None:
+                    usage_dict = _extract_prompt_response_usage(prompt_usage)
+                    # 合并 usage_update 的 context window 数据
+                    if client.latest_usage:
+                        usage_dict["contextUsedTokens"] = client.latest_usage.get("contextUsedTokens")
+                        usage_dict["contextWindowTokens"] = client.latest_usage.get("contextWindowTokens")
+                else:
+                    usage_dict = client.latest_usage
                     "result": {
                         "stopReason": getattr(prompt_result, "stop_reason", None),
                         "runtime": "codex-acp",
