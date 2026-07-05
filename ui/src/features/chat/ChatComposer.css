@@ -305,6 +305,45 @@
   color: currentColor;
 }
 
+.composer-config-skeleton {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-skeleton-chip {
+  height: 24px;
+  display: inline-block;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, #eceae6 0%, #f7f6f3 46%, #eceae6 100%);
+  background-size: 220% 100%;
+  animation: composer-skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+.composer-skeleton-chip.short {
+  width: 92px;
+}
+
+.composer-skeleton-chip.medium {
+  width: 116px;
+}
+
+.composer-skeleton-chip.tiny {
+  width: 46px;
+}
+
+@keyframes composer-skeleton-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -120% 0;
+  }
+}
+
 .access-mode-menu {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -370,6 +409,16 @@
 
 .send-button:hover {
   background: #333941;
+}
+
+.send-button:disabled {
+  cursor: default;
+  background: #d7d3cd;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.send-button:disabled:hover {
+  background: #d7d3cd;
 }
 
 .composer-status-bar {

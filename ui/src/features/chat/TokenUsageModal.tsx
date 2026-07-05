@@ -28,6 +28,10 @@ function formatNumber(n: number): string {
   return n.toLocaleString();
 }
 
+function modelValue(value: unknown): string {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
 /** 从 messages 中按模型累计 token 用量 */
 function buildModelUsage(messages: ChatMessage[]): ModelUsage[] {
   const map = new Map<string, ModelUsage>();
@@ -37,8 +41,8 @@ function buildModelUsage(messages: ChatMessage[]): ModelUsage[] {
 
     // 从 model 字段提取模型 ID
     const modelInfo = msg.model as Record<string, unknown> | undefined;
-    const modelId = String(modelInfo?.model ?? modelInfo?.runtimeModel ?? "unknown");
-    const modelLabel = String(modelInfo?.label ?? modelId);
+    const modelId = modelValue(modelInfo?.model) || modelValue(modelInfo?.runtimeModel) || "unknown";
+    const modelLabel = modelValue(modelInfo?.label) || (modelId === "unknown" ? "未知模型" : modelId);
 
     const key = modelId;
     if (!map.has(key)) {

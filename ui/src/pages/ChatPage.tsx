@@ -110,6 +110,62 @@ function mergeLoadedSession(loadedSession: Session, cachedSession: Session | und
   };
 }
 
+function buildDefaultConfig(caps: SessionCapabilities): SessionConfig {
+  const defaultMode = caps.modes.find((mode) => mode.isDefault);
+  const accessMode = defaultMode?.id ?? caps.modes[0]?.id ?? "read-only";
+  const reasoningOpt = caps.configOptions.find((option) => option.id === "reasoning_effort" || option.id === "effort");
+  const reasoningEffort = reasoningOpt?.currentValue ? String(reasoningOpt.currentValue) : "medium";
+  const selectedConfig: Record<string, ChatConfigValue> = {};
+  for (const option of caps.configOptions) {
+    if (option.currentValue != null) {
+      selectedConfig[option.id] = option.currentValue;
+    }
+  }
+
+  const currentModel = caps.models.find((model) => model.isCurrent) ?? caps.models[0];
+  let modelFamily = "";
+  if (currentModel) {
+    const familyMatch = currentModel.id.match(/^(.*?)\[/);
+    modelFamily = familyMatch ? familyMatch[1] : currentModel.id;
+  }
+
+  return {
+    accessMode,
+    modelFamily,
+    reasoningEffort,
+    selectedConfig,
+  };
+}
+
+function mergeConfigDefaults(config: SessionConfig | undefined, caps: SessionCapabilities): SessionConfig {
+  const defaults = buildDefaultConfig(caps);
+  if (!config) {
+    return defaults;
+  }
+
+  return {
+    accessMode: config.accessMode || defaults.accessMode,
+    modelFamily: config.modelFamily || defaults.modelFamily,
+    reasoningEffort: config.reasoningEffort || defaults.reasoningEffort,
+    selectedConfig: {
+      ...defaults.selectedConfig,
+      ...config.selectedConfig,
+    },
+  };
+}
+
+function isConfigReady(caps: SessionCapabilities | null, config: SessionConfig | null | undefined): boolean {
+  if (!caps || !config) {
+    return false;
+  }
+  const nextConfig = mergeConfigDefaults(config, caps);
+  const hasRequiredModel = caps.models.length > 0 && Boolean(nextConfig.modelFamily);
+  const hasRequiredMode = caps.modes.length === 0 || Boolean(nextConfig.accessMode);
+  const hasReasoningPicker = caps.configOptions.some((option) => option.id === "reasoning_effort" || option.id === "effort");
+  const hasRequiredReasoning = !hasReasoningPicker || Boolean(nextConfig.reasoningEffort);
+  return hasRequiredModel && hasRequiredMode && hasRequiredReasoning;
+}
+
 export function ChatPage() {
   const initialState = useMemo<StoredState>(() => {
     const session = createDraftSession();
@@ -139,10 +195,14 @@ export function ChatPage() {
   // ─── Per-session 状态：每个会话独立的 capabilities 和 config ───
   const [capabilitiesBySession, setCapabilitiesBySession] = useState<Record<string, SessionCapabilities>>({});
   const [configBySession, setConfigBySession] = useState<Record<string, SessionConfig>>({});
+  const [configLoadingBySession, setConfigLoadingBySession] = useState<Record<string, boolean>>({});
 
   // ─── 派生：当前会话的 capabilities 和 config ───
   const currentCapabilities = capabilitiesBySession[activeSessionId] ?? null;
   const currentConfig = configBySession[activeSessionId] ?? null;
+  const isCurrentConfigReady = isConfigReady(currentCapabilities, currentConfig);
+  const isCurrentConfigLoading =
+    activeView === "chat" && ((configLoadingBySession[activeSessionId] ?? false) || !isCurrentConfigReady);
 
   // ─── 同步 state 到 ref（确保 sendMessage 读取到最新值）───
   useEffect(() => {
@@ -274,8 +334,9 @@ export function ChatPage() {
   useEffect(() => {
     // draft session 也通过 __probe__ 探测 capabilities
     // 真实会话的 agent 来自 session.agent 字段
-    if (!activeSessionId) return;
+    if (!activeSessionId || activeView !== "chat") return;
     let cancelled = false;
+    setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: true }));
 
     async function loadCapabilities() {
       try {
@@ -284,14 +345,13 @@ export function ChatPage() {
         if (existingCaps && activeSessionId !== DRAFT_SESSION_ID) {
           // capabilities 已缓存；使用函数式更新确保不覆盖用户的选择
           setConfigBySession((prev) => {
-            // 如果 config 已存在，不覆盖（保留用户的选择）
-            if (prev[activeSessionId]) {
-              return prev;
-            }
-            // 否则设置默认值
-            const defaultConfig = buildDefaultConfig(existingCaps);
-            return { ...prev, [activeSessionId]: defaultConfig };
+            const result = { ...prev, [activeSessionId]: mergeConfigDefaults(prev[activeSessionId], existingCaps) };
+            configBySessionRef.current = result;
+            return result;
           });
+          if (!cancelled) {
+            setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
+          }
           return;
         }
 
@@ -304,12 +364,11 @@ export function ChatPage() {
 
         // 初始化 config（仅当该会话没有 config 时）— 使用函数式更新确保不覆盖
         setConfigBySession((prev) => {
-          if (prev[activeSessionId]) {
-            return prev;  // config 已存在，不覆盖
-          }
-          const defaultConfig = buildDefaultConfig(caps);
-          return { ...prev, [activeSessionId]: defaultConfig };
+          const result = { ...prev, [activeSessionId]: mergeConfigDefaults(prev[activeSessionId], caps) };
+          configBySessionRef.current = result;
+          return result;
         });
+        setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
       } catch (error) {
         console.error("Failed to load session capabilities:", error);
         // ... fallback 逻辑（保留原有行为，但写入 capabilitiesBySession 而非全局 state）
@@ -327,7 +386,10 @@ export function ChatPage() {
         const runtime = runtimeSettings.runtimes.find(
           (item) => item.adapter === (fallbackAgentId || runtimeSettings.activeAdapter)
         );
-        if (!runtime) return;
+        if (!runtime) {
+          setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
+          return;
+        }
 
         setActiveAgent({
           configMode: runtime.configMode,
@@ -381,49 +443,15 @@ export function ChatPage() {
 
         // 初始化 config（仅当该会话没有 config 时）— 使用函数式更新确保不覆盖
         setConfigBySession((prev) => {
-          if (prev[activeSessionId]) {
-            return prev;  // config 已存在，不覆盖
-          }
-          const defaultConfig = buildDefaultConfig(fallbackCaps);
-          return { ...prev, [activeSessionId]: defaultConfig };
+          const result = { ...prev, [activeSessionId]: mergeConfigDefaults(prev[activeSessionId], fallbackCaps) };
+          configBySessionRef.current = result;
+          return result;
         });
+        setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
       } catch (fallbackError) {
         console.error("Fallback model loading also failed:", fallbackError);
+        setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
       }
-    }
-
-    /** 从 capabilities 中提取默认 config */
-    function buildDefaultConfig(caps: SessionCapabilities): SessionConfig {
-      // 提取权限模式默认值
-      const defaultMode = caps.modes.find((m) => m.isDefault);
-      const accessMode = defaultMode?.id ?? caps.modes[0]?.id ?? "read-only";
-
-      // 提取推理强度默认值
-      const reasoningOpt = caps.configOptions.find((o) => o.id === "reasoning_effort" || o.id === "effort");
-      const reasoningEffort = reasoningOpt?.currentValue ? String(reasoningOpt.currentValue) : "medium";
-
-      // 提取其他 configOptions 默认值
-      const selectedConfig: Record<string, ChatConfigValue> = {};
-      for (const opt of caps.configOptions) {
-        if (opt.currentValue != null) {
-          selectedConfig[opt.id] = opt.currentValue;
-        }
-      }
-
-      // 提取模型族
-      const currentModel = caps.models.find((m) => m.isCurrent) ?? caps.models[0];
-      let modelFamily = "";
-      if (currentModel) {
-        const familyMatch = currentModel.id.match(/^(.*?)\[/);
-        modelFamily = familyMatch ? familyMatch[1] : currentModel.id;
-      }
-
-      return {
-        modelFamily,
-        accessMode,
-        reasoningEffort,
-        selectedConfig,
-      };
     }
 
     void loadCapabilities();
@@ -975,7 +1003,10 @@ export function ChatPage() {
 
   async function sendMessage() {
     const text = draft.trim();
-    if (!text || activeTurnId) {
+    if (!text || activeTurnId || isCurrentConfigLoading || !isCurrentConfigReady) {
+      return;
+    }
+    if (!currentCapabilities) {
       return;
     }
 
@@ -994,8 +1025,8 @@ export function ChatPage() {
 
     try {
       // 从 ref 读取最新的 config（避免闭包捕获旧值）
-      const cfg = configBySessionRef.current[sessionId] ?? currentConfig;
-      const models = currentCapabilities?.models ?? [];
+      const cfg = mergeConfigDefaults(configBySessionRef.current[sessionId] ?? currentConfig ?? undefined, currentCapabilities);
+      const models = currentCapabilities.models;
 
       // 解析模型 ID：
       // - Codex 用 "模型族[推理强度]" 格式（模型 id 本身含括号）
@@ -1141,6 +1172,7 @@ export function ChatPage() {
               activeTurnId={isActiveSessionRunning ? activeTurnId : null}
               agent={sessionAgent}
               commands={currentCapabilities?.commands ?? []}
+              configLoading={isCurrentConfigLoading}
               configOptions={currentCapabilities?.configOptions ?? []}
               contextUsage={contextUsage}
               draft={draft}
@@ -1161,6 +1193,7 @@ export function ChatPage() {
               onStopTurn={() => void stopCurrentTurn()}
               pendingApproval={activePendingApproval}
               reasoningEffort={currentConfig?.reasoningEffort ?? ""}
+              sendDisabled={isCurrentConfigLoading || !isCurrentConfigReady}
               selectedConfig={currentConfig?.selectedConfig ?? {}}
               selectedModelFamily={currentConfig?.modelFamily ?? ""}
               sessionId={activeSession.id}

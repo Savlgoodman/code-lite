@@ -21,7 +21,9 @@ interface ChatWorkspaceProps {
   commands: SlashCommand[];
   configOptions: SessionConfigOption[];
   contextUsage: UsageStats | null;
+  configLoading: boolean;
   draft: string;
+  sendDisabled: boolean;
   isRunning: boolean;
   messages: ChatMessage[];
   models: SessionModel[];
@@ -50,7 +52,9 @@ export function ChatWorkspace({
   commands,
   configOptions,
   contextUsage,
+  configLoading,
   draft,
+  sendDisabled,
   isRunning,
   messages,
   models,
@@ -86,8 +90,10 @@ export function ChatWorkspace({
         agent={agent}
         commands={commands}
         configOptions={configOptions}
+        configLoading={configLoading}
         contextUsage={contextUsage}
         draft={draft}
+        sendDisabled={sendDisabled}
         messages={messages}
         modes={modes}
         models={models}

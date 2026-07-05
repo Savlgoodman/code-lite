@@ -64,6 +64,7 @@ interface ChatComposerProps {
   agent?: AgentSummary | null;
   commands: SlashCommand[];
   configOptions: SessionConfigOption[];
+  configLoading: boolean;
   contextUsage: UsageStats | null;
   draft: string;
   messages: ChatMessage[];
@@ -79,6 +80,7 @@ interface ChatComposerProps {
   onStopTurn: () => void;
   pendingApproval: ApprovalRequest | null;
   reasoningEffort: string;
+  sendDisabled: boolean;
   selectedConfig: Record<string, ChatConfigValue>;
   selectedModelFamily: string;
 }
@@ -89,6 +91,7 @@ export function ChatComposer({
   agent,
   commands,
   configOptions,
+  configLoading,
   contextUsage,
   draft,
   messages,
@@ -104,6 +107,7 @@ export function ChatComposer({
   onStopTurn,
   pendingApproval,
   reasoningEffort,
+  sendDisabled,
   selectedConfig,
   selectedModelFamily,
 }: ChatComposerProps) {
@@ -337,7 +341,9 @@ export function ChatComposer({
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                onSendMessage();
+                if (!sendDisabled) {
+                  onSendMessage();
+                }
               }
             }}
             placeholder="描述电脑问题，或要求继续变更"
@@ -379,8 +385,11 @@ export function ChatComposer({
                   </div>
                 ) : null}
               </div>
-              {/* 权限模式 */}
-              {hasModes && (
+              {configLoading ? (
+                <div className="composer-config-skeleton" aria-label="正在加载会话配置">
+                  <span className="composer-skeleton-chip short" />
+                </div>
+              ) : hasModes ? (
                 <div className="access-mode-picker" ref={accessMenuRef}>
                   <button
                     aria-expanded={isAccessMenuOpen}
@@ -412,7 +421,7 @@ export function ChatComposer({
                     </div>
                   ) : null}
                 </div>
-              )}
+              ) : null}
             </div>
 
             <div className="composer-right">
@@ -423,7 +432,12 @@ export function ChatComposer({
               />
 
               {/* 底部状态栏：模型族 + 推理强度 */}
-              {hasAnyControls ? (
+              {configLoading ? (
+                <div className="composer-config-skeleton" aria-label="正在加载模型和思考强度">
+                  <span className="composer-skeleton-chip medium" />
+                  <span className="composer-skeleton-chip tiny" />
+                </div>
+              ) : hasAnyControls ? (
                 <div className="composer-status-bar">
                   {(hasModelPicker || hasReasoningPicker) && (
                     <div className="status-combined-picker" ref={statusMenuRef}>
@@ -516,6 +530,7 @@ export function ChatComposer({
 
               <button
                 className={`send-button ${activeTurnId ? "stop" : ""}`}
+                disabled={!activeTurnId && sendDisabled}
                 onClick={activeTurnId ? onStopTurn : onSendMessage}
                 aria-label={activeTurnId ? "停止" : "发送"}
               >
