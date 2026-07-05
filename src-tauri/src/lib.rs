@@ -3,7 +3,12 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(BackendState::default())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![ensure_backend, shutdown_app])
+        .invoke_handler(tauri::generate_handler![
+            ensure_backend,
+            minimize_window,
+            shutdown_app,
+            toggle_maximize_window
+        ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 if let Some(state) = window.try_state::<BackendState>() {
@@ -160,6 +165,30 @@ fn ensure_backend(
     }
 
     Err("backend did not start within 15 seconds".to_string())
+}
+
+#[tauri::command]
+fn minimize_window(window: tauri::Window) -> Result<(), String> {
+    window
+        .minimize()
+        .map_err(|error| format!("failed to minimize window: {error}"))
+}
+
+#[tauri::command]
+fn toggle_maximize_window(window: tauri::Window) -> Result<(), String> {
+    let is_maximized = window
+        .is_maximized()
+        .map_err(|error| format!("failed to read window state: {error}"))?;
+
+    if is_maximized {
+        window
+            .unmaximize()
+            .map_err(|error| format!("failed to unmaximize window: {error}"))
+    } else {
+        window
+            .maximize()
+            .map_err(|error| format!("failed to maximize window: {error}"))
+    }
 }
 
 #[tauri::command]

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Minus, PanelLeft, Square, X } from "lucide-react";
+import { Minus, PanelLeft, Square, X } from "lucide-react";
 
 import "./AppTitlebar.css";
 
@@ -8,15 +8,13 @@ async function handleWindowAction(action: "minimize" | "maximize" | "close") {
     return;
   }
 
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  const currentWindow = getCurrentWindow();
+  const { invoke } = await import("@tauri-apps/api/core");
 
   if (action === "minimize") {
-    await currentWindow.minimize();
+    await invoke("minimize_window");
   } else if (action === "maximize") {
-    await currentWindow.toggleMaximize();
+    await invoke("toggle_maximize_window");
   } else {
-    const { invoke } = await import("@tauri-apps/api/core");
     await invoke("shutdown_app");
   }
 }
@@ -24,15 +22,10 @@ async function handleWindowAction(action: "minimize" | "maximize" | "close") {
 export function AppTitlebar() {
   return (
     <header className="titlebar" data-tauri-drag-region>
+      <div className="titlebar-drag-surface" data-tauri-drag-region aria-hidden="true" />
       <div className="titlebar-left">
         <button className="icon-button" aria-label="侧边栏">
           <PanelLeft size={16} />
-        </button>
-        <button className="icon-button muted" aria-label="后退">
-          <ArrowLeft size={16} />
-        </button>
-        <button className="icon-button muted" aria-label="前进">
-          <ArrowRight size={16} />
         </button>
         <nav className="title-menu" aria-label="应用菜单">
           <button>文件</button>

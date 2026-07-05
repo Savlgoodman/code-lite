@@ -1,8 +1,9 @@
 ﻿.titlebar {
+  position: relative;
   height: 34px;
   flex: 0 0 34px;
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) auto minmax(210px, 1fr);
+  grid-template-columns: minmax(280px, auto) minmax(120px, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 0 10px;
@@ -12,9 +13,18 @@
   user-select: none;
 }
 
+.titlebar-drag-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  -webkit-app-region: drag;
+}
+
 .titlebar-left,
 .window-controls,
 .title-menu {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
 }
@@ -25,8 +35,15 @@
 }
 
 .titlebar-center {
+  position: relative;
+  z-index: 1;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: #767b82;
   font-size: 12px;
+  pointer-events: none;
 }
 
 .title-menu {
@@ -75,7 +92,7 @@
 
 @media (max-width: 980px) {
   .titlebar {
-    grid-template-columns: minmax(260px, 1fr) auto minmax(160px, 1fr);
+    grid-template-columns: minmax(220px, auto) minmax(80px, 1fr) auto;
   }
 
   .title-menu button {
