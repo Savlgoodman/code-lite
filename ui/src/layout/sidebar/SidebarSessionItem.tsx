@@ -1,4 +1,5 @@
 import { Archive } from "lucide-react";
+import { useState, type FocusEvent } from "react";
 
 import { AgentIcon } from "../../components/AgentIcon";
 import { formatTimeLabel } from "../../lib/formatters";
@@ -18,11 +19,37 @@ export function SidebarSessionItem({
   onSelect,
   session
 }: SidebarSessionItemProps) {
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
+
+  function selectSession() {
+    setConfirmingArchive(false);
+    onSelect();
+  }
+
+  function handleArchiveClick() {
+    if (!confirmingArchive) {
+      setConfirmingArchive(true);
+      return;
+    }
+
+    setConfirmingArchive(false);
+    onArchive();
+  }
+
+  function handleBlur(event: FocusEvent<HTMLDivElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      setConfirmingArchive(false);
+    }
+  }
+
   return (
-    <div className={`sidebar-session-row ${active ? "active" : ""}`}>
+    <div
+      className={`sidebar-session-row ${active ? "active" : ""} ${confirmingArchive ? "confirming-archive" : ""}`}
+      onBlur={handleBlur}
+    >
       <button
         className="sidebar-session-select"
-        onClick={onSelect}
+        onClick={selectSession}
         title={session.title}
         type="button"
       >
@@ -31,13 +58,13 @@ export function SidebarSessionItem({
         <span className="sidebar-session-time">{formatTimeLabel(session.updatedAt)}</span>
       </button>
       <button
-        aria-label={`归档对话：${session.title}`}
+        aria-label={confirmingArchive ? `确认归档对话：${session.title}` : `归档对话：${session.title}`}
         className="sidebar-session-archive"
-        onClick={onArchive}
-        title="归档对话"
+        onClick={handleArchiveClick}
+        title={confirmingArchive ? "确认归档" : "归档对话"}
         type="button"
       >
-        <Archive size={15} />
+        {confirmingArchive ? <span>归档</span> : <Archive size={15} />}
       </button>
     </div>
   );

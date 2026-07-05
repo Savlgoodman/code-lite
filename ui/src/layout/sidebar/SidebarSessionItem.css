@@ -74,13 +74,15 @@
 }
 
 .sidebar-session-row:hover .sidebar-session-time,
-.sidebar-session-row:focus-within .sidebar-session-time {
+.sidebar-session-row:focus-within .sidebar-session-time,
+.sidebar-session-row.confirming-archive .sidebar-session-time {
   opacity: 0;
 }
 
 .sidebar-session-row:hover .sidebar-session-archive,
 .sidebar-session-row:focus-within .sidebar-session-archive,
-.sidebar-session-archive:focus-visible {
+.sidebar-session-archive:focus-visible,
+.sidebar-session-row.confirming-archive .sidebar-session-archive {
   opacity: 1;
   pointer-events: auto;
 }
@@ -90,4 +92,24 @@
   background: rgba(30, 35, 42, 0.08);
   color: #20252c;
   outline: 0;
+}
+
+.sidebar-session-row.confirming-archive .sidebar-session-archive {
+  width: 42px;
+  border-radius: 7px;
+  background: #c83b32;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.sidebar-session-row.confirming-archive .sidebar-session-archive:hover,
+.sidebar-session-row.confirming-archive .sidebar-session-archive:focus-visible {
+  background: #b02f27;
+  color: #fff;
+}
+
+.sidebar-session-archive span {
+  line-height: 1;
+  white-space: nowrap;
 }
