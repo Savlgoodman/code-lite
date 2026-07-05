@@ -100,6 +100,15 @@ def _map_agent_thought_chunk(update: Any, ctx: EventContext) -> dict[str, Any]:
     return event
 
 
+def _map_session_info_update(update: Any, ctx: EventContext) -> dict[str, Any] | None:
+    title = str(getattr(update, "title", "") or "").strip()
+    if not title:
+        return None
+    event = _base_event("agent.session.updated", ctx)
+    event["title"] = title
+    return event
+
+
 def _map_tool_call(update: Any, ctx: EventContext) -> dict[str, Any]:
     tool_call_id = str(getattr(update, "tool_call_id", None) or f"tool-{uuid.uuid4().hex}")
     name = str(getattr(update, "title", None) or getattr(update, "kind", None) or "tool")
@@ -248,6 +257,7 @@ def _detect_compaction(content: str, prev_usage: dict[str, Any] | None, curr_usa
 ACP_EVENT_MAP: dict[str, Callable[[Any, EventContext], dict[str, Any] | None]] = {
     "agent_message_chunk": _map_agent_message_chunk,
     "agent_thought_chunk": _map_agent_thought_chunk,
+    "session_info_update": _map_session_info_update,
     "tool_call": _map_tool_call,
     "tool_call_update": _map_tool_call_update,
 }

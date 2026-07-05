@@ -916,6 +916,18 @@ export function ChatPage() {
       return;
     }
 
+    if (event.type === "agent.session.updated") {
+      const title = event.title?.trim();
+      if (event.session || title) {
+        updateSession(targetSessionId, (session) => event.session ?? {
+          ...session,
+          title: title ?? session.title,
+          updatedAt: Date.now(),
+        });
+      }
+      return;
+    }
+
     if (event.type === "agent.run.completed") {
       flushQueuedMessageDeltas();
       const completedAt = Date.now();

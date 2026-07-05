@@ -419,6 +419,14 @@ export type AgentEvent =
       context: UsageStats;
     }
   | {
+      type: "agent.session.updated";
+      conversationId: string;
+      turnId: string;
+      session?: Session;
+      title?: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
       type: "agent.run.completed";
       conversationId: string;
       turnId: string;

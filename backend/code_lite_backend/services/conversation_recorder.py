@@ -146,6 +146,10 @@ class ConversationRecorder:
                     **(assistant.get("usage") or {}),
                     **context_data,
                 }
+        elif event_type == "agent.session.updated":
+            title = str(event.get("title") or "").strip()
+            if title:
+                return self._update_active_session(conversation_id, {"title": title})
         elif event_type == "agent.tool.started":
             self._upsert_tool_call(
                 assistant,
