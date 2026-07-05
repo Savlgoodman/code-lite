@@ -381,7 +381,7 @@ interface TokenUsageModalProps {
 │  │ Cache Read         8,000   │  │
 │  │ Cache Write        2,000   │  │
 │  │ Thought Tokens     1,500   │  │
-│  └────────────────────────────┘  │
+│  ────────────────────────────┘  │
 │                                  │
 │  ─────────────────────────────   │
 │                                  │
@@ -459,95 +459,234 @@ Token 分项数据来源：
 
 ### 5.1 目标
 
-在输入框左下角的 `+` 按钮（原 Paperclip 图标位置）点击后弹出快捷指令面板，展示当前 runtime 支持的斜杠命令。
+在输入框左下角的 `+` 按钮（原 Paperclip 图标位置）点击后弹出快捷指令面板，展示**当前 agent runtime 支持的斜杠命令**。
+
+**核心设计原则**：快捷命令必须跟随 agent 配置，和模型列表、思考强度一样作为 `SessionCapabilities` 的一部分，随 session 动态变化。不同 agent runtime（Codex / Claude Code / OpenCode）支持的命令不同，不能硬编码。
 
 ### 5.2 交互设计
 
 ```
 用户点击 + 按钮
   → 弹出快捷指令面板（向上弹出，类似 access mode picker）
-  → 面板内容：
-    - 检测到的可用命令（来自 available_commands_update 事件）
-    - 每个命令显示图标 + 名称 + 描述
-    - 点击命令 → 将 "/command" 填充到输入框
+  → 面板内容跟随当前 agent runtime：
+    - Codex 会话 → 显示 Codex 的命令列表
+    - Claude Code 会话 → 显示 Claude Code 的命令列表
+  → 每个命令显示图标 + 名称 + 描述
+  → 点击命令 → 将 "/command" 填充到输入框
 ```
 
-**面板布局**：
+**面板布局**（以 Codex 为例）：
 
 ```
-─────────────────────────────┐
-│  ⏱  压缩    压缩此线程的上下文    │
-│  🎯  目标    设置或清除任务目标    │
-│  ℹ️   状态    显示会话配置和状态    │
-│  📋  审查    审查未暂存的更改      │
-│    MCP     显示 MCP 服务器状态   │
-│  💬  反馈    发送有关此聊天的反馈   │
-─────────────────────────────┘
+─────────────────────────────────────────────┐
+│    压缩      压缩此线程的上下文              │
+│    目标      设置或清除任务目标              │
+│    状态      显示会话配置和状态              │
+│    审查      审查未暂存的更改                │
+│    MCP      显示 MCP 服务器状态              │
+│    Skills   列出可用技能                    │
+│    登出      退出登录                        │
+└─────────────────────────────────────────────┘
 ```
 
-### 5.3 命令来源
+### 5.3 数据流设计：跟随 SessionCapabilities
 
-有两种方式获取可用命令：
+#### 5.3.1 架构对比
 
-#### 方式 A：静态命令列表（推荐，快速实现）
+**错误方案**（硬编码命令列表）：
+```
+前端根据 agent.id 判断 → 使用预定义的 CLAUDE_CODE_COMMANDS / CODEX_COMMANDS
+```
+问题：命令会随 runtime 版本变化，硬编码容易过期。
 
-根据 ACP runtime 类型提供预定义的命令列表：
+**正确方案**（跟随 agent 配置）：
+```
+ACP session/new 返回 SessionCapabilities
+  → 包含 modes / models / configOptions / commands（新增）
+  → 前端根据 commands 渲染面板
+  → 切换 agent 时自动更新命令列表
+```
 
-```typescript
-// ui/src/features/chat/slashCommands.ts (新建)
+这和模型选择器、推理强度的数据流完全一致：
+```
+ACP session/new
+  → NewSessionResponse { modes, models, configOptions }
+  → build_session_capabilities() → SessionCapabilities
+  → 前端收到 SessionCapabilities → 渲染所有 UI 控件
+```
 
-export interface SlashCommand {
-  id: string;
-  icon: string;        // lucide-react 图标名
-  label: string;       // 中文标签
-  description: string; // 中文描述
-  command: string;     // 实际发送的命令文本
-  availableIn?: string[]; // 可选，限制在哪些 runtime 中显示
+#### 5.3.2 数据来源
+
+ACP 协议通过 `session/update` → `available_commands_update` 事件推送可用命令：
+
+```python
+# ACP SDK schema.py:3544-3588
+class AvailableCommand(BaseModel):
+    name: str                          # 命令名称（如 "compact"）
+    description: str                   # 人类可读描述
+    input: Optional[AvailableCommandInput]  # 输入规格（可选）
+
+class AvailableCommandsUpdate(BaseModel):
+    session_update: "available_commands_update"
+    available_commands: List[AvailableCommand]
+```
+
+Runtime 在 session 建立后通过 `session/update` 推送命令列表。
+
+#### 5.3.3 后端改动：提取 commands 到 SessionCapabilities
+
+**文件**: `backend/code_lite_backend/schemas/session.py`
+
+扩展 `SessionCapabilities`，增加 `commands` 字段：
+
+```python
+@dataclass(frozen=True)
+class SlashCommand:
+    """斜杠命令定义"""
+    id: str        # 命令 ID（如 "compact"）
+    label: str     # 中文展示名
+    description: str  # 中文描述
+    command: str   # 实际命令文本（如 "/compact"）
+
+@dataclass(frozen=True)
+class SessionCapabilities:
+    agent: SessionAgentInfo
+    modes: list[SessionMode]
+    models: list[SessionModel]
+    config_options: list[SessionConfigOption]
+    commands: list[SlashCommand] = field(default_factory=list)  # 新增
+```
+
+更新 `to_dict()` 方法：
+
+```python
+def to_dict(self) -> dict[str, Any]:
+    return {
+        "agent": asdict(self.agent),
+        "modes": [asdict(m) for m in self.modes],
+        "models": [asdict(m) for m in self.models],
+        "configOptions": [...],  # 保持不变
+        "commands": [asdict(c) for c in self.commands],  # 新增
+    }
+```
+
+**文件**: `backend/code_lite_backend/api/routes/sessions.py`
+
+在 `build_session_capabilities()` 中增加 commands 解析：
+
+```python
+def build_session_capabilities(...) -> SessionCapabilities:
+    # ... 现有逻辑 ...
+
+    # 新增：从 ACP 可用命令构建命令列表
+    commands = _build_commands(session_result, adapter_kind)
+
+    return SessionCapabilities(
+        agent=...,
+        modes=modes,
+        models=models,
+        config_options=config_options,
+        commands=commands,  # 新增
+    )
+```
+
+`_build_commands()` 函数根据 ACP 返回的命令列表，映射为中文展示：
+
+```python
+# 命令 ID → 中文映射表
+_COMMAND_LABELS: dict[str, str] = {
+    "compact": "压缩",
+    "goal": "目标",
+    "init": "初始化",
+    "resume": "恢复",
+    "review": "审查",
+    "context": "上下文",
+    "mcp": "MCP",
+    "skills": "Skills",
+    "status": "状态",
+    "logout": "登出",
 }
 
-export const CLAUDE_CODE_COMMANDS: SlashCommand[] = [
-  { id: 'compact', icon: 'Compress', label: '压缩', description: '压缩此线程的上下文', command: '/compact' },
-  { id: 'goal', icon: 'Target', label: '目标', description: '设置或清除任务目标', command: '/goal' },
-  { id: 'init', icon: 'FileText', label: '初始化', description: '初始化 CLAUDE.md 文件', command: '/init' },
-  { id: 'resume', icon: 'Play', label: '恢复', description: '恢复 Claude Code 会话', command: '/resume' },
-  { id: 'review', icon: 'Code', label: '审查', description: '审查未暂存的更改', command: '/review' },
-  { id: 'context', icon: 'Info', label: '上下文', description: '显示上下文使用情况', command: '/context' },
-];
+_COMMAND_DESCRIPTIONS: dict[str, str] = {
+    "compact": "压缩此线程的上下文",
+    "goal": "设置或清除任务目标",
+    "init": "初始化 CLAUDE.md 文件",
+    "resume": "恢复会话",
+    "review": "审查未暂存的更改",
+    "context": "显示上下文使用情况",
+    "mcp": "显示 MCP 服务器状态",
+    "skills": "列出可用技能",
+    "status": "显示会话配置和状态",
+    "logout": "退出登录",
+}
 
-export const CODEX_COMMANDS: SlashCommand[] = [
-  { id: 'compact', icon: 'Compress', label: '压缩', description: '压缩此线程的上下文', command: '/compact' },
-  { id: 'goal', icon: 'Target', label: '目标', description: '设置或清除任务目标', command: '/goal' },
-  { id: 'mcp', icon: 'Plug', label: 'MCP', description: '显示 MCP 服务器状态', command: '/mcp' },
-  { id: 'skills', icon: 'Zap', label: 'Skills', description: '列出可用技能', command: '/skills' },
-  { id: 'status', icon: 'Info', label: '状态', description: '显示会话配置和状态', command: '/status' },
-  { id: 'review', icon: 'Code', label: '审查', description: '审查未暂存的更改', command: '/review' },
-  { id: 'logout', icon: 'LogOut', label: '登出', description: '退出登录', command: '/logout' },
-];
+def _build_commands(session_result: Any, adapter_kind: str) -> list[SlashCommand]:
+    """从 session_result 中提取可用命令列表"""
+    raw_commands = extract_commands_from_session_result(session_result)
 
-export const OPENCODE_COMMANDS: SlashCommand[] = [
-  { id: 'compact', icon: 'Compress', label: '压缩', description: '压缩当前会话', command: '/compact' },
-];
+    commands = []
+    for cmd in raw_commands:
+        cmd_name = cmd.get("name", "")
+        commands.append(SlashCommand(
+            id=cmd_name,
+            label=_COMMAND_LABELS.get(cmd_name, cmd_name),
+            description=_COMMAND_DESCRIPTIONS.get(
+                cmd_name, cmd.get("description", "")
+            ),
+            command=f"/{cmd_name}",
+        ))
+    return commands
 ```
 
-#### 方式 B：动态命令发现（进阶，后续实现）
+**文件**: `backend/code_lite_backend/agents/acp/capabilities.py`
 
-监听 ACP `available_commands_update` 事件，动态获取 runtime 支持的命令列表。
+新增 `parse_commands_from_session_result()` 函数，从 ACP session/new 结果或 `available_commands_update` 事件中提取命令列表。
+
+#### 5.3.4 前端类型扩展
+
+**文件**: `ui/src/types.ts`
 
 ```typescript
-// 在 AcpClientHandler 中处理
-if kind == "available_commands_update":
-    commands = update.get("availableCommands", [])
-    await self._put({
-        "type": "agent.commands.updated",
-        "commands": commands,
-    })
+// 新增 SlashCommand 类型
+export interface SlashCommand {
+  id: string;
+  label: string;
+  description: string;
+  command: string;
+}
+
+// 扩展 SessionCapabilities
+export interface SessionCapabilities {
+  agent: SessionAgentInfo;
+  modes: SessionMode[];
+  models: SessionModel[];
+  configOptions: SessionConfigOption[];
+  commands: SlashCommand[];  // 新增：跟随 agent 配置的快捷命令
+}
 ```
 
-前端根据 `agent.commands.updated` 事件更新可用命令列表。
-
-### 5.4 ChatComposer 改动
+#### 5.3.5 ChatComposer Props 扩展
 
 **文件**: `ui/src/features/chat/ChatComposer.tsx`
+
+`ChatComposerProps` 增加 `commands` prop（从 SessionCapabilities 透传）：
+
+```typescript
+interface ChatComposerProps {
+  // ... 现有 props ...
+  commands: SlashCommand[];  // 新增：当前 agent 支持的快捷命令
+}
+```
+
+数据流与 models/modes 一致：
+```
+ChatPage
+  → sessionCapabilities.commands
+  → <ChatComposer commands={commands} />
+  → + 按钮点击 → 渲染命令面板
+```
+
+### 5.4 ChatComposer 改动
 
 #### 5.4.1 附件按钮改为 + 图标
 
@@ -596,15 +735,14 @@ const handleCommandSelect = (command: SlashCommand) => {
 #### 5.4.3 命令面板 UI
 
 ```tsx
-{isCommandMenuOpen && (
+{isCommandMenuOpen && commands.length > 0 && (
   <div className="command-menu" ref={commandMenuRef}>
-    {availableCommands.map(cmd => (
+    {commands.map(cmd => (
       <button
         key={cmd.id}
         className="command-menu-item"
         onClick={() => handleCommandSelect(cmd)}
       >
-        <Icon name={cmd.icon} size={16} />
         <span className="command-label">{cmd.label}</span>
         <span className="command-description">{cmd.description}</span>
       </button>
@@ -615,7 +753,7 @@ const handleCommandSelect = (command: SlashCommand) => {
 
 ### 5.5 斜杠命令自动触发（可选增强）
 
-在 textarea 的 `onKeyDown` 或 `onInput` 中检测 `/` 输入：
+在 textarea 的 `onInput` 中检测 `/` 输入：
 
 ```typescript
 const handleTextAreaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -687,15 +825,18 @@ const handleTextAreaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 ┌─────────────────────────────────────────────────────────────┐
 │                      用户交互层                               │
 │                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  ──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
 │  │ + 按钮       │  │ ContextRing  │  │ /compact 输入     │  │
 │  │ → 命令面板   │  │ → Token 弹窗 │  │ → 压缩触发        │  │
+│  │ (跟随 agent) │  │              │  │                  │  │
 │  ──────────────┘  └──────────────┘  └──────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                             │
-┌───────────────────────────┴─────────────────────────────────┐
+───────────────────────────┴─────────────────────────────────┐
 │                      后端处理层                               │
 │                                                             │
+│  session.py: SessionCapabilities 增加 commands 字段            │
+│  sessions.py: _build_commands() 从 ACP 提取命令列表            │
 │  adapter.py: 读取 PromptResponse.usage → 分项 token 数据      │
 │  mapper.py: 压缩检测逻辑 → compaction 标记                    │
 │  recorder.py: 写入 messages.json（自动包含新增字段）            │
@@ -705,6 +846,8 @@ const handleTextAreaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 │                      ACP Runtime                             │
 │                                                             │
 │  Codex / Claude Code                                        │
+│  → session/new → SessionCapabilities { modes, models,        │
+│                  configOptions, commands }                    │
 │  → PromptResponse.usage (分项 token)                          │
 │  → usage_update (context window)                             │
 │  → available_commands_update (可用命令)                       │
@@ -714,16 +857,19 @@ const handleTextAreaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 
 ### 6.2 向后兼容策略
 
-- 所有新增字段都是 `Optional`，不影响现有功能
+- 所有新增字段都是 `Optional` 或有默认值，不影响现有功能
+- `SessionCapabilities.commands` 默认空列表，旧版 ACP runtime 不返回命令时不显示面板
 - 如果 ACP agent 不返回 `PromptResponse.usage`，fallback 到现有的 `usage_update` 数据
 - messages.json 中旧的 usage 格式（只有 3 个字段）仍然有效
 - 前端 TokenUsageModal 在分项数据不存在时只显示 context window 信息
+- 命令面板在 `commands.length === 0` 时不渲染
 
 ### 6.3 性能考量
 
 - `PromptResponse.usage` 只在 turn 结束时返回一次，不影响流式性能
 - 压缩检测是纯文本匹配，开销可忽略
-- 命令面板使用静态列表，无需额外网络请求
+- 命令列表从 session/new 一次性获取，无需额外网络请求
+- 命令面板是纯前端渲染，无性能影响
 
 ---
 
@@ -733,6 +879,9 @@ const handleTextAreaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 
 | 文件 | 改动 |
 |------|------|
+| `backend/.../schemas/session.py` | 新增 `SlashCommand` 类型，扩展 `SessionCapabilities` 增加 `commands` 字段 |
+| `backend/.../api/routes/sessions.py` | `_build_commands()` 从 ACP 提取命令列表，集成到 `build_session_capabilities()` |
+| `backend/.../agents/acp/capabilities.py` | 新增 `parse_commands_from_session_result()` |
 | `backend/.../agents/acp/mapper.py` | 扩展 `UsageSnapshot`，新增 `extract_prompt_response_usage()`，新增压缩检测 |
 | `backend/.../agents/acp/adapter.py` | 读取 `prompt_result.usage`，合并分项 + context window 数据 |
 | `backend/.../agents/codex/adapter.py` | 同步 adapter.py 的改动 |
@@ -742,15 +891,14 @@ const handleTextAreaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 
 | 文件 | 改动 |
 |------|------|
-| `ui/src/types.ts` | 扩展 `UsageStats` 接口，新增分项字段 |
+| `ui/src/types.ts` | 扩展 `UsageStats` 接口，新增 `SlashCommand` 类型，扩展 `SessionCapabilities` |
 | `ui/src/features/chat/ContextRing.tsx` | 新增 `onClick` 回调 prop，添加 clickable 样式 |
-| `ui/src/features/chat/TokenUsageModal.tsx` | **新建** — Token 详情弹窗组件 |
-| `ui/src/features/chat/slashCommands.ts` | **新建** — 快捷命令定义 |
-| `ui/src/features/chat/ChatComposer.tsx` | Paperclip → Plus 图标，命令面板，TokenModal 集成 |
-| `ui/src/features/chat/ChatComposer.css` | 命令面板样式 |
 | `ui/src/features/chat/ContextRing.css` | clickable 状态样式 |
+| `ui/src/features/chat/TokenUsageModal.tsx` | **新建** — Token 详情弹窗组件 |
 | `ui/src/features/chat/TokenUsageModal.css` | **新建** — Token 弹窗样式 |
-| `ui/src/styles.css` | 可能需要全局样式调整 |
+| `ui/src/features/chat/ChatComposer.tsx` | Paperclip → Plus 图标，命令面板，TokenModal 集成，commands prop |
+| `ui/src/features/chat/chatTypes.ts` | `SessionConfig` 无需改动（commands 不在 config 中，而在 capabilities 中） |
+| `ui/src/pages/ChatPage.tsx` | 传递 `commands` prop 给 ChatComposer |
 
 ### 7.3 消息格式
 
@@ -767,7 +915,6 @@ const handleTextAreaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 | **Phase 1** | Token 分项统计（后端） | 低 | 无 |
 | **Phase 2** | TokenUsageModal + ContextRing 点击 | 中 | Phase 1 |
 | **Phase 3** | 压缩感知与状态展示 | 中 | Phase 1 |
-| **Phase 4** | 快捷指令面板（静态列表） | 低 | 无（可并行） |
-| **Phase 5** | 动态命令发现（available_commands_update） | 中 | Phase 4 |
+| **Phase 4** | 快捷指令面板（跟随 agent 配置） | 中 | 无（可并行） |
 
-Phase 1 和 Phase 4 可以并行开发，无相互依赖。
+Phase 1 和 Phase 4 可以并行开发，无相互依赖。Phase 2 和 Phase 3 依赖 Phase 1 的 token 分项数据。
