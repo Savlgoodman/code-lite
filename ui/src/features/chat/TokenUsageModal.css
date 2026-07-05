@@ -32,11 +32,12 @@
 
 .token-modal::-webkit-scrollbar-track {
   background: transparent;
+  margin: 4px 0;
 }
 
 .token-modal::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(105, 112, 121, 0.28);
+  background: rgba(105, 112, 121, 0.25);
   background-clip: content-box;
   min-height: 30px;
 }
