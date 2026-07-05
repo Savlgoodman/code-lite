@@ -1,33 +1,39 @@
-# ACP 协议能力调研：Token 统计、模式控制、多模态
+# ACP 协议能力调研：Token 统计、上下文压缩、Subagent、多模态
 
 > 调研日期：2026-07-05
 > 调研范围：codex-lite 项目中 Codex ACP 和 Claude Code ACP 的协议能力
 > 分支：`research/acp-investigation`
+> ACP SDK 版本：v0.12.2
 
 ---
 
 ## 目录
 
-1. [Token 使用量信息](#1-token-使用量信息)
-2. [上下文压缩 (Context Compression)](#2-上下文压缩-context-compression)
-3. [Plan Mode](#3-plan-mode)
-4. [Goal Mode](#4-goal-mode)
-5. [多模态功能（图片传入）](#5-多模态功能图片传入)
+1. [Token 使用量信息：能否获取并展示](#1-token-使用量信息能否获取并展示)
+2. [上下文压缩：如何手动触发](#2-上下文压缩如何手动触发)
+3. [Subagent：如何展示](#3-subagent如何展示)
+4. [多模态功能：图片传入](#4-多模态功能图片传入)
+5. [附录：ACP SDK 完整 API 速查](#5-附录acp-sdk-完整-api-速查)
 6. [总结与改进建议](#6-总结与改进建议)
 
 ---
 
-## 1. Token 使用量信息
+## 1. Token 使用量信息：能否获取并展示
 
-### 1.1 ACP 协议定义了两个 Usage 结构
+### 1.1 结论：可以获取，`PromptResponse.usage` 包含全部分项数据
 
-ACP 协议（`acp.schema`）定义了两类携带 token 信息的结构：
+**`PromptResponse.usage` 字段存在且包含完整的 token 分项数据**，但目前 codex-lite 完全没有读取。
 
-#### 结构一：`UsageUpdate` — 实时流式事件
+ACP 协议定义了两个完全不同的 Usage 结构：
+
+### 1.2 两个 Usage 结构对比
+
+#### 结构一：`UsageUpdate` — 实时流式事件（当前已使用）
 
 通过 `session/update` 以 `usage_update` 类型推送，**只携带 context window 维度信息**：
 
 ```python
+# schema.py:1952-1970
 class _UsageUpdate(BaseModel):
     field_meta: Optional[Dict[str, Any]]  # _meta
     cost: Optional[Cost]                  # 累积 session 费用 (可选)
@@ -35,364 +41,603 @@ class _UsageUpdate(BaseModel):
     used: int                             # 当前 context 中使用的 tokens
 ```
 
-**关键**：`UsageUpdate` **不包含** input_tokens / output_tokens / cache_creation / cache_read 等分项。
+**不包含** input_tokens / output_tokens / cache 分项。
 
-#### 结构二：`Usage` — PromptResponse 中的 turn 汇总
+#### 结构二：`Usage` — PromptResponse 中的 turn 汇总（⚠️ 当前未读取）
 
-出现在 `PromptResponse.usage`（prompt 完成后的返回值中），携带**丰富的分项 token 信息**：
+出现在 `PromptResponse.usage`（prompt 完成后的返回值中），携带**完整的分项 token 信息**：
 
 ```python
+# schema.py:1907-1949
 class Usage(BaseModel):
-    cached_read_tokens: Optional[int]    # cache 读取 tokens
-    cached_write_tokens: Optional[int]   # cache 写入 tokens
-    input_tokens: int                    # 输入 tokens
-    output_tokens: int                   # 输出 tokens
-    thought_tokens: Optional[int]        # 推理/思考 tokens
-    total_tokens: int                    # 所有 token 类型的总和
+    cached_read_tokens: Optional[int]    # alias="cachedReadTokens", cache 读取 tokens
+    cached_write_tokens: Optional[int]   # alias="cachedWriteTokens", cache 写入 tokens
+    input_tokens: int                    # alias="inputTokens", 输入 tokens (必填)
+    output_tokens: int                   # alias="outputTokens", 输出 tokens (必填)
+    thought_tokens: Optional[int]        # alias="thoughtTokens", 推理/思考 tokens
+    total_tokens: int                    # alias="totalTokens", 所有 token 类型总和 (必填)
 ```
 
-**注意**：此字段标记为 **unstable**，不是所有 ACP agent 都会实现。
+**注意**：此字段标记为 **UNSTABLE**，`Optional`，不是所有 ACP agent 都会实现。
 
-### 1.2 codex-lite 当前实现
+### 1.3 数据流对比
 
-#### 后端处理
+```
+                          ACP Runtime
+                              │
+                 ┌────────────┴────────────┐
+                 │                         │
+      session/update (实时流)      PromptResponse (turn 结束返回值)
+      type: "usage_update"        prompt_result.usage
+                 │                         │
+          UsageUpdate 对象             Usage 对象
+          ┌──────────────┐      ┌──────────────────────┐
+          │ used: 45000   │      │ input_tokens: 12000   │
+          │ size: 200000  │      │ output_tokens: 3500   │
+          │ cost: {...}   │      │ cached_read_tokens: 8000│
+          └──────────────┘      │ cached_write_tokens: 2000│
+                                │ thought_tokens: 1500  │
+                                │ total_tokens: 27000   │
+                                └──────────────────────┘
+                 │                         │
+          codex-lite 已读取 ✅       codex-lite 未读取 ❌
+          (context ring 展示)       (完整分项数据被忽略)
+```
 
-`UsageSnapshot`（`backend/.../agents/acp/mapper.py`）只提取 `used` 和 `size`：
+### 1.4 当前代码的处理（关键缺口）
+
+#### adapter.py — prompt_result.usage 被完全忽略
+
+```python
+# backend/.../agents/acp/adapter.py:248-277
+prompt_result = await connection_sdk.prompt(...)
+
+# 只读了 stop_reason，没有读 usage
+logger.info("Prompt completed for %s (stop=%s)",
+    request.turn_id, getattr(prompt_result, "stop_reason", None))
+
+# usage 来自 handler.latest_usage（即 UsageUpdate 的 used/size），不是 PromptResponse.usage
+usage_dict = handler_usage.to_dict() if handler_usage else ...
+await output_queue.put({
+    "type": "agent.run.completed",
+    "usage": usage_dict,  # 只有 totalTokens/contextUsedTokens/contextWindowTokens
+})
+```
+
+#### mapper.py — UsageSnapshot 字段有限
+
+```python
+# backend/.../agents/acp/mapper.py:170-192
+@dataclass
+class UsageSnapshot:
+    total_tokens: int | None = None         # ← 来自 used
+    context_used_tokens: int | None = None  # ← 来自 used
+    context_window_tokens: int | None = None# ← 来自 size
+    source: str = "acp.usage_update"
+    # ❌ 没有 input_tokens, output_tokens, cached_read_tokens, cached_write_tokens, thought_tokens
+```
+
+### 1.5 接入方案
+
+需要修改的文件和内容：
+
+#### 后端改动（3 个文件）
+
+**① `backend/.../agents/acp/mapper.py` — 扩展 UsageSnapshot**
 
 ```python
 @dataclass
 class UsageSnapshot:
+    # 来自 PromptResponse.usage 的分项数据
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_read_tokens: int | None = None
+    cached_write_tokens: int | None = None
+    thought_tokens: int | None = None
+    # 来自 UsageUpdate 的 context window 数据
     total_tokens: int | None = None
     context_used_tokens: int | None = None
     context_window_tokens: int | None = None
-    source: str = "acp.usage_update"
+    source: str = "acp.usage"
 
-def _extract_usage(update: Any) -> UsageSnapshot:
+    def to_dict(self) -> dict[str, Any]:
+        result = {
+            "inputTokens": self.input_tokens,
+            "outputTokens": self.output_tokens,
+            "cachedReadTokens": self.cached_read_tokens,
+            "cachedWriteTokens": self.cached_write_tokens,
+            "thoughtTokens": self.thought_tokens,
+            "totalTokens": self.total_tokens,
+            "contextUsedTokens": self.context_used_tokens,
+            "contextWindowTokens": self.context_window_tokens,
+            "source": self.source,
+        }
+        return {k: v for k, v in result.items() if v is not None}
+```
+
+新增函数，从 `PromptResponse.usage` 提取数据：
+
+```python
+def extract_prompt_response_usage(usage: Any) -> UsageSnapshot:
+    """从 PromptResponse.usage (Usage 对象) 中提取完整分项 token 数据"""
     return UsageSnapshot(
-        total_tokens=getattr(update, "used", None),
-        context_used_tokens=getattr(update, "used", None),
-        context_window_tokens=getattr(update, "size", None),
+        input_tokens=getattr(usage, "input_tokens", None),
+        output_tokens=getattr(usage, "output_tokens", None),
+        cached_read_tokens=getattr(usage, "cached_read_tokens", None),
+        cached_write_tokens=getattr(usage, "cached_write_tokens", None),
+        thought_tokens=getattr(usage, "thought_tokens", None),
+        total_tokens=getattr(usage, "total_tokens", None),
+        source="acp.prompt_response.usage",
     )
 ```
 
-**`PromptResponse.usage`（包含完整分项数据）从未被读取**。代码只提取了 `prompt_result.stop_reason`，忽略了 `prompt_result.usage`。
+**② `backend/.../agents/acp/adapter.py` — 读取 prompt_result.usage**
 
-#### 前端类型
+```python
+# 在 prompt_result = await connection_sdk.prompt(...) 之后：
+prompt_usage = getattr(prompt_result, "usage", None)
+if prompt_usage is not None:
+    # 优先使用 PromptResponse.usage（包含完整分项数据）
+    usage_dict = extract_prompt_response_usage(prompt_usage).to_dict()
+else:
+    # fallback 到 usage_update 的累计数据
+    usage_dict = handler_usage.to_dict() if handler_usage else ...
+```
 
-`UsageStats`（`ui/src/types.ts`）定义了 `promptTokens` 和 `completionTokens` 字段，但后端 ACP 路径**从未填充**这些字段：
+**③ `backend/.../agents/codex/adapter.py` — 同步修改**（同逻辑）
+
+#### 前端改动（2 个文件）
+
+**④ `ui/src/types.ts` — 扩展 UsageStats**
 
 ```typescript
 export interface UsageStats {
-  promptTokens?: number;       // 定义但从未填充
-  completionTokens?: number;   // 定义但从未填充
-  totalTokens?: number;        // ✅ 从 used 填充
-  contextUsedTokens?: number;  // ✅ 从 used 填充
-  contextWindowTokens?: number;// ✅ 从 size 填充
+  // 新增：PromptResponse.usage 分项数据
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedReadTokens?: number;
+  cachedWriteTokens?: number;
+  thoughtTokens?: number;
+  // 保留：UsageUpdate 的 context window 数据
+  promptTokens?: number;       // 向后兼容
+  completionTokens?: number;   // 向后兼容
+  totalTokens?: number;
+  contextUsedTokens?: number;
+  contextWindowTokens?: number;
   source?: string;
 }
 ```
 
-### 1.3 VibeX 参考实现
+**⑤ `ui/src/features/chat/` — 展示分项数据**
 
-VibeX（`ref/VibeX-master`）实现了更完整的 token 统计，但数据来源不同：
+可在 turn 完成后展示一个 token breakdown 面板，显示：
+- Input tokens / Output tokens
+- Cache read / Cache write tokens
+- Thought tokens（推理消耗）
+- Total tokens
 
-- **实时流**：同样只从 `UsageUpdate` 获取 `used`/`size`，转换时 `input_tokens = used`，其余分项**硬编码为 0**
-- **完整分项数据**：来自 Claude Code **JSONL 转录文件的离线解析**（`parsers/claude.rs`），而非 ACP 实时流
+### 1.6 数据源汇总
 
+| 维度 | `usage_update` (实时) | `PromptResponse.usage` (turn 结束) |
+|------|:---:|:---:|
+| input_tokens | ❌ | ✅ |
+| output_tokens | ❌ | ✅ |
+| cached_read_tokens | ❌ | ✅ |
+| cached_write_tokens | ❌ | ✅ |
+| thought_tokens | ❌ | ✅ |
+| total_tokens | ❌ | ✅ |
+| context_used (used) | ✅ | ❌ |
+| context_window (size) | ✅ | ❌ |
+| cost | 可选 | ❌ |
+
+**结论**：两个数据源互补，合并后可获得完整视图。`PromptResponse.usage` 虽然标记为 UNSTABLE，但它是获取分项 token 数据的最直接方式，值得接入。
+
+---
+
+## 2. 上下文压缩：如何手动触发
+
+### 2.1 结论：通过发送 `/compact` 作为 prompt 文本触发
+
+ACP 协议**没有** `session/compact` 这样的专用 API。触发压缩的唯一方式是**将 `/compact` 字符串作为普通 prompt 文本通过 `session/prompt` 发送给 runtime**。
+
+### 2.2 ACP 协议层面
+
+- `AGENT_METHODS`（`meta.py:3-31`）中**没有** `session/compact`
+- ACP SDK `schema.py` 全文搜索 `compact` — **零匹配**
+- Runtime 通过 `available_commands_update` 事件广播 `compact` 为可用命令
+
+### 2.3 触发流程
+
+```
+ACP Runtime 在 session/update 中发送 available_commands_update
+  → 包含 { name: "compact", description: "Compact conversation..." }
+  → 前端检测到 compact 命令可用
+  → 用户点击"压缩"按钮（或输入 /compact）
+  → 前端将 "/compact" 作为普通 prompt 文本发送
+  → 后端 session/prompt(prompt=[text_block("/compact")])
+  → Runtime 执行压缩
+  → 返回文本 "Context compacted..."
+  → 发送新的 usage_update（used 值突然下降）
+  → 前端 ContextRing 百分比下降
+```
+
+### 2.4 VibeX 参考实现
+
+VibeX 已经完整实现了 compact 功能，方式就是发送 `/compact` 作为 prompt：
+
+**后端 — slash command 注册**（`crates/services/src/services/container.rs:171`）：
 ```rust
-// VibeX: 从 ACP UsageUpdate 转换时
-AgentEvent::Usage { usage } => Some(ConversationEvent::UsageUpdated {
-    usage: ConversationUsage {
-        input_tokens: usage.used,       // 用 used 填充
-        output_tokens: 0,               // 硬编码 0
-        cache_creation_input_tokens: 0, // 硬编码 0
-        cache_read_input_tokens: 0,     // 硬编码 0
-        context_window_max: usage.limit,
-    },
-}),
-```
-
-### 1.4 Token 信息来源对比
-
-| 维度 | ACP `usage_update` (实时流) | ACP `PromptResponse.usage` (turn 结束) | Claude Code 转录文件 |
-|------|:---:|:---:|:---:|
-| input_tokens | ❌ | ✅ | ✅ |
-| output_tokens | ❌ | ✅ | ✅ |
-| cache_creation_input_tokens | ❌ | ❌ | ✅ |
-| cache_read_input_tokens | ❌ | ❌ | ✅ |
-| thought_tokens | ❌ | ✅ | ❌ |
-| total_tokens | ❌ | ✅ | 可计算 |
-| context_used (used) | ✅ | ❌ | ❌ |
-| context_window (size) | ✅ | ❌ | ❌ |
-| cost | 可选 | ❌ | ❌ |
-
-### 1.5 改进建议
-
-1. **读取 `PromptResponse.usage`**：当前代码完全忽略了这个字段。应当在 `agent.run.completed` 事件中提取 `prompt_result.usage`，获取 input_tokens / output_tokens / cached_read_tokens / cached_write_tokens / thought_tokens
-2. **合并两个数据源**：实时流中的 `usage_update` 提供 context window 信息，`PromptResponse.usage` 提供分项 token 信息，两者互补
-3. **扩展 `UsageSnapshot`**：增加 `input_tokens`、`output_tokens`、`cache_read_tokens`、`cache_write_tokens`、`thought_tokens` 字段
-4. **前端适配**：`UsageStats` 已有 `promptTokens` / `completionTokens` 字段，只需后端填充即可
-
----
-
-## 2. 上下文压缩 (Context Compression)
-
-### 2.1 现状：不自行实现，完全依赖 ACP runtime
-
-codex-lite **没有**自己实现任何 context compression 或 summarization 逻辑。压缩功能完全由各 ACP runtime（Codex、Claude Code）在其内部处理。
-
-### 2.2 触发方式
-
-压缩有两种触发途径：
-
-1. **自动触发**：runtime 内部在上下文窗口接近满时自动执行
-2. **手动触发**：用户在 runtime 原生界面中通过 `/compact` 命令触发
-
-code-lite 无法直接触发压缩，也没有暴露压缩按钮或 API。
-
-### 2.3 可观测性
-
-当 runtime 执行压缩时，会发生两件事：
-
-1. **文本信号**：runtime 发送一段文本（如 `Context compacted...`），`AcpEventMapper` 将其映射为 `agent.text.delta` 事件展示在聊天界面
-2. **Usage 更新**：发送新的 `usage_update`（`used` 和 `size` 值），前端 `ContextRing` 组件的百分比会突然下降
-
-用户可以从 ContextRing 的百分比下降**间接观察**到压缩发生了。
-
-### 2.4 协议限制
-
-> `/compact` 会触发可观察文本和新的 `usage_update`，但 ACP SDK schema 没有标准化的 compaction 字段。code-lite 可以 best-effort 记录 runtime-specific 压缩信号，但不要把它设计成跨 runtime 强保证。
-> — `docs/research/0703-BACKEND-ACP-RESEARCH.md`
-
-### 2.5 上下文窗口管理
-
-- **默认窗口大小**：`DEFAULT_CONTEXT_WINDOW_TOKENS = 65_536`（`services/model_config.py`）
-- **前端展示**：`ContextRing` 组件（24px SVG 圆环），颜色分级：<50% 正常、50-80% 警告、>80% 危险
-- **相关文件**：
-  - `backend/.../services/model_config.py` — 模型配置
-  - `ui/src/features/chat/ContextRing.tsx` — 前端圆环组件
-
----
-
-## 3. Plan Mode
-
-### 3.1 定义
-
-Plan Mode 是 **Claude Code runtime** 提供的一种 **access mode**，通过 ACP 协议的 mode 机制实现。
-
-### 3.2 各 Runtime 支持的模式
-
-**Claude Code**（`runtimes/descriptors.py`）：
-
-| Mode ID | 说明 |
-|---------|------|
-| `ask` | 只问答，不修改代码 |
-| `code` | 正常编码模式 |
-| `plan` | 计划模式 — 只规划不执行 |
-
-**Codex**（`runtimes/descriptors.py`）：
-
-| Mode ID | 说明 |
-|---------|------|
-| `read-only` | 只读模式 |
-| `agent` | 代理模式 |
-| `agent-full-access` | 完全访问代理模式 |
-
-**注意**：Codex 没有 `plan` mode，只有 Claude Code 提供。
-
-### 3.3 触发流程
-
-```
-ACP session/new 返回 modes 列表
-  → parse_modes_from_session_result() 提取
-  → _build_modes() 三源合并（configOptions > session_result.modes > default）
-  → SessionCapabilities.modes 返回前端
-  → ChatComposer 渲染 access-mode-menu 下拉菜单
-  → 用户选择 "plan"
-  → updateSessionConfig({ accessMode: "plan" })
-  → sendMessage() 携带 accessMode: "plan"
-  → 后端 _resolve_mode("plan") → "plan" (Claude Code 直接透传)
-  → conn.set_session_mode(session_id, mode_id="plan")
-  → Claude Code runtime 切换到 plan 模式
-```
-
-### 3.4 UI 交互
-
-- **位置**：`ChatComposer.tsx` 输入框左下角的 access mode 下拉菜单
-- **图标**：Plan mode 使用 `FileText` 图标（lucide-react）
-- **Per-session 隔离**：每个会话的 mode 独立存储，切换会话时保持各自 mode 不变
-
-### 3.5 关键文件
-
-| 文件 | 职责 |
-|------|------|
-| `backend/.../runtimes/descriptors.py` | Mode 映射表和 resolve 函数 |
-| `backend/.../acp/adapter.py` | `_configure_session()` 每轮 turn 前调用 `set_session_mode()` |
-| `backend/.../acp/capabilities.py` | `parse_modes_from_session_result()` 从 ACP 提取 modes |
-| `backend/.../api/routes/sessions.py` | `_build_modes()` 三源合并构建 modes 列表 |
-| `ui/src/features/chat/ChatComposer.tsx` | Access mode picker UI |
-| `ui/src/pages/SettingsPage.tsx` | Codex 全局默认 mode 配置 |
-
----
-
-## 4. Goal Mode
-
-### 4.1 结论：本项目中不存在
-
-经过对整个项目的全面搜索：
-
-- `goalMode` / `goal_mode` / `goal-mode` / `GoalMode` — **0 匹配**
-- `goal` 在代码和文档中 — **0 相关匹配**
-
-本项目**没有**任何 Goal Mode 的实现、配置、文档或讨论。
-
-如果 Goal Mode 是其他产品（如 Claude Code 原生 CLI）中的功能，那么它可能：
-- 尚未通过 ACP 协议暴露
-- 尚未被 code-lite 项目集成
-- 是产品路线图中的未来功能
-
----
-
-## 5. 多模态功能（图片传入）
-
-### 5.1 ACP 协议层面的支持
-
-ACP 协议的 `initialize` 响应中，agent 通过 `agentCapabilities.promptCapabilities.image` 声明是否支持图片输入：
-
-```python
-"promptCapabilities": {
-    "image": True/False,    # 是否支持图片
-    "audio": True/False,    # 是否支持音频
-    "embeddedContext": True, # 是否支持嵌入上下文
+fn acp_slash_command_catalog(agent_type: AgentType) -> Vec<SlashCommandDescription> {
+    match agent_type {
+        AgentType::ClaudeCode => vec![
+            slash_command("compact", "Compact conversation with an optional focus"),
+        ],
+        AgentType::Codex => vec![
+            slash_command("compact", "Compact conversation with an optional focus"),
+        ],
+        AgentType::OpenCode => vec![
+            slash_command("compact", "Compact the current session"),
+        ],
+    }
 }
 ```
 
-**真实 Codex ACP runtime 声明支持 image 能力**（见 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md`）。
+**前端 — 触发逻辑**（`frontend/src/components/tasks/follow-up/useSessionComposerContextCompact.ts`）：
+```typescript
+const handleCompactContext = useCallback(async () => {
+    const compactTurnInput = buildCompactContextTurnInput({ ... });
+    const turn = await sendAgentRuntimeTurn(compactTurnInput); // 发送 "/compact" 作为 text
+    setPendingCompactProcessId(turn.turnId);
+}, [...]);
+```
 
-### 5.2 ACP Content Block 预期格式
+**前端 — 状态检测**（`frontend/src/lib/contextCompact.ts`）：
+```typescript
+export const CONTEXT_COMPACT_RUNNING_TEXT = '正在执行上下文压缩...';
+export const CONTEXT_COMPACT_SUCCESS_TEXT = '上下文已压缩';
+export const CONTEXT_COMPACT_FAILED_TEXT = '上下文压缩失败';
 
-ACP `session/prompt` 接受 `prompt` 数组，每个元素是一个 content block。当前代码只处理 `type: "text"` 的 block：
+export function isContextCompactPrompt(prompt: string | null | undefined): boolean {
+  return typeof prompt === 'string' && /^\/compact(?:\s|$)/i.test(prompt.trim());
+}
+```
+
+**注意**：VibeX 的 Codex Native Provider（不走 ACP，直接走 Codex app-server JSON-RPC）使用私有协议 `thread/compact/start` + `thread/compacted` 事件。但这是 Codex 私有协议，不是 ACP 标准。
+
+### 2.5 codex-lite 实现建议
+
+需要修改的文件：
+
+| 文件 | 改动 |
+|------|------|
+| `ui/src/features/chat/ChatComposer.tsx` | 增加 `/compact` 斜杠命令或"压缩"按钮 |
+| `ui/src/features/chat/ChatComposer.tsx` | 监听 `available_commands_update` 事件，检测 compact 命令是否可用 |
+| `ui/src/features/chat/MessageList.tsx` | 检测压缩状态文本，展示 "上下文已压缩" 提示 |
+| `backend/.../acp/client.py` | 处理 `available_commands_update` 事件，提取可用命令列表 |
+| `ui/src/types.ts` | 增加 `availableCommands` 到事件类型 |
+
+数据流：
+```
+Runtime 发送 available_commands_update (含 compact 命令)
+  → AcpClientHandler 检测并记录 compact 可用
+  → 推送 agent.commands.updated 事件给前端
+  → ChatComposer 显示 /compact 斜杠命令或"压缩"按钮
+  → 用户触发 → 发送 "/compact" 作为 prompt
+  → 检测返回文本中 "compacted" 关键词
+  → 显示 "上下文已压缩" 状态
+```
+
+### 2.6 Demo 中的验证命令
+
+```powershell
+uv run --with agent-client-protocol python .\python_sdk_acp_probe.py \
+  --agent codex --temp-workspace --allow-real-turn --summary-only --prompt "/compact"
+```
+
+---
+
+## 3. Subagent：如何展示
+
+### 3.1 结论：ACP 协议没有原生 subagent 事件，VibeX 通过 MCP + Delegation Broker 实现
+
+### 3.2 ACP 协议层面
+
+ACP 协议有 `session/fork` 方法（UNSTABLE），可以创建新的独立 session：
 
 ```python
-# 当前实现（acp/adapter.py）
-prompt_result = await connection_sdk.prompt(
-    session_id=binding.native_session_id,
-    prompt=[acp.text_block(request.prompt)],  # 只有文本
-)
+# schema.py:3840
+class ForkSessionRequest(BaseModel):
+    session_id: str
+    cwd: str
+    additional_directories: Optional[List[str]] = None
+    mcp_servers: Optional[List[McpServerConfig]] = None
+
+# schema.py:4711
+class ForkSessionResponse(BaseModel):
+    session_id: str  # 新 fork 的 session ID
 ```
 
-图片 content block 的预期格式推断为：
+但 ACP **没有**定义 `task_started`、`agent_spawned`、`delegation_started` 等 subagent 事件类型。
 
-```json
-{"type": "image", "data": "<base64-encoded>", "mimeType": "image/png"}
-```
+### 3.3 codex-lite 当前状态
 
-或 resource URL 形式。但项目代码中**完全没有实现** image block 的构造。
+**完全不存在** subagent / delegation 相关的类型、事件或 UI 组件。
 
-### 5.3 当前项目各层现状
+`AgentEvent` 类型（`ui/src/types.ts:310-421`）只包含标准事件（text.delta、tool.started、context.updated 等），没有 subagent 相关事件。
 
-| 层面 | 现状 | 缺失 |
-|------|------|------|
-| **ACP 协议** | `promptCapabilities.image` 字段已定义；Codex 声明支持 | mock agent 都设为 `False` |
-| **后端 API** | `/api/turns/stream` 只接受 `input: string` | 需要改为接受 content array |
-| **AgentRunRequest** | `prompt: str` 纯文本 | 需要改为 `content: list[ContentBlock]` |
-| **ACP adapter** | 只用 `acp.text_block()` | 需要添加 `acp.image_block()` 或等效构造 |
-| **前端 ChatMessage** | `content: string` | 需要改为 content array |
-| **前端 ChatComposer** | Paperclip 按钮无功能；textarea 只接受文本 | 需要添加图片上传、粘贴、拖拽 |
-| **前端消息渲染** | 用户消息只渲染 `<p>{content}</p>` | 需要渲染图片预览 |
-| **模型能力** | `vision` 字段已存在于类型定义和设置页 | 需要在发送时根据 vision 能力决定是否允许图片 |
+### 3.4 VibeX 的实现方式（应用层方案）
 
-### 5.4 已有的基础
-
-项目已有一些基础设施为多模态做了准备：
-
-1. **`ModelCapabilities.vision`**（`ui/src/types.ts`）：模型级别的视觉能力标记
-2. **设置页面**：`SettingsPage.tsx` 有"多模态支持"开关，可设置 `vision: supportsMultimodal`
-3. **附件按钮**：`ChatComposer.tsx` 有 Paperclip 图标按钮（但无 `onClick` handler）
-
-### 5.5 关键文件
-
-| 文件 | 当前状态 |
-|------|----------|
-| `backend/.../schemas/agent.py` | `AgentRunRequest.prompt: str` — 纯文本 |
-| `backend/.../api/routes/turns.py` | `prompt = str(body.get("input") or "").strip()` — 强制字符串 |
-| `backend/.../acp/adapter.py` | `prompt=[acp.text_block(request.prompt)]` — 只发文本 |
-| `backend/.../acp/mapper.py` | `_text_from_content()` 只提取 text 字段 |
-| `backend/.../codex/adapter.py` | 同样只用 `acp.text_block()` |
-| `ui/src/types.ts` | `ChatMessage.content: string` — 纯文本 |
-| `ui/src/features/chat/ChatComposer.tsx` | Paperclip 按钮无功能 |
-| `ui/src/features/chat/MessageList.tsx` | 用户消息只渲染 `<p>{content}</p>` |
-
-### 5.6 实现多模态需要修改的链路
+VibeX 的 subagent 不依赖 ACP 协议层面的事件，而是在**应用层**通过 MCP 工具 + Delegation Broker 实现：
 
 ```
-前端 ChatComposer
-  ↓ 添加图片上传/粘贴/拖拽
-  ↓ content 从 string 改为 ContentBlock[]
-  ↓
-API 路由 /api/turns/stream
-  ↓ input 从 string 改为 ContentBlock[]
-  ↓
-AgentRunRequest
-  ↓ prompt 从 str 改为 list[ContentBlock]
-  ↓
-ACP adapter
-  ↓ 构造 [text_block(...), image_block(...)] 数组
-  ↓
-ACP session/prompt
-  ↓ runtime 处理多模态输入
+Agent 执行中
+  → 调用 delegate_to_agent MCP 工具（由 vibex-mcp server 暴露）
+  → Delegation Broker 启动子 agent session
+  → 发射 AgentEvent::DelegationStarted
+  → UI 渲染 DelegationCard（显示任务描述、agent 类型、运行状态）
+  → 子 agent 完成
+  → 发射 AgentEvent::DelegationCompleted
+  → DelegationCard 更新为完成状态（显示结果预览、耗时）
+```
+
+**后端架构**（Rust）：
+- `crates/delegation/` — broker/listener/spawner/resolver 完整架构
+- `crates/delegation-proto/` — 协议定义
+- `crates/vibex-mcp/` — MCP server，暴露 3 个工具：
+  - `delegate_to_agent` — 启动子 agent
+  - `get_delegation_status` — 查询状态
+  - `cancel_delegation` — 取消
+
+**前端数据模型**（`shared/types.ts:906`）：
+```typescript
+export type ConversationDelegation = {
+  delegation_id: string,
+  parent_tool_call_id: string,
+  child_conversation_id: string,
+  agent_type: AgentType,
+  task_preview: string,
+};
+
+export type ConversationDelegationView = {
+  delegation_id: string,
+  parent_tool_call_id?: string | null,
+  child_conversation_id?: string | null,
+  agent_type?: AgentType | null,
+  task_preview?: string | null,
+  status: string,  // running / completed / failed
+  result?: ConversationDelegationResult | null,
+};
+```
+
+**前端 UI 组件**（`DelegationCard.tsx`）：
+- 显示委派给哪个 agent（agent_type）
+- 任务描述（task_preview）
+- 状态标签（running/completed/failed）+ spinner 动画
+- 完成后的结果预览（text_preview）
+- 耗时（duration_ms）
+- "打开子会话" 按钮（跳转到 child conversation）
+
+### 3.5 codex-lite 实现 subagent 展示的可行方案
+
+由于 ACP 协议没有原生 subagent 事件，有两种方案：
+
+**方案 A：通过 tool_call 事件间接展示**（推荐，无需额外基础设施）
+
+ACP 的 `tool_call` + `tool_call_update` 事件已经在流式传输。当 agent 使用内置的 subagent 工具（如 Claude Code 的 `Agent` 工具、Codex 的 subagent）时，tool_call 事件中会包含 subagent 的调用信息。可以在前端：
+
+1. 检测特定的 tool_call name（如 `Agent`、`subagent`、`delegate`）
+2. 将这类 tool_call 渲染为特殊的 "子任务卡片"
+3. 从 tool_call_update 的 delta 中提取子 agent 的输出
+
+**方案 B：构建 MCP Delegation Broker**（VibeX 方案，复杂但功能完整）
+
+需要：
+1. 实现 MCP server 暴露 delegation 工具
+2. 实现 broker 管理子 agent 生命周期
+3. 前端 DelegationCard 组件
+
+---
+
+## 4. 多模态功能：图片传入
+
+### 4.1 结论：ACP 协议支持，SDK 已提供 `image_block()` 工厂函数，但 codex-lite 全链路未实现
+
+### 4.2 ACP SDK 已提供图片支持
+
+SDK `helpers.py` 已定义 `image_block()` 工厂函数：
+
+```python
+# helpers.py
+def image_block(data: str, mime_type: str, ...) -> ImageContentBlock
+```
+
+`ContentBlock` 类型（`helpers.py:36-38`）包含 5 种 block：
+
+| Block 类型 | type 值 | 关键字段 |
+|-----------|---------|---------|
+| `TextContentBlock` | `"text"` | `text: str` |
+| `ImageContentBlock` | `"image"` | `data: str` (base64), `mime_type: str` |
+| `AudioContentBlock` | `"audio"` | `data: str` (base64), `mime_type: str` |
+| `ResourceContentBlock` | `"resource_link"` | `name: str`, `uri: str`, `mime_type: str` |
+| `EmbeddedResourceContentBlock` | `"resource"` | `resource: TextResourceContents \| BlobResourceContents` |
+
+`prompt()` 方法的签名已支持混合内容：
+
+```python
+async def prompt(
+    self,
+    prompt: list[TextContentBlock | ImageContentBlock | AudioContentBlock
+                 | ResourceContentBlock | EmbeddedResourceContentBlock],
+    session_id: str,
+    message_id=None,
+) -> PromptResponse
+```
+
+### 4.3 ImageContent 的完整定义
+
+```python
+# schema.py:2648
+class ImageContent(BaseModel):
+    data: str          # base64 编码的图片数据
+    mime_type: str     # 如 "image/png", "image/jpeg"
+    annotations: Optional[Annotations] = None
+```
+
+### 4.4 当前缺失与改造链路
+
+```
+当前: prompt=[acp.text_block("hello")]
+目标: prompt=[acp.text_block("分析这张图"), acp.image_block(base64_data, "image/png")]
+```
+
+需要改造的完整链路：
+
+| 层 | 文件 | 当前 | 目标 |
+|----|------|------|------|
+| **前端输入** | `ChatComposer.tsx` | textarea 纯文本 | 增加图片上传/粘贴/拖拽 |
+| **前端类型** | `types.ts` | `ChatMessage.content: string` | 改为 content block array |
+| **前端渲染** | `MessageList.tsx` | `<p>{content}</p>` | 渲染图片预览 |
+| **API 路由** | `routes/turns.py` | `input: string` | 改为 content array |
+| **请求模型** | `schemas/agent.py` | `AgentRunRequest.prompt: str` | 改为 `content: list[ContentBlock]` |
+| **ACP adapter** | `acp/adapter.py` | `[acp.text_block(...)]` | `[text_block(...), image_block(...)]` |
+| **Codex adapter** | `codex/adapter.py` | 同上 | 同上 |
+| **事件映射** | `acp/mapper.py` | `_text_from_content()` 只提取 text | 处理 image 类型 |
+
+### 4.5 已有基础设施
+
+- `ModelCapabilities.vision` 字段已存在（`types.ts`、`SettingsPage.tsx`）
+- 设置页有"多模态支持"开关
+- `ChatComposer.tsx` 有 Paperclip 图标按钮（但无 `onClick` handler）
+- SDK 已有 `image_block()` 工厂函数，无需额外封装
+
+### 4.6 实现建议
+
+分步实施：
+1. **后端先行**：扩展 `AgentRunRequest` 支持 content array，adapter 支持 image block
+2. **前端输入**：ChatComposer 增加图片粘贴（`onPaste`）、拖拽（`onDrop`）、文件选择（`<input type="file">`）
+3. **前端渲染**：MessageList 渲染图片缩略图
+4. **能力协商**：根据 `promptCapabilities.image` 和 `ModelCapabilities.vision` 控制图片功能可见性
+
+---
+
+## 5. 附录：ACP SDK 完整 API 速查
+
+### 5.1 Client → Agent 方法（AGENT_METHODS）
+
+```python
+{
+    "initialize", "logout",
+    "session_new", "session_load", "session_list", "session_close",
+    "session_prompt", "session_cancel", "session_fork", "session_resume",
+    "session_set_mode", "session_set_model", "session_set_config_option",
+    "authenticate",
+    "document_did_open/save/change/focus/close",
+    "nes_start/accept/reject/close/suggest",
+    "providers_list/disable/set",
+}
+```
+
+**注意**：没有 `session_compact`、没有 `session_delegate`。
+
+### 5.2 Agent → Client 方法（CLIENT_METHODS）
+
+```python
+{
+    "session_update",                    # 流式事件推送
+    "fs_read_text_file", "fs_write_text_file",
+    "terminal_create/output/wait_for_exit/kill/release",
+    "session_request_permission",
+    "elicitation_create/complete",
+}
+```
+
+### 5.3 session/update 事件类型
+
+| `session_update` 值 | 说明 |
+|---|---|
+| `agent_message_chunk` | Agent 消息片段 |
+| `agent_thought_chunk` | Agent 思考片段 |
+| `user_message_chunk` | 用户消息片段 |
+| `tool_call` | 工具调用开始 |
+| `tool_call_update` | 工具调用进度 |
+| `plan` | 计划更新 |
+| `available_commands_update` | 可用命令更新（含 compact） |
+| `current_mode_update` | 当前模式更新 |
+| `config_option_update` | 配置选项更新 |
+| `session_info_update` | 会话信息更新 |
+| `usage_update` | Token 使用量更新（只有 used/size） |
+
+### 5.4 PromptResponse 完整定义
+
+```python
+# schema.py:3108-3155
+class PromptResponse(BaseModel):
+    field_meta: Optional[Dict[str, Any]]  # _meta
+    stop_reason: StopReason               # "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | "cancelled"
+    usage: Optional[Usage]                # UNSTABLE — 完整分项 token 数据
+    user_message_id: Optional[str]        # UNSTABLE — 回显的消息 ID
+```
+
+### 5.5 SDK Helper 工厂函数
+
+```python
+# helpers.py 导出的便捷函数
+text_block(text)                          # 创建文本 block
+image_block(data, mime_type)              # 创建图片 block
+audio_block(data, mime_type)              # 创建音频 block
+resource_link_block(name, uri, ...)       # 创建资源链接 block
+embedded_text_resource(...)               # 创建嵌入文本资源
+embedded_blob_resource(...)               # 创建嵌入二进制资源
+resource_block(...)                       # 创建资源 block
+tool_content(...)                         # 工具内容
+tool_diff_content(...)                    # 工具 diff 内容
+tool_terminal_ref(...)                    # 工具终端引用
+plan_entry(...)                           # 计划条目
+update_plan(...)                          # 更新计划
+update_user_message(...)                  # 更新用户消息
+update_agent_message(...)                 # 更新 agent 消息
+update_agent_thought(...)                 # 更新 agent 思考
+session_notification(...)                 # 会话通知
+start_tool_call(...)                      # 开始工具调用
+start_read_tool_call(...)                 # 开始读工具调用
+start_edit_tool_call(...)                 # 开始编辑工具调用
+update_tool_call(...)                     # 更新工具调用
 ```
 
 ---
 
 ## 6. 总结与改进建议
 
-### 6.1 能力成熟度矩阵
+### 6.1 能力矩阵
 
-| 能力 | ACP 协议支持 | codex-lite 实现 | 优先级 |
-|------|:---:|:---:|:---:|
-| Token 分项统计 (input/output/cache) | ✅ `PromptResponse.usage` | ❌ 未读取 | 🔴 高 |
-| Context window 使用率 | ✅ `usage_update` | ✅ 已实现 | — |
-| 上下文压缩 | ✅ runtime 内部 | ⚠️ 仅被动观测 | 🟡 中 |
-| Plan Mode (Claude Code) | ✅ access mode | ✅ 已实现 | — |
-| Goal Mode | ❌ 不存在 | ❌ 不存在 | — |
-| 多模态图片输入 | ✅ `promptCapabilities.image` | ❌ 未实现 | 🟡 中 |
+| 能力 | ACP 协议支持 | SDK 工具 | codex-lite 现状 | 改进难度 |
+|------|:---:|:---:|:---:|:---:|
+| Token 分项统计 | ✅ `PromptResponse.usage` | ✅ Usage 类 | ❌ 未读取 | 🟢 低 |
+| Context window 使用率 | ✅ `usage_update` | ✅ UsageUpdate 类 | ✅ 已实现 | — |
+| 手动触发压缩 | ✅ 发送 `/compact` prompt | ✅ text_block | ❌ 未实现 | 🟢 低 |
+| 压缩状态检测 | ✅ `available_commands_update` | ✅ 事件类型 | ❌ 未实现 | 🟡 中 |
+| Subagent 展示 | ⚠️ 通过 tool_call 间接 | ✅ 已有事件 | ❌ 未实现 | 🟡 中 |
+| 多模态图片输入 | ✅ `promptCapabilities.image` | ✅ image_block() | ❌ 未实现 | 🟠 中高 |
 
-### 6.2 优先改进项
+### 6.2 优先实施建议
 
-#### 高优先级：读取 PromptResponse.usage
+1. **🔴 高优先级 — Token 分项统计**：改动最小（3 个后端文件 + 2 个前端文件），价值最高。读取 `prompt_result.usage` 即可获得 input/output/cache/thought tokens。
 
-当前 `PromptResponse.usage` 中的完整 token 分项数据被完全忽略，这是最容易获取也最有价值的改进：
+2. **🟡 中优先级 — 手动压缩**：发送 `/compact` 作为 prompt，监听 `available_commands_update` 检测 compact 可用性。参考 VibeX 的 `contextCompact.ts` 实现。
 
-```python
-# 建议在 adapter.py 的 agent.run.completed 事件中增加：
-usage = getattr(prompt_result, "usage", None)
-if usage:
-    detailed_usage = {
-        "input_tokens": getattr(usage, "input_tokens", None),
-        "output_tokens": getattr(usage, "output_tokens", None),
-        "cache_read_tokens": getattr(usage, "cached_read_tokens", None),
-        "cache_write_tokens": getattr(usage, "cached_write_tokens", None),
-        "thought_tokens": getattr(usage, "thought_tokens", None),
-        "total_tokens": getattr(usage, "total_tokens", None),
-    }
-```
+3. **🟡 中优先级 — Subagent 展示**：通过 tool_call 事件检测 subagent 类型的工具调用，在前端渲染为子任务卡片。无需额外 MCP 基础设施。
 
-#### 中优先级：上下文压缩可观测
-
-- 检测压缩信号（如文本包含 "compacted" 或 `used` 值突然下降）
-- 在前端显示 "上下文已压缩" 的提示
-- 记录压缩事件到会话历史
-
-#### 中优先级：多模态图片支持
-
-需要全链路改造（前端 → API → adapter → ACP），建议分步实施：
-1. 后端先支持 content array 格式的 prompt
-2. ACP adapter 增加 image block 构造
-3. 前端增加图片上传/粘贴功能
-4. 根据模型 `vision` 能力控制图片功能可见性
+4. **🟠 中低优先级 — 多模态图片**：全链路改造，工作量大但 SDK 已提供所有基础设施。建议分步实施。
 
 ### 6.3 参考资源
 
-- VibeX 的转录文件解析方案（`ref/VibeX-master/crates/agents/src/parsers/claude.rs`）可作为获取完整 token 统计的备选方案
-- ACP 协议 `promptCapabilities` 机制可作为多模态能力协商的标准方式
+| 资源 | 路径 | 说明 |
+|------|------|------|
+| ACP SDK Schema | `backend/.venv/.../acp/schema.py` | 完整类型定义 |
+| ACP SDK Helpers | `backend/.venv/.../acp/helpers.py` | 工厂函数 |
+| ACP SDK Meta | `backend/.venv/.../acp/meta.py` | AGENT_METHODS/CLIENT_METHODS |
+| VibeX Compact | `ref/VibeX-master/frontend/src/lib/contextCompact.ts` | 压缩状态检测 |
+| VibeX Delegation | `ref/VibeX-master/crates/delegation/` | Subagent 架构 |
+| VibeX Usage | `ref/VibeX-master/crates/agents/src/parsers/claude.rs` | 转录文件 token 解析 |
+| ACP Demo Probe | `demo/acp-demo/python_sdk_acp_probe.py` | Compact 验证命令 |
+| 设计文档 | `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` | ACP 实现设计 |
