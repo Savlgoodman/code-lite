@@ -155,24 +155,30 @@ export function OverviewPage() {
         {error ? <div className="overview-error">{error}</div> : null}
 
         <section className="overview-section">
-          <div className="overview-summary-grid">
-            <div className="overview-stat">
-              <span className="overview-stat-icon"><Database size={17} /></span>
-              <span>今日 Token</span>
-              <strong>{formatNumber(totals?.totalTokens)}</strong>
-              <small>输入 {formatNumber(totals?.inputTokens)} / 输出 {formatNumber(totals?.outputTokens)}</small>
+          <div className="overview-status-strip">
+            <div className="overview-status-item">
+              <Database size={16} />
+              <div>
+                <span>今日 Token</span>
+                <strong>{formatNumber(totals?.totalTokens)}</strong>
+                <small>输入 {formatNumber(totals?.inputTokens)} / 输出 {formatNumber(totals?.outputTokens)}</small>
+              </div>
             </div>
-            <div className="overview-stat">
-              <span className="overview-stat-icon"><Coins size={17} /></span>
-              <span>估算费用</span>
-              <strong>{formatUsd(totals?.estimatedCostUsd)}</strong>
-              <small>{totals?.unknownCostTurns ? `${totals.unknownCostTurns} 轮价格未知` : "已按本地价格表估算"}</small>
+            <div className="overview-status-item">
+              <Coins size={16} />
+              <div>
+                <span>估算费用</span>
+                <strong>{formatUsd(totals?.estimatedCostUsd)}</strong>
+                <small>{totals?.unknownCostTurns ? `${totals.unknownCostTurns} 轮价格未知` : "已按本地价格表估算"}</small>
+              </div>
             </div>
-            <div className="overview-stat">
-              <span className="overview-stat-icon"><Layers size={17} /></span>
-              <span>模型用量</span>
-              <strong>{formatNumber(billingUsage?.models.length)}</strong>
-              <small>{formatNumber(totals?.turns)} 轮完成请求</small>
+            <div className="overview-status-item">
+              <Layers size={16} />
+              <div>
+                <span>模型用量</span>
+                <strong>{formatNumber(billingUsage?.models.length)}</strong>
+                <small>{formatNumber(totals?.turns)} 轮完成请求</small>
+              </div>
             </div>
           </div>
         </section>
