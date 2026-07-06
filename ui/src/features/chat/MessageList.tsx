@@ -24,6 +24,23 @@ function isCompactPrompt(value?: string): boolean {
   return /^\/compact(?:\s|$)/i.test((value ?? "").trim());
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function scrollCruiseProgress(progress: number) {
+  const ramp = 0.22;
+  const t = clamp(progress, 0, 1);
+  if (t < ramp) {
+    return (t * t) / (2 * ramp * (1 - ramp));
+  }
+  if (t > 1 - ramp) {
+    const remaining = 1 - t;
+    return 1 - (remaining * remaining) / (2 * ramp * (1 - ramp));
+  }
+  return (t - ramp / 2) / (1 - ramp);
+}
+
 function AssistantMessageContent({ isCompactTurn, message }: { isCompactTurn: boolean; message: ChatMessage }) {
   if (isCompactTurn && !message.error) {
     return null;
@@ -147,6 +164,8 @@ interface MessageListProps {
 
 export function MessageList({ isRunning, messages, sessionId, updatedAt }: MessageListProps) {
   const scrollRef = useRef<HTMLElement | null>(null);
+  const smoothScrollFrameRef = useRef<number | null>(null);
+  const smoothScrollActiveRef = useRef(false);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [scrollbarState, setScrollbarState] = useState({
@@ -172,11 +191,63 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
     setScrollbarState({ thumbHeight, thumbTop, visible: true });
   }
 
+  function cancelSmoothScroll() {
+    if (smoothScrollFrameRef.current !== null) {
+      cancelAnimationFrame(smoothScrollFrameRef.current);
+      smoothScrollFrameRef.current = null;
+    }
+    smoothScrollActiveRef.current = false;
+  }
+
+  function animateScrollToBottom(element: HTMLElement) {
+    cancelSmoothScroll();
+
+    const startTop = element.scrollTop;
+    const targetTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    const distance = targetTop - startTop;
+    if (distance <= 1) {
+      element.scrollTop = targetTop;
+      setIsPinnedToBottom(true);
+      setShowScrollToBottom(false);
+      updateScrollbarState(element);
+      return;
+    }
+
+    const duration = clamp(Math.round(distance / 1.8), 360, 860);
+    const startTime = performance.now();
+    smoothScrollActiveRef.current = true;
+
+    const step = (now: number) => {
+      const progress = clamp((now - startTime) / duration, 0, 1);
+      const latestTargetTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      element.scrollTop = startTop + (latestTargetTop - startTop) * scrollCruiseProgress(progress);
+
+      if (progress < 1) {
+        smoothScrollFrameRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      smoothScrollFrameRef.current = null;
+      smoothScrollActiveRef.current = false;
+      setIsPinnedToBottom(true);
+      setShowScrollToBottom(false);
+      updateScrollbarState(element);
+    };
+
+    smoothScrollFrameRef.current = requestAnimationFrame(step);
+  }
+
   function scrollToBottom(behavior: ScrollBehavior = "smooth") {
     const element = scrollRef.current;
     if (!element) {
       return;
     }
+    if (behavior === "smooth") {
+      animateScrollToBottom(element);
+      return;
+    }
+    cancelSmoothScroll();
     element.scrollTo({
       behavior,
       top: element.scrollHeight
@@ -192,15 +263,26 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
     const handleScroll = () => {
       const nextIsAtBottom = isAtBottom(element);
       setIsPinnedToBottom(nextIsAtBottom);
+      if (smoothScrollActiveRef.current) {
+        setShowScrollToBottom(false);
+        updateScrollbarState(element);
+        return;
+      }
       setShowScrollToBottom(!nextIsAtBottom);
       updateScrollbarState(element);
     };
+    const cancelOnUserScroll = () => cancelSmoothScroll();
 
     handleScroll();
     element.addEventListener("scroll", handleScroll, { passive: true });
+    element.addEventListener("touchstart", cancelOnUserScroll, { passive: true });
+    element.addEventListener("wheel", cancelOnUserScroll, { passive: true });
     window.addEventListener("resize", handleScroll);
     return () => {
+      cancelSmoothScroll();
       element.removeEventListener("scroll", handleScroll);
+      element.removeEventListener("touchstart", cancelOnUserScroll);
+      element.removeEventListener("wheel", cancelOnUserScroll);
       window.removeEventListener("resize", handleScroll);
     };
   }, [sessionId]);
@@ -246,7 +328,6 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
           className="scroll-bottom-button"
           aria-label="回到底部"
           onClick={() => {
-            setIsPinnedToBottom(true);
             setShowScrollToBottom(false);
             scrollToBottom("smooth");
           }}
