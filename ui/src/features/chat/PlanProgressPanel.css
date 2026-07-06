@@ -1,7 +1,10 @@
 .plan-progress-panel {
+  --plan-progress-item-gap: 8px;
+  --plan-progress-item-height: 20px;
+  height: var(--chat-plan-panel-height, 60px);
   width: min(252px, 33.333%);
   min-width: 218px;
-  max-height: min(320px, calc(100vh - 220px));
+  max-height: min(148px, calc(100vh - 220px));
   align-self: center;
   overflow: hidden;
   border: 1px solid rgba(218, 216, 211, 0.72);
@@ -13,6 +16,7 @@
   pointer-events: auto;
   backdrop-filter: blur(14px);
   transition:
+    height 0.24s cubic-bezier(0.2, 0, 0, 1),
     width 0.18s ease,
     min-width 0.18s ease,
     background 0.16s ease,
@@ -74,16 +78,22 @@
 }
 
 .plan-progress-list {
-  max-height: min(246px, calc(100vh - 288px));
+  max-height: min(
+    calc((var(--plan-progress-item-height) * 3.5) + (var(--plan-progress-item-gap) * 3)),
+    calc(100vh - 288px)
+  );
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--plan-progress-item-gap);
   margin: 0;
   padding: 0 10px 10px;
   list-style: none;
-  scrollbar-color: rgba(105, 112, 121, 0.28) transparent;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  transition:
+    max-height 0.24s cubic-bezier(0.2, 0, 0, 1),
+    padding-bottom 0.24s cubic-bezier(0.2, 0, 0, 1),
+    opacity 0.18s ease;
 }
 
 .plan-progress-panel.collapsed .plan-progress-list {
@@ -94,16 +104,12 @@
 }
 
 .plan-progress-list::-webkit-scrollbar {
-  width: 4px;
-}
-
-.plan-progress-list::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(105, 112, 121, 0.28);
+  width: 0;
+  height: 0;
 }
 
 .plan-progress-item {
-  min-height: 20px;
+  min-height: var(--plan-progress-item-height);
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: start;
@@ -189,10 +195,6 @@
   .plan-progress-panel {
     width: min(280px, 76%);
     min-width: 0;
-    max-height: min(276px, calc(100vh - 210px));
-  }
-
-  .plan-progress-list {
-    max-height: min(208px, calc(100vh - 280px));
+    max-height: min(148px, calc(100vh - 210px));
   }
 }

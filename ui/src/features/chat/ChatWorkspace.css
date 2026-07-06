@@ -1,4 +1,12 @@
 .chat-workspace {
+  --chat-composer-bottom: 16px;
+  --chat-composer-min-height: 98px;
+  --chat-composer-stack-gap: 8px;
+  --chat-plan-collapsed-height: 60px;
+  --chat-plan-expanded-height: 136px;
+  --chat-plan-panel-height: var(--chat-plan-collapsed-height);
+  --chat-scroll-button-plan-gap: 24px;
+  --chat-scroll-plan-padding-extra: 52px;
   position: relative;
   flex: 1;
   min-width: 0;
@@ -6,4 +14,8 @@
   display: flex;
   flex-direction: column;
   background: var(--panel);
+}
+
+.chat-workspace:has(.plan-progress-panel.expanded) {
+  --chat-plan-panel-height: var(--chat-plan-expanded-height);
 }

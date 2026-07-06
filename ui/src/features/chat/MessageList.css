@@ -2,9 +2,10 @@
   flex: 1;
   min-height: 0;
   overflow: overlay;
-  padding: 28px 24px 172px;
+  padding: 28px 24px calc(var(--chat-composer-bottom) + var(--chat-composer-min-height) + 58px);
   scrollbar-gutter: auto;
   scrollbar-width: none;
+  transition: padding-bottom 0.24s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .chat-scroll::-webkit-scrollbar {
@@ -285,7 +286,7 @@
 
 .scroll-bottom-button {
   position: absolute;
-  bottom: 154px;
+  bottom: calc(var(--chat-composer-bottom) + var(--chat-composer-min-height) + 40px);
   left: 50%;
   z-index: 5;
   width: 34px;
@@ -299,6 +300,10 @@
   color: #343a42;
   box-shadow: 0 10px 28px rgba(30, 35, 42, 0.12);
   backdrop-filter: blur(10px);
+  transition:
+    bottom 0.24s cubic-bezier(0.2, 0, 0, 1),
+    background 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .scroll-bottom-button:hover {
@@ -306,19 +311,17 @@
 }
 
 .chat-workspace:has(.plan-progress-panel) .chat-scroll {
-  padding-bottom: 214px;
-}
-
-.chat-workspace:has(.plan-progress-panel.expanded) .chat-scroll {
-  padding-bottom: 320px;
+  padding-bottom: calc(
+    var(--chat-composer-bottom) + var(--chat-composer-min-height) + var(--chat-composer-stack-gap)
+    + var(--chat-plan-panel-height) + var(--chat-scroll-plan-padding-extra)
+  );
 }
 
 .chat-workspace:has(.plan-progress-panel) .scroll-bottom-button {
-  bottom: 206px;
-}
-
-.chat-workspace:has(.plan-progress-panel.expanded) .scroll-bottom-button {
-  bottom: 300px;
+  bottom: calc(
+    var(--chat-composer-bottom) + var(--chat-composer-min-height) + var(--chat-composer-stack-gap)
+    + var(--chat-plan-panel-height) + var(--chat-scroll-button-plan-gap)
+  );
 }
 
 @media (max-width: 780px) {
@@ -327,19 +330,7 @@
     padding-left: 16px;
   }
 
-  .chat-workspace:has(.plan-progress-panel) .chat-scroll {
-    padding-bottom: 214px;
-  }
-
-  .chat-workspace:has(.plan-progress-panel.expanded) .chat-scroll {
-    padding-bottom: 292px;
-  }
-
-  .chat-workspace:has(.plan-progress-panel) .scroll-bottom-button {
-    bottom: 206px;
-  }
-
-  .chat-workspace:has(.plan-progress-panel.expanded) .scroll-bottom-button {
-    bottom: 278px;
+  .chat-workspace {
+    --chat-plan-expanded-height: 136px;
   }
 }
