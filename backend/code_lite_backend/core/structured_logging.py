@@ -26,7 +26,7 @@ LOG_CATEGORIES = {
 _TEXT_LOG_HANDLE: Any | None = None
 _ANSI_RESET = "\033[0m"
 _CATEGORY_COLORS = {
-    "acp": "\033[31m",
+    "acp": "\033[36m",
     "runtime.stderr": "\033[91m",
     "diagnostic": "\033[91m",
     "python": "\033[34m",

@@ -179,9 +179,9 @@ prompt_result = await conn.prompt(...)
 日志分类建议使用稳定 category，而不是只靠颜色：
 
 | category | 含义 | 控制台颜色 | UI 颜色建议 |
-| --- | --- | --- |
+| --- | --- | --- | --- |
 | `api` | HTTP API 请求、响应、参数摘要 | 沿用当前默认色 | 沿用当前默认色 |
-| `acp` | ACP spawn、initialize、session、prompt、permission、JSON-RPC 阶段 | 红色 | 红色 |
+| `acp` | ACP spawn、initialize、session、prompt、permission、JSON-RPC 阶段 | 青色 | 蓝绿色 |
 | `python` | backend 内部任务、存储、billing、配置、启动关闭 | 蓝色 | 蓝色 |
 | `runtime.stderr` | codex-acp / claude-agent-acp / opencode 的 stderr | 浅红色 | 红色弱化 |
 | `diagnostic` | 结构化错误诊断 | 浅红色 | 深红色 |
@@ -457,7 +457,7 @@ uv run --project backend python -m code_lite_backend.main --help
 2. backend 启动时会在 `data/logs/current/` 下写入分类 JSONL 日志。
 3. `runtime.stderr` 会同时保留 ring buffer，并写入 `runtime-stderr.jsonl`。
 4. 旧 `--log-file` 文本日志仍保留。
-5. 控制台输出已按 category 上色：ACP 红色、runtime stderr / diagnostic 浅红、Python 蓝色、API 默认色。`CODE_LITE_LOG_COLOR=always` 可强制开启，`CODE_LITE_LOG_COLOR=never` 或 `NO_COLOR=1` 可关闭。
+5. 控制台输出已按 category 上色：ACP 青色、runtime stderr / diagnostic 浅红、Python 蓝色、API 默认色。`CODE_LITE_LOG_COLOR=always` 可强制开启，`CODE_LITE_LOG_COLOR=never` 或 `NO_COLOR=1` 可关闭。
 
 建议验证：
 
@@ -501,7 +501,7 @@ uv run --project backend python -m code_lite_backend.main --help
 1. 已新增 `/api/logs/files`、`/api/logs/tail`、`/api/logs/diagnostics/{conversation_id}`。
 2. 设置页已新增“日志”栏目，可刷新、按 category / level / query 过滤、展开 JSON 详情。
 3. MVP 暂未加入复制诊断摘要按钮，详情 JSON 已可直接查看。
-4. UI 日志颜色约定已落地：ACP 红色、runtime stderr 浅红、API 中性灰、Python 蓝色、diagnostic 深红。
+4. UI 日志颜色约定已落地：ACP 蓝绿色、runtime stderr 浅红、API 中性灰、Python 蓝色、diagnostic 深红。
 
 建议验证：
 
