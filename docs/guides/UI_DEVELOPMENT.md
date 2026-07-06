@@ -244,7 +244,7 @@ Tauri 启动 backend 时会把控制台输出写入运行时 data 目录：
 
 ## 图标资源
 
-图标资源位于 `src-tauri/icons/`。当前 `app-icon.svg` 是临时开发图标源，已生成 Tauri 需要的多尺寸图标，包括：
+图标资源位于 `src-tauri/icons/`。当前 `app-icon.png` 是品牌图标源，已生成 Tauri 需要的多尺寸图标，包括：
 
 ```text
 src-tauri/icons/icon.ico
@@ -257,7 +257,7 @@ src-tauri/icons/128x128@2x.png
 替换品牌图标时，建议准备正方形 SVG 或 PNG，然后重新执行：
 
 ```powershell
-npm exec --prefix ui -- tauri icon .\src-tauri\icons\app-icon.svg --output .\src-tauri\icons
+npm exec --prefix ui -- tauri icon .\src-tauri\icons\app-icon.png --output .\src-tauri\icons
 ```
 
 ## 当前 UI 数据策略
@@ -328,7 +328,7 @@ npm run tauri:dev:win
 Tauri Windows 构建需要 `src-tauri/icons/icon.ico`。如图标文件缺失，重新生成：
 
 ```powershell
-npm exec --prefix ui -- tauri icon .\src-tauri\icons\app-icon.svg --output .\src-tauri\icons
+npm exec --prefix ui -- tauri icon .\src-tauri\icons\app-icon.png --output .\src-tauri\icons
 ```
 
 ### 开发模式提示 backend sidecar 缺失
