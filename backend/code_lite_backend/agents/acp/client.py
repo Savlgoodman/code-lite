@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections import deque
 from typing import Any
@@ -22,6 +23,22 @@ from code_lite_backend.agents.acp.mapper import (
 )
 from code_lite_backend.schemas.agent import AgentEvent
 from code_lite_backend.services.approvals import ApprovalBroker
+
+
+logger = logging.getLogger(__name__)
+
+_KNOWN_SESSION_UPDATE_KINDS = {
+    "agent_message_chunk",
+    "agent_thought_chunk",
+    "available_commands_update",
+    "config_option_update",
+    "current_mode_update",
+    "plan",
+    "session_info_update",
+    "tool_call",
+    "tool_call_update",
+    "usage_update",
+}
 
 
 class AcpClientHandler:
@@ -65,12 +82,34 @@ class AcpClientHandler:
         if not isinstance(message, dict):
             return
         method = message.get("method")
+        direction = str(getattr(getattr(event, "direction", None), "value", getattr(event, "direction", "unknown")))
         if method == "session/update":
             params = message.get("params")
             if isinstance(params, dict):
                 session_id = params.get("sessionId")
                 if session_id:
                     self.native_session_id = str(session_id)
+                update = params.get("update")
+                update_kind = ""
+                if isinstance(update, dict):
+                    update_kind = str(update.get("sessionUpdate") or update.get("session_update") or "")
+                if update_kind and update_kind not in _KNOWN_SESSION_UPDATE_KINDS:
+                    self._put_raw_rpc(
+                        method=str(method),
+                        direction=direction,
+                        rpc_kind="session_update",
+                        message=message,
+                        update_kind=update_kind,
+                    )
+            return
+
+        if method and direction == "incoming":
+            self._put_raw_rpc(
+                method=str(method),
+                direction=direction,
+                rpc_kind="request" if "id" in message else "notification",
+                message=message,
+            )
 
     async def session_update(self, session_id: str, update: Any, **_: Any) -> None:
         self.native_session_id = session_id
@@ -89,6 +128,20 @@ class AcpClientHandler:
 
         event = self.mapper.map_update(update, self.context)
         if event is not None:
+            if event.get("type") == "agent.raw.update":
+                logger.info(
+                    "ACP unhandled session/update forwarded: %s",
+                    event.get("updateKind"),
+                    extra={
+                        "category": "acp",
+                        "runtime": self.runtime,
+                        "conversationId": self.conversation_id,
+                        "turnId": self.turn_id,
+                        "nativeSessionId": self.native_session_id,
+                        "stage": "session.update.raw",
+                        "fields": {"updateKind": event.get("updateKind")},
+                    },
+                )
             await self._put(event)
 
     async def request_permission(
@@ -142,6 +195,50 @@ class AcpClientHandler:
 
     async def _put(self, event: dict[str, Any]) -> None:
         await self.output_queue.put({
+            "conversationId": self.conversation_id,
+            "turnId": self.turn_id,
+            **event,
+        })
+
+    def _put_raw_rpc(
+        self,
+        *,
+        method: str,
+        direction: str,
+        rpc_kind: str,
+        message: dict[str, Any],
+        update_kind: str | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "direction": direction,
+            "message": message,
+            "method": method,
+            "rpcKind": rpc_kind,
+        }
+        if update_kind:
+            payload["updateKind"] = update_kind
+        event = self.mapper.map_raw_rpc_event(payload, self.context)
+        if update_kind:
+            event["updateKind"] = update_kind
+        logger.info(
+            "ACP raw JSON-RPC forwarded: %s",
+            method,
+            extra={
+                "category": "acp",
+                "runtime": self.runtime,
+                "conversationId": self.conversation_id,
+                "turnId": self.turn_id,
+                "nativeSessionId": self.native_session_id,
+                "stage": "jsonrpc.raw",
+                "fields": {
+                    "direction": direction,
+                    "method": method,
+                    "rpcKind": rpc_kind,
+                    "updateKind": update_kind,
+                },
+            },
+        )
+        self.output_queue.put_nowait({
             "conversationId": self.conversation_id,
             "turnId": self.turn_id,
             **event,

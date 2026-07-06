@@ -86,6 +86,37 @@ export interface ChatMessage {
   error?: string;
   toolCalls: ToolCallItem[];
   usage?: UsageStats;
+  plan?: PlanSnapshot;
+  runtimeEvents?: RuntimeEventRecord[];
+}
+
+export type PlanEntryStatus = "pending" | "in_progress" | "completed";
+
+export interface PlanEntry {
+  id?: string;
+  content: string;
+  priority?: "high" | "medium" | "low" | string;
+  status: PlanEntryStatus;
+}
+
+export interface PlanSnapshot {
+  entries: PlanEntry[];
+  id?: string;
+  markdown?: string;
+  source?: string;
+  title?: string;
+  uri?: string;
+}
+
+export interface RuntimeEventRecord {
+  createdAt?: number;
+  direction?: string;
+  method?: string;
+  modeId?: string;
+  raw?: unknown;
+  rpcKind?: string;
+  type: string;
+  updateKind?: string;
 }
 
 export interface ToolCallItem {
@@ -111,6 +142,7 @@ export interface ApprovalRequest {
   impact: string;
   risks: string[];
   rollback: string;
+  plan?: PlanSnapshot;
 }
 
 export interface UsageStats {
@@ -482,6 +514,7 @@ export type AgentEvent =
       toolCallId: string;
       name: string;
       arguments?: unknown;
+      plan?: PlanSnapshot;
       risk?: ToolCallItem["risk"];
     }
   | {
@@ -501,6 +534,7 @@ export type AgentEvent =
       name: string;
       result?: unknown;
       metadata?: Record<string, unknown>;
+      plan?: PlanSnapshot;
     }
   | {
       type: "agent.tool.failed";
@@ -525,6 +559,54 @@ export type AgentEvent =
       impact: string;
       risks: string[];
       rollback: string;
+      plan?: PlanSnapshot;
+    }
+  | {
+      type: "agent.plan.updated";
+      conversationId: string;
+      turnId: string;
+      metadata?: Record<string, unknown>;
+      plan: PlanSnapshot;
+    }
+  | {
+      type: "agent.mode.updated";
+      conversationId: string;
+      turnId: string;
+      metadata?: Record<string, unknown>;
+      modeId: string;
+    }
+  | {
+      type: "agent.command.available.updated";
+      conversationId: string;
+      turnId: string;
+      commands: SlashCommand[];
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "agent.config.updated";
+      conversationId: string;
+      turnId: string;
+      configOptions: unknown[];
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "agent.raw.update";
+      conversationId: string;
+      turnId: string;
+      metadata?: Record<string, unknown>;
+      raw?: unknown;
+      updateKind: string;
+    }
+  | {
+      type: "agent.raw.rpc";
+      conversationId: string;
+      turnId: string;
+      direction?: string;
+      method: string;
+      metadata?: Record<string, unknown>;
+      raw?: unknown;
+      rpcKind?: string;
+      updateKind?: string;
     }
   | {
       type: "agent.context.updated";

@@ -305,9 +305,41 @@
   background: rgba(255, 255, 255, 0.82);
 }
 
+.chat-workspace:has(.plan-progress-panel) .chat-scroll {
+  padding-bottom: 214px;
+}
+
+.chat-workspace:has(.plan-progress-panel.expanded) .chat-scroll {
+  padding-bottom: 372px;
+}
+
+.chat-workspace:has(.plan-progress-panel) .scroll-bottom-button {
+  bottom: 206px;
+}
+
+.chat-workspace:has(.plan-progress-panel.expanded) .scroll-bottom-button {
+  bottom: 352px;
+}
+
 @media (max-width: 780px) {
   .chat-scroll {
     padding-right: 16px;
     padding-left: 16px;
+  }
+
+  .chat-workspace:has(.plan-progress-panel) .chat-scroll {
+    padding-bottom: 214px;
+  }
+
+  .chat-workspace:has(.plan-progress-panel.expanded) .chat-scroll {
+    padding-bottom: 330px;
+  }
+
+  .chat-workspace:has(.plan-progress-panel) .scroll-bottom-button {
+    bottom: 206px;
+  }
+
+  .chat-workspace:has(.plan-progress-panel.expanded) .scroll-bottom-button {
+    bottom: 316px;
   }
 }

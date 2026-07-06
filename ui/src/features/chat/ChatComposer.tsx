@@ -20,6 +20,7 @@ import type {
   ApprovalRequest,
   BillingPricesResult,
   ChatMessage,
+  PlanSnapshot,
   SessionConfigOption,
   SessionModel,
   SessionMode,
@@ -30,6 +31,7 @@ import { loadBillingPrices } from "../../services/billingStore";
 import { ApprovalCard } from "./ApprovalCard";
 import { buildSessionBillingSummary } from "./billing";
 import { ContextRing } from "./ContextRing";
+import { PlanProgressPanel } from "./PlanProgressPanel";
 import { TokenUsageModal } from "./TokenUsageModal";
 import type { ChatConfigValue } from "./chatTypes";
 import "./ChatComposer.css";
@@ -82,6 +84,7 @@ interface ChatComposerProps {
   onSendMessage: () => void;
   onStopTurn: () => void;
   pendingApproval: ApprovalRequest | null;
+  plan: PlanSnapshot | null;
   reasoningEffort: string;
   sendDisabled: boolean;
   selectedConfig: Record<string, ChatConfigValue>;
@@ -109,6 +112,7 @@ export function ChatComposer({
   onSendMessage,
   onStopTurn,
   pendingApproval,
+  plan,
   reasoningEffort,
   sendDisabled,
   selectedConfig,
@@ -354,6 +358,7 @@ export function ChatComposer({
     <Fragment>
     <div className="composer-wrap">
       <div className="composer-stack">
+        <PlanProgressPanel plan={plan} />
         {pendingApproval ? <ApprovalCard approval={pendingApproval} onResolve={onResolveApproval} /> : null}
 
         <div className="composer">

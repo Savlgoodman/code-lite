@@ -75,6 +75,8 @@ export function ChatWorkspace({
   title,
   updatedAt
 }: ChatWorkspaceProps) {
+  const activePlan = [...messages].reverse().find((message) => message.role === "assistant" && message.plan)?.plan ?? null;
+
   return (
     <main className="chat-workspace">
       <ConversationHeader agent={agent} isRunning={isRunning} title={title} />
@@ -106,6 +108,7 @@ export function ChatWorkspace({
         onSendMessage={onSendMessage}
         onStopTurn={onStopTurn}
         pendingApproval={pendingApproval}
+        plan={activePlan}
         reasoningEffort={reasoningEffort}
         selectedConfig={selectedConfig}
         selectedModelFamily={selectedModelFamily}

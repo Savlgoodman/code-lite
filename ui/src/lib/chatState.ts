@@ -64,7 +64,8 @@ export function normalizeStoredState(value: StoredState): StoredState {
         createdAt: typeof message.createdAt === "number" ? message.createdAt : now,
         updatedAt: typeof message.updatedAt === "number" ? message.updatedAt : undefined,
         streaming: false,
-        toolCalls: message.toolCalls ?? []
+        toolCalls: message.toolCalls ?? [],
+        runtimeEvents: message.runtimeEvents ?? []
       }))
     ])
   );

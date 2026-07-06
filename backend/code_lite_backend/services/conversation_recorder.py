@@ -44,6 +44,25 @@ def _default_tool_call(tool_call_id: str, name: str) -> dict[str, Any]:
     }
 
 
+def _event_record(event: dict[str, Any]) -> dict[str, Any]:
+    timestamp = now_ms()
+    keys = (
+        "type",
+        "updateKind",
+        "method",
+        "direction",
+        "rpcKind",
+        "modeId",
+        "commands",
+        "configOptions",
+        "raw",
+        "metadata",
+    )
+    record = {key: event[key] for key in keys if key in event}
+    record["createdAt"] = timestamp
+    return record
+
+
 @dataclass(frozen=True)
 class TurnRecord:
     session: dict[str, Any]
@@ -146,11 +165,28 @@ class ConversationRecorder:
                     **(assistant.get("usage") or {}),
                     **context_data,
                 }
+        elif event_type == "agent.plan.updated":
+            plan = event.get("plan")
+            if isinstance(plan, dict):
+                assistant["plan"] = plan
+                assistant["updatedAt"] = now_ms()
+            self._append_runtime_event(assistant, event)
+        elif event_type in {
+            "agent.command.available.updated",
+            "agent.config.updated",
+            "agent.mode.updated",
+            "agent.raw.rpc",
+            "agent.raw.update",
+        }:
+            self._append_runtime_event(assistant, event)
         elif event_type == "agent.session.updated":
             title = str(event.get("title") or "").strip()
             if title:
                 return self._update_active_session(conversation_id, {"title": title})
         elif event_type == "agent.tool.started":
+            plan = event.get("plan")
+            if isinstance(plan, dict):
+                assistant["plan"] = plan
             self._upsert_tool_call(
                 assistant,
                 event.get("toolCallId") or create_message_id("tool"),
@@ -173,6 +209,9 @@ class ConversationRecorder:
                 },
             )
         elif event_type == "agent.tool.completed":
+            plan = event.get("plan")
+            if isinstance(plan, dict):
+                assistant["plan"] = plan
             self._upsert_tool_call(
                 assistant,
                 event.get("toolCallId") or create_message_id("tool"),
@@ -193,6 +232,9 @@ class ConversationRecorder:
                 },
             )
         elif event_type == "approval.required":
+            plan = event.get("plan")
+            if isinstance(plan, dict):
+                assistant["plan"] = plan
             self._upsert_tool_call(
                 assistant,
                 event.get("toolCallId") or event.get("approvalId") or create_message_id("tool"),
@@ -299,3 +341,12 @@ class ConversationRecorder:
                 "updatedAt": timestamp,
             }
         )
+
+    @staticmethod
+    def _append_runtime_event(message: dict[str, Any], event: dict[str, Any]) -> None:
+        timestamp = now_ms()
+        events = message.setdefault("runtimeEvents", [])
+        if isinstance(events, list):
+            events.append(_event_record(event))
+            del events[:-200]
+        message["updatedAt"] = timestamp

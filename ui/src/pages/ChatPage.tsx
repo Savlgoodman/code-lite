@@ -35,6 +35,9 @@ import type {
   SessionConfigOption,
   SessionModel,
   ToolCallItem,
+  PlanSnapshot,
+  RuntimeEventRecord,
+  SlashCommand,
   UsageStats
 } from "../types";
 
@@ -83,6 +86,34 @@ function upsertToolCall(
         }
       : tool
   );
+}
+
+function appendRuntimeEvent(events: RuntimeEventRecord[] | undefined, event: AgentEvent): RuntimeEventRecord[] {
+  const base: RuntimeEventRecord = {
+    type: event.type,
+    createdAt: Date.now(),
+  };
+  const rawEvent = event as Record<string, unknown>;
+  for (const key of ["direction", "method", "modeId", "raw", "rpcKind", "updateKind"] as const) {
+    if (rawEvent[key] != null) {
+      (base as unknown as Record<string, unknown>)[key] = rawEvent[key];
+    }
+  }
+  return [...(events ?? []), base].slice(-200);
+}
+
+function mergeRuntimeCommands(current: SessionCapabilities | undefined, commands: SlashCommand[]): SessionCapabilities | undefined {
+  if (!current || commands.length === 0) {
+    return current;
+  }
+  return {
+    ...current,
+    commands,
+  };
+}
+
+function hasVisiblePlan(plan: PlanSnapshot | undefined | null) {
+  return Boolean(plan && ((plan.entries?.length ?? 0) > 0 || plan.markdown?.trim()));
 }
 
 function mergeLoadedMessages(loadedMessages: ChatMessage[], cachedMessages: ChatMessage[] | undefined) {
@@ -839,11 +870,77 @@ export function ChatPage() {
       return;
     }
 
+    if (event.type === "agent.plan.updated") {
+      flushQueuedMessageDeltas();
+      setMessages((current) =>
+        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
+          ...message,
+          plan: hasVisiblePlan(event.plan) ? event.plan : message.plan,
+          runtimeEvents: appendRuntimeEvent(message.runtimeEvents, event),
+          updatedAt: Date.now(),
+        }))
+      );
+      return;
+    }
+
+    if (event.type === "agent.command.available.updated") {
+      setCapabilitiesBySession((prev) => {
+        const nextCaps = mergeRuntimeCommands(prev[targetSessionId], event.commands);
+        return nextCaps ? { ...prev, [targetSessionId]: nextCaps } : prev;
+      });
+      setMessages((current) =>
+        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
+          ...message,
+          runtimeEvents: appendRuntimeEvent(message.runtimeEvents, event),
+        }))
+      );
+      return;
+    }
+
+    if (event.type === "agent.mode.updated") {
+      if (event.modeId) {
+        setConfigBySession((prev) => {
+          const current = prev[targetSessionId];
+          const nextConfig: SessionConfig = {
+            accessMode: event.modeId,
+            modelFamily: current?.modelFamily ?? "",
+            reasoningEffort: current?.reasoningEffort ?? "medium",
+            selectedConfig: current?.selectedConfig ?? {},
+          };
+          const result = { ...prev, [targetSessionId]: nextConfig };
+          configBySessionRef.current = result;
+          return result;
+        });
+      }
+      setMessages((current) =>
+        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
+          ...message,
+          runtimeEvents: appendRuntimeEvent(message.runtimeEvents, event),
+        }))
+      );
+      return;
+    }
+
+    if (
+      event.type === "agent.config.updated"
+      || event.type === "agent.raw.rpc"
+      || event.type === "agent.raw.update"
+    ) {
+      setMessages((current) =>
+        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
+          ...message,
+          runtimeEvents: appendRuntimeEvent(message.runtimeEvents, event),
+        }))
+      );
+      return;
+    }
+
     if (event.type === "agent.tool.started") {
       flushQueuedMessageDeltas();
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
+          plan: hasVisiblePlan(event.plan) ? event.plan : message.plan,
           toolCalls: upsertToolCall(message.toolCalls, {
             anchorOffset: message.content.length,
             argumentsText: formatJson(event.arguments),
@@ -878,6 +975,7 @@ export function ChatPage() {
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
+          plan: hasVisiblePlan(event.plan) ? event.plan : message.plan,
           toolCalls: upsertToolCall(message.toolCalls, {
             id: event.toolCallId || createId("tool"),
             name: event.name,
@@ -913,6 +1011,7 @@ export function ChatPage() {
         conversationId: targetSessionId,
         impact: event.impact,
         name: event.name,
+        plan: event.plan,
         purpose: event.purpose,
         risk: event.risk,
         risks: event.risks,
@@ -923,6 +1022,7 @@ export function ChatPage() {
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
+          plan: hasVisiblePlan(event.plan) ? event.plan : message.plan,
           toolCalls: upsertToolCall(message.toolCalls, {
             anchorOffset: message.content.length,
             argumentsText: formatJson(event.argumentsText ? event.argumentsText : event.arguments),
