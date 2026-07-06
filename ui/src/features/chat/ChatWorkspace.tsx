@@ -12,6 +12,7 @@ import { ChatComposer } from "./ChatComposer";
 import { ConversationHeader } from "./ConversationHeader";
 import { MessageList } from "./MessageList";
 import type { ChatConfigValue } from "./chatTypes";
+import { latestMergedPlanFromMessages } from "./planSnapshots";
 import "./ChatWorkspace.css";
 
 interface ChatWorkspaceProps {
@@ -75,10 +76,7 @@ export function ChatWorkspace({
   title,
   updatedAt
 }: ChatWorkspaceProps) {
-  const activePlan = [...messages]
-    .reverse()
-    .find((message) => message.role === "assistant" && hasVisiblePlan(message.plan))
-    ?.plan ?? null;
+  const activePlan = latestMergedPlanFromMessages(messages) ?? null;
 
   return (
     <main className="chat-workspace">
@@ -118,23 +116,4 @@ export function ChatWorkspace({
       />
     </main>
   );
-}
-
-function hasVisiblePlan(plan: ChatMessage["plan"]) {
-  return Boolean(
-    plan
-      && ((plan.entries?.length ?? 0) > 0 || hasMarkdownPlanEntries(plan.markdown))
-  );
-}
-
-function hasMarkdownPlanEntries(markdown: string | undefined) {
-  if (!markdown?.trim()) {
-    return false;
-  }
-  return markdown.split(/\r?\n/).some((line) => {
-    const text = line.trim();
-    return /^[-*]\s+\[[ xX]\]\s+.+$/.test(text)
-      || /^(?:\d+|[一二三四五六七八九十]+)[.、]\s+.+$/.test(text)
-      || /^#{2,6}\s+(?:步骤|Step|Task)\s*[\w一二三四五六七八九十]*[：:.\-\s]*.+$/i.test(text);
-  });
 }

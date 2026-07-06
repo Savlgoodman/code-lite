@@ -86,6 +86,41 @@ def _normalize_plan_entry_text(value: Any) -> str:
     return text.lower()
 
 
+def _comparable_plan_entry_text(value: Any) -> str:
+    return re.sub(r"[\s`\"'_*()[\]{}<>（）【】]", "", _normalize_plan_entry_text(value))
+
+
+def _is_generic_plan_entry_id(value: Any) -> bool:
+    text = str(value or "")
+    return not text or bool(re.match(r"^(?:plan-entry|markdown-plan)-\d+$", text))
+
+
+def _plan_entry_content_matches(current_content: Any, next_content: Any) -> bool:
+    current = _comparable_plan_entry_text(current_content)
+    next_text = _comparable_plan_entry_text(next_content)
+    if not current or not next_text:
+        return False
+    if current == next_text:
+        return True
+    shorter, longer = (current, next_text) if len(current) <= len(next_text) else (next_text, current)
+    return len(shorter) >= 6 and shorter in longer
+
+
+def _plan_entries_match(current: dict[str, Any], next_entry: dict[str, Any]) -> bool:
+    current_id = current.get("id")
+    next_id = next_entry.get("id")
+    if not _is_generic_plan_entry_id(current_id) and current_id == next_id:
+        return True
+    return _plan_entry_content_matches(current.get("content"), next_entry.get("content"))
+
+
+def _find_plan_entry_index(current_entries: list[Any], next_entry: dict[str, Any]) -> int | None:
+    for index, current in enumerate(current_entries):
+        if isinstance(current, dict) and _plan_entries_match(current, next_entry):
+            return index
+    return None
+
+
 def _has_visible_plan(plan: Any) -> bool:
     if not isinstance(plan, dict):
         return False
@@ -110,23 +145,13 @@ def _has_markdown_plan_entries(markdown: Any) -> bool:
 
 def _merge_plan_entries(current_entries: list[Any], next_entries: list[Any]) -> list[Any]:
     merged = [dict(entry) if isinstance(entry, dict) else entry for entry in current_entries]
-    index_by_content: dict[str, int] = {}
-    for index, entry in enumerate(merged):
-        if not isinstance(entry, dict):
-            continue
-        key = _normalize_plan_entry_text(entry.get("content"))
-        if key and key not in index_by_content:
-            index_by_content[key] = index
 
     for entry in next_entries:
         if not isinstance(entry, dict):
             continue
-        key = _normalize_plan_entry_text(entry.get("content"))
-        existing_index = index_by_content.get(key) if key else None
+        existing_index = _find_plan_entry_index(merged, entry)
         if existing_index is None:
             merged.append(dict(entry))
-            if key:
-                index_by_content[key] = len(merged) - 1
             continue
         current = merged[existing_index]
         if isinstance(current, dict):
@@ -140,14 +165,8 @@ def _merge_plan_entries(current_entries: list[Any], next_entries: list[Any]) -> 
 
 
 def _has_matching_plan_entry(current_entries: list[Any], next_entries: list[Any]) -> bool:
-    current_keys = {
-        _normalize_plan_entry_text(entry.get("content"))
-        for entry in current_entries
-        if isinstance(entry, dict)
-    }
-    current_keys.discard("")
     return any(
-        isinstance(entry, dict) and _normalize_plan_entry_text(entry.get("content")) in current_keys
+        isinstance(entry, dict) and _find_plan_entry_index(current_entries, entry) is not None
         for entry in next_entries
     )
 
@@ -163,6 +182,7 @@ def _merge_plan_snapshot(current: Any, next_plan: Any) -> dict[str, Any] | None:
     if (
         len(current_entries) > 1
         and 0 < len(next_entries) < len(current_entries)
+        and next_plan.get("source") == "acp.plan"
         and _has_matching_plan_entry(current_entries, next_entries)
     ):
         return {
