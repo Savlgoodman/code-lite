@@ -35,6 +35,7 @@ import type {
   SessionConfigOption,
   SessionModel,
   ToolCallItem,
+  PlanEntry,
   PlanSnapshot,
   RuntimeEventRecord,
   SlashCommand,
@@ -113,7 +114,129 @@ function mergeRuntimeCommands(current: SessionCapabilities | undefined, commands
 }
 
 function hasVisiblePlan(plan: PlanSnapshot | undefined | null) {
-  return Boolean(plan && ((plan.entries?.length ?? 0) > 0 || plan.markdown?.trim()));
+  return Boolean(
+    plan
+      && ((plan.entries?.length ?? 0) > 0 || hasMarkdownPlanEntries(plan.markdown))
+  );
+}
+
+function hasMarkdownPlanEntries(markdown: string | undefined) {
+  if (!markdown?.trim()) {
+    return false;
+  }
+  return markdown.split(/\r?\n/).some((line) => {
+    const text = line.trim();
+    return /^[-*]\s+\[[ xX]\]\s+.+$/.test(text)
+      || /^(?:\d+|[一二三四五六七八九十]+)[.、]\s+.+$/.test(text)
+      || /^#{2,6}\s+(?:步骤|Step|Task)\s*[\w一二三四五六七八九十]*[：:.\-\s]*.+$/i.test(text);
+  });
+}
+
+function normalizePlanEntryText(value: string) {
+  return value
+    .replace(/^\s*[-*]\s+\[[ xX]\]\s*/, "")
+    .replace(/^\s*(?:\d+|[一二三四五六七八九十]+)[.、]\s*/, "")
+    .replace(/^\s*#{1,6}\s*/, "")
+    .replace(/^\s*(?:步骤|Step|Task)\s*[\w一二三四五六七八九十]*[：:.\-\s]+/i, "")
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function mergePlanEntries(currentEntries: PlanEntry[], nextEntries: PlanEntry[]) {
+  const merged = currentEntries.map((entry) => ({ ...entry }));
+  const indexByContent = new Map<string, number>();
+  for (let index = 0; index < merged.length; index += 1) {
+    const key = normalizePlanEntryText(merged[index].content);
+    if (key && !indexByContent.has(key)) {
+      indexByContent.set(key, index);
+    }
+  }
+
+  for (const entry of nextEntries) {
+    const key = normalizePlanEntryText(entry.content);
+    const existingIndex = key ? indexByContent.get(key) : undefined;
+    if (existingIndex == null) {
+      const appended = { ...entry };
+      merged.push(appended);
+      if (key) {
+        indexByContent.set(key, merged.length - 1);
+      }
+      continue;
+    }
+    merged[existingIndex] = {
+      ...merged[existingIndex],
+      ...entry,
+      content: merged[existingIndex].content || entry.content,
+      id: merged[existingIndex].id || entry.id,
+    };
+  }
+  return merged;
+}
+
+function hasMatchingPlanEntry(currentEntries: PlanEntry[], nextEntries: PlanEntry[]) {
+  const currentKeys = new Set(
+    currentEntries
+      .map((entry) => normalizePlanEntryText(entry.content))
+      .filter(Boolean),
+  );
+  return nextEntries.some((entry) => currentKeys.has(normalizePlanEntryText(entry.content)));
+}
+
+function mergePlanSnapshot(current: PlanSnapshot | undefined, next: PlanSnapshot | undefined | null) {
+  if (!hasVisiblePlan(next)) {
+    return current;
+  }
+  if (!current || !hasVisiblePlan(current)) {
+    return next ?? current;
+  }
+
+  const currentEntries = current.entries ?? [];
+  const nextEntries = next?.entries ?? [];
+  if (
+    currentEntries.length > 1
+    && nextEntries.length > 0
+    && nextEntries.length < currentEntries.length
+    && hasMatchingPlanEntry(currentEntries, nextEntries)
+  ) {
+    return {
+      ...current,
+      ...next,
+      entries: mergePlanEntries(currentEntries, nextEntries),
+      markdown: next?.markdown ?? current.markdown,
+      title: next?.title ?? current.title,
+      uri: next?.uri ?? current.uri,
+    };
+  }
+  return next ?? current;
+}
+
+function latestPlanFromMessages(items: ChatMessage[] | undefined, excludeMessageId: string) {
+  if (!items?.length) {
+    return undefined;
+  }
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const message = items[index];
+    if (message.id === excludeMessageId) {
+      continue;
+    }
+    if (message.role === "assistant" && hasVisiblePlan(message.plan)) {
+      return message.plan;
+    }
+  }
+  return undefined;
+}
+
+function mergeMessagePlan(
+  message: ChatMessage,
+  sessionMessages: ChatMessage[] | undefined,
+  nextPlan: PlanSnapshot | undefined | null,
+) {
+  if (!hasVisiblePlan(nextPlan)) {
+    return message.plan;
+  }
+  return mergePlanSnapshot(message.plan ?? latestPlanFromMessages(sessionMessages, message.id), nextPlan);
 }
 
 function mergeLoadedMessages(loadedMessages: ChatMessage[], cachedMessages: ChatMessage[] | undefined) {
@@ -875,7 +998,7 @@ export function ChatPage() {
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
-          plan: hasVisiblePlan(event.plan) ? event.plan : message.plan,
+          plan: mergeMessagePlan(message, current[targetSessionId], event.plan),
           runtimeEvents: appendRuntimeEvent(message.runtimeEvents, event),
           updatedAt: Date.now(),
         }))
@@ -940,7 +1063,7 @@ export function ChatPage() {
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
-          plan: hasVisiblePlan(event.plan) ? event.plan : message.plan,
+          plan: mergeMessagePlan(message, current[targetSessionId], event.plan),
           toolCalls: upsertToolCall(message.toolCalls, {
             anchorOffset: message.content.length,
             argumentsText: formatJson(event.arguments),
@@ -975,7 +1098,7 @@ export function ChatPage() {
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
-          plan: hasVisiblePlan(event.plan) ? event.plan : message.plan,
+          plan: mergeMessagePlan(message, current[targetSessionId], event.plan),
           toolCalls: upsertToolCall(message.toolCalls, {
             id: event.toolCallId || createId("tool"),
             name: event.name,
@@ -1022,7 +1145,7 @@ export function ChatPage() {
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
-          plan: hasVisiblePlan(event.plan) ? event.plan : message.plan,
+          plan: mergeMessagePlan(message, current[targetSessionId], event.plan),
           toolCalls: upsertToolCall(message.toolCalls, {
             anchorOffset: message.content.length,
             argumentsText: formatJson(event.argumentsText ? event.argumentsText : event.arguments),

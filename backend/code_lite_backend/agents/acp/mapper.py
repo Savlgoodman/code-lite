@@ -134,6 +134,7 @@ def _clean_plan_text(value: str) -> str:
     text = re.sub(r"^\s*[-*]\s+\[[ xX]\]\s*", "", text)
     text = re.sub(r"^\s*(?:\d+|[一二三四五六七八九十]+)[.、]\s*", "", text)
     text = re.sub(r"^\s*#{1,6}\s*", "", text)
+    text = re.sub(r"^\s*(?:步骤|Step|Task)\s*[\w一二三四五六七八九十]*[：:.\-\s]+", "", text, flags=re.I)
     text = text.replace("**", "").replace("__", "")
     return text.strip()
 
@@ -276,7 +277,15 @@ def _plan_from_tool_payload(tool_call: Any, source: str) -> dict[str, Any] | Non
     if not isinstance(raw, dict):
         return None
     raw_input = raw.get("rawInput") or raw.get("raw_input")
-    markdown = _extract_markdown_plan(raw_input) or _extract_markdown_plan(raw)
+    markdown = ""
+    if isinstance(raw_input, dict):
+        raw_plan = raw_input.get("plan")
+        if isinstance(raw_plan, str) and raw_plan.strip():
+            markdown = raw_plan
+    if not markdown and not _is_plan_tool_payload(raw):
+        return None
+    if not markdown:
+        markdown = _extract_markdown_plan(raw)
     if not markdown:
         return None
     plan_file = raw_input.get("planFilePath") if isinstance(raw_input, dict) else None
@@ -286,6 +295,15 @@ def _plan_from_tool_payload(tool_call: Any, source: str) -> dict[str, Any] | Non
         title=str(raw.get("title") or "").strip() or None,
         uri=str(plan_file) if plan_file else None,
     )
+
+
+def _is_plan_tool_payload(raw: dict[str, Any]) -> bool:
+    raw_input = raw.get("rawInput") or raw.get("raw_input")
+    kind = str(raw.get("kind") or "").lower()
+    title = str(raw.get("title") or "").strip().lower()
+    if isinstance(raw_input, dict) and (raw_input.get("plan") or raw_input.get("planFilePath")):
+        return True
+    return kind == "switch_mode" or title in {"ready to code?", "exited plan mode"}
 
 
 def _plan_from_tool_result(result: Any) -> dict[str, Any] | None:
