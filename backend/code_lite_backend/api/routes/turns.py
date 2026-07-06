@@ -253,6 +253,17 @@ async def stream_turn(
                         assistant_message_id=assistant_message_id,
                         event=event,
                     )
+                    if event.get("type") == "agent.run.completed" and isinstance(event.get("usage"), dict):
+                        services.billing_usage_recorder.enqueue_turn_usage(
+                            conversation_id=conversation_id,
+                            turn_id=turn_id,
+                            assistant_message_id=assistant_message_id,
+                            workspace=workspace,
+                            agent_id=agent_id,
+                            agent_label=str(agent_metadata.get("label") or agent_id),
+                            model_metadata=model_metadata,
+                            usage=event.get("usage"),
+                        )
                     if session is not None:
                         event = {
                             **event,

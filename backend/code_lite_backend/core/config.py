@@ -66,6 +66,7 @@ class RuntimeConfig:
     data_dir: Path
     config_dir: Path
     record_dir: Path
+    billing_dir: Path
     logs_dir: Path
     cache_dir: Path
     app_config_path: Path
@@ -116,10 +117,11 @@ def resolve_runtime_config(
     data_dir = resolve_data_dir(env=env, workspace=workspace, data_dir_override=data_dir_override)
     config_dir = data_dir / "config"
     record_dir = data_dir / "record"
+    billing_dir = data_dir / "billing"
     logs_dir = data_dir / "logs"
     cache_dir = data_dir / "cache"
 
-    for directory in (config_dir, record_dir, logs_dir, cache_dir):
+    for directory in (config_dir, record_dir, billing_dir / "daily", logs_dir, cache_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     nanobot_config_path = (
@@ -143,6 +145,7 @@ def resolve_runtime_config(
         data_dir=data_dir,
         config_dir=config_dir,
         record_dir=record_dir,
+        billing_dir=billing_dir,
         logs_dir=logs_dir,
         cache_dir=cache_dir,
         app_config_path=app_config_path,

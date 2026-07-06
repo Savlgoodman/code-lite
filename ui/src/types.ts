@@ -147,6 +147,66 @@ export interface BillingPricesResult {
   stale: boolean;
 }
 
+export interface BillingUsageTotals {
+  cachedReadTokens: number;
+  cachedWriteTokens: number;
+  estimatedCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  thoughtTokens: number;
+  totalTokens: number;
+  turns: number;
+  unknownCostTurns: number;
+}
+
+export interface BillingUsageModel extends BillingUsageTotals {
+  key?: string;
+  modelId: string;
+  modelLabel: string;
+  priceModelId?: string;
+  runtime: string;
+}
+
+export interface BillingUsageSeriesPoint extends BillingUsageTotals {
+  bucket: string;
+  date?: string;
+}
+
+export interface BillingUsageEntry {
+  agentId?: string;
+  agentLabel?: string;
+  confidence?: "measured" | "partial" | "estimated" | string;
+  conversationId?: string;
+  cost?: {
+    estimatedCostUsd?: number;
+    matched?: boolean;
+    priceModelId?: string;
+  };
+  createdAtIso?: string;
+  id?: string;
+  localDate?: string;
+  localHour?: string;
+  modelId?: string;
+  modelLabel?: string;
+  runtime?: string;
+  timestamp?: number;
+  turnId?: string;
+  usage?: UsageStats;
+  workspaceLabel?: string;
+}
+
+export interface BillingUsageSummary {
+  currency: "USD" | string;
+  date?: string;
+  endDate?: string;
+  models: BillingUsageModel[];
+  recentEntries: BillingUsageEntry[];
+  series: BillingUsageSeriesPoint[];
+  startDate?: string;
+  timezone?: string;
+  totals: BillingUsageTotals;
+}
+
 export interface SystemProfileItem {
   label: string;
   value: string;
