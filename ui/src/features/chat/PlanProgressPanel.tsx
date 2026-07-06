@@ -115,7 +115,7 @@ export function PlanProgressPanel({ plan }: PlanProgressPanelProps) {
             <span className="plan-progress-marker" aria-hidden="true">
               {entry.status === "completed" ? <Check size={11} strokeWidth={2.8} /> : null}
             </span>
-            <span className="plan-progress-text">{entry.content}</span>
+            <span className="plan-progress-text" title={entry.content}>{entry.content}</span>
           </li>
         ))}
       </ol>

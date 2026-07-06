@@ -33,8 +33,6 @@
 }
 
 .plan-progress-panel.expanded {
-  width: min(760px, 100%);
-  min-width: 0;
   background: rgba(255, 255, 255, 0.9);
 }
 
@@ -162,18 +160,10 @@
 
 .plan-progress-text {
   min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.plan-progress-panel.collapsed .plan-progress-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow-wrap: normal;
-}
-
-.plan-progress-panel.expanded .plan-progress-text {
-  overflow-wrap: anywhere;
 }
 
 @keyframes plan-progress-ring-spin {

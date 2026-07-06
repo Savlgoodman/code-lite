@@ -310,7 +310,7 @@
 }
 
 .chat-workspace:has(.plan-progress-panel.expanded) .chat-scroll {
-  padding-bottom: 372px;
+  padding-bottom: 320px;
 }
 
 .chat-workspace:has(.plan-progress-panel) .scroll-bottom-button {
@@ -318,7 +318,7 @@
 }
 
 .chat-workspace:has(.plan-progress-panel.expanded) .scroll-bottom-button {
-  bottom: 352px;
+  bottom: 300px;
 }
 
 @media (max-width: 780px) {
@@ -332,7 +332,7 @@
   }
 
   .chat-workspace:has(.plan-progress-panel.expanded) .chat-scroll {
-    padding-bottom: 330px;
+    padding-bottom: 292px;
   }
 
   .chat-workspace:has(.plan-progress-panel) .scroll-bottom-button {
@@ -340,6 +340,6 @@
   }
 
   .chat-workspace:has(.plan-progress-panel.expanded) .scroll-bottom-button {
-    bottom: 316px;
+    bottom: 278px;
   }
 }
