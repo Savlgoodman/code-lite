@@ -21,7 +21,8 @@ $cmd = @(
   "call `"$vsDevCmd`" -arch=x64 -host_arch=x64",
   "set `"PATH=%USERPROFILE%\.cargo\bin;%PATH%`"",
   "cd /d `"$repoRoot`"",
-  "npm run tauri:dev"
+  "npm run ui:deps",
+  "npm run tauri:dev --ignore-scripts"
 ) -join " && "
 
 if ($SkipBackend) {
