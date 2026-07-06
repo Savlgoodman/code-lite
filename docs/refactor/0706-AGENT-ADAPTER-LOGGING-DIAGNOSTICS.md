@@ -28,9 +28,11 @@ React UI
 | `backend/code_lite_backend/agents/acp/client.py` | ACP client handler，接收 update 和 permission request |
 | `backend/code_lite_backend/agents/acp/mapper.py` | ACP update 到 `AgentEvent` 的映射 |
 | `backend/code_lite_backend/agents/runtimes/descriptors.py` | Codex / Claude Code / opencode descriptor |
-| `backend/code_lite_backend/agents/codex/adapter.py` | 旧 Codex 专属 adapter，目前没有主流程引用 |
+| `backend/code_lite_backend/agents/runtimes/profiles.py` | Codex / Claude Code / opencode runtime profile |
+| `backend/code_lite_backend/agents/codex/adapter.py` | 已删除，Codex 不再维护独立 adapter |
+| `backend/code_lite_backend/agents/claude_code/adapter.py` | 已删除，Claude Code 不再维护 placeholder adapter |
 
-当前 `agents/codex/adapter.py` 只由 `agents/codex/__init__.py` 导出，没有被 registry、router 或 app 主流程引用。后续不再往该文件新增功能，应把它作为迁移遗留代码，待通用 ACP 路径覆盖功能后删除。
+当前 Codex、Claude Code、opencode 均通过 `AcpAgentAdapter` + `RuntimeProfile` 进入 ACP 主线，不再存在独立 Codex / Claude Code adapter 入口。
 
 ## 2. 当前问题
 
@@ -423,6 +425,13 @@ MVP 不需要实时 WebSocket，可用刷新按钮和 tail API。
 4. `AgentRuntimeConfigStore` 中 Codex 专属方法逐步收敛为 runtime 通用方法或移动到 Codex profile。
 5. 标记 `agents/codex/adapter.py` 为 legacy，确认无引用后删除。
 
+实现状态：
+
+1. 已新增 `backend/code_lite_backend/agents/runtimes/profiles.py`。
+2. `AcpAgentAdapter` 的 command / env / mode / model / reasoning 配置已移动到 runtime profile。
+3. `agents/codex/adapter.py`、`agents/codex/__init__.py`、`agents/claude_code/adapter.py`、`agents/claude_code/__init__.py` 已删除。
+4. `registry.py` 和 `router.py` 已改为统一从 descriptor registry 创建 ACP adapter。
+
 建议验证：
 
 ```powershell
@@ -441,6 +450,13 @@ uv run --project backend python -m code_lite_backend.main --help
 3. ACP stderr tail 同时写 ring buffer 和 `runtime-stderr.jsonl`。
 4. 保留旧 backend 文本日志兼容。
 
+实现状态：
+
+1. 已新增 `backend/code_lite_backend/core/structured_logging.py`。
+2. backend 启动时会在 `data/logs/current/` 下写入分类 JSONL 日志。
+3. `runtime.stderr` 会同时保留 ring buffer，并写入 `runtime-stderr.jsonl`。
+4. 旧 `--log-file` 文本日志仍保留。
+
 建议验证：
 
 1. 启动 backend 后 `data/logs/current/` 自动创建。
@@ -457,6 +473,13 @@ uv run --project backend python -m code_lite_backend.main --help
 3. `agent.run.failed` 附带 `diagnostic`。
 4. 配置失败等非致命问题通过 `agent.diagnostic` 可选事件输出。
 
+实现状态：
+
+1. `DiagnosticError` 已落地在结构化日志模块。
+2. turn prompt 失败、ACP command 不存在、session initialize 失败、runtime model probe 失败会写入 `diagnostics.jsonl`。
+3. `agent.run.failed` 和 session initialize HTTP 错误会附带 `diagnostic`。
+4. configure mode / model / reasoning 的非致命失败当前作为 ACP warning 日志记录。
+
 建议验证：
 
 1. 配置不存在的 ACP command，前端收到 `acp.command_not_found`。
@@ -470,6 +493,13 @@ uv run --project backend python -m code_lite_backend.main --help
 1. backend 增加 logs API。
 2. 设置页新增“日志”栏目。
 3. 支持 tail、filter、详情展开、复制诊断摘要。
+
+实现状态：
+
+1. 已新增 `/api/logs/files`、`/api/logs/tail`、`/api/logs/diagnostics/{conversation_id}`。
+2. 设置页已新增“日志”栏目，可刷新、按 category / level / query 过滤、展开 JSON 详情。
+3. MVP 暂未加入复制诊断摘要按钮，详情 JSON 已可直接查看。
+4. 日志颜色约定已落地：ACP 红色、runtime stderr 浅红、API 中性灰、Python 蓝色、diagnostic 深红。
 
 建议验证：
 
@@ -538,3 +568,27 @@ uv run --project backend python -m code_lite_backend.main --help
 2. Codex、Claude Code、opencode 的专属行为应归位到 runtime profile。
 3. 日志和诊断应作为独立基础设施重构，避免继续把 stderr 和 exception 拼进单一错误字符串。
 4. 设置页日志查看依赖结构化日志和 logs API，应放在日志落盘之后实现。
+
+## 15. 2026-07-06 实施记录
+
+本轮实现已完成 adapter 归位、结构化日志、基础诊断和设置页日志查看。
+
+已验证：
+
+```powershell
+uv run --project backend python -m py_compile backend/code_lite_backend/core/structured_logging.py backend/code_lite_backend/agents/runtimes/profiles.py backend/code_lite_backend/agents/acp/adapter.py backend/code_lite_backend/agents/acp/runtime_manager.py backend/code_lite_backend/api/routes/logs.py backend/code_lite_backend/api/routes/sessions.py backend/code_lite_backend/api/routes/settings.py backend/code_lite_backend/app.py backend/code_lite_backend/main.py
+npm run ui:build
+git diff --check
+```
+
+补充验证：
+
+1. 使用临时目录验证结构化日志会生成 `api.jsonl`、`runtime-stderr.jsonl`、`diagnostics.jsonl`。
+2. 使用 FastAPI TestClient 验证 `/api/logs/files` 和 `/api/logs/tail` 在空日志目录下返回 200。
+3. 使用 `logger.exception` 验证 Python 异常堆栈会进入 `python.jsonl` 的 `fields.exception`。
+
+未完成项：
+
+1. 当前 backend 依赖未包含 pytest，`uv run --project backend python -m pytest` 无法运行。
+2. 需要后续在本机已安装 Codex / Claude Code ACP wrapper 的环境中做真实 initialize / prompt smoke。
+3. 日志轮转、清理和复制诊断摘要按钮留到下一轮。

@@ -12,9 +12,9 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from code_lite_backend.agents.acp.client import AcpClientHandler
-from code_lite_backend.agents.runtimes import CODEX_DESCRIPTOR
+from code_lite_backend.agents.runtimes import get_descriptor, get_runtime_profile
 from code_lite_backend.api.dependencies import get_services
-from code_lite_backend.services.agent_runtime_config import _string_list
+from code_lite_backend.core.structured_logging import DiagnosticError, log_diagnostic
 from code_lite_backend.schemas.session import (
     SessionCapabilities,
     build_nanobot_session_capabilities,
@@ -25,6 +25,43 @@ from code_lite_backend.services.runtime import AppServices
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _log_session_diagnostic(
+    *,
+    services: AppServices,
+    code: str,
+    message: str,
+    agent_id: str,
+    conversation_id: str,
+    error: Exception,
+    stage: str,
+    command: list[str] | None = None,
+) -> dict[str, Any]:
+    connection = services.runtime_manager.get_connection_for_conversation(conversation_id) if services.runtime_manager else None
+    stderr_tail = list(connection.stderr_ring_buffer) if connection is not None else []
+    native_session_id = None
+    if connection is not None:
+        binding = connection.sessions.get(conversation_id)
+        native_session_id = binding.native_session_id if binding is not None else None
+    diagnostic = DiagnosticError(
+        code=code,
+        message=message,
+        category="acp",
+        stage=stage,
+        runtime=agent_id,
+        conversation_id=conversation_id,
+        native_session_id=native_session_id,
+        retryable=True,
+        user_action="请查看设置页日志中的 ACP 与 runtime stderr 详情。",
+        details={
+            "errorType": type(error).__name__,
+            "command": command,
+            "stderrTail": stderr_tail,
+        },
+    )
+    log_diagnostic(services.runtime_config.logs_dir, diagnostic)
+    return diagnostic.to_dict()
 
 
 @router.post("/sessions/{conversation_id}/initialize")
@@ -65,16 +102,12 @@ async def initialize_session(
         )
         return JSONResponse(caps.to_dict())
 
-    if agent_id == "codex":
-        descriptor = CODEX_DESCRIPTOR
-    else:
-        from code_lite_backend.agents.runtimes import get_descriptor
-        descriptor = get_descriptor(agent_id)
-        if descriptor is None:
-            logger.error("  No descriptor for agent_id=%s", agent_id)
-            return JSONResponse({
-                "error": f"不支持的 agent: {agent_id}",
-            }, status_code=400)
+    descriptor = get_descriptor(agent_id)
+    if descriptor is None:
+        logger.error("  No descriptor for agent_id=%s", agent_id)
+        return JSONResponse({
+            "error": f"不支持的 agent: {agent_id}",
+        }, status_code=400)
 
     logger.info("  descriptor: id=%s label=%s status=%s default_mode=%s",
                 descriptor.id, descriptor.label, descriptor.status, descriptor.default_mode)
@@ -94,14 +127,34 @@ async def initialize_session(
         logger.info("  configOptions: %s", [o.id for o in caps.config_options])
         return JSONResponse(caps.to_dict())
     except FileNotFoundError as exc:
+        diagnostic = _log_session_diagnostic(
+            services=services,
+            code="acp.session_command_not_found",
+            message=f"{agent_label} session 初始化失败：{exc}",
+            agent_id=agent_id,
+            conversation_id=conversation_id,
+            error=exc,
+            stage="session.initialize.spawn",
+        )
         logger.error("  FAIL — command not found: %s", exc)
         return JSONResponse({
             "error": f"初始化 session 失败：{agent_label} 的可执行文件未找到 ({exc})。请在设置页安装 ACP 包。",
+            "diagnostic": diagnostic,
         }, status_code=502)
     except Exception as exc:
+        diagnostic = _log_session_diagnostic(
+            services=services,
+            code="acp.session_initialize_failed",
+            message=f"{agent_label} session 初始化失败：{type(exc).__name__}: {exc}",
+            agent_id=agent_id,
+            conversation_id=conversation_id,
+            error=exc,
+            stage="session.initialize",
+        )
         logger.exception("  FAIL — unexpected error: %s: %s", type(exc).__name__, exc)
         return JSONResponse({
             "error": f"初始化 session 失败: {type(exc).__name__}: {exc}",
+            "diagnostic": diagnostic,
         }, status_code=502)
 
 
@@ -114,27 +167,13 @@ async def _initialize_acp_session(
     conversation_id: str,
 ) -> SessionCapabilities:
     """通过 RuntimeManager 复用连接和 session 来构建 SessionCapabilities。"""
-    agent_runtime_config_store = services.agent_runtime_config_store
-    runtime_config = services.runtime_config
+    profile = get_runtime_profile(agent_id)
+    if profile is None:
+        raise RuntimeError(f"Unsupported ACP runtime profile: {agent_id}")
 
-    if agent_id == "codex":
-        command = agent_runtime_config_store.codex_command()
-        env = agent_runtime_config_store.codex_env()
-        default_mode = agent_runtime_config_store.codex_mode()
-    elif agent_id == "claude_code":
-        runtime_settings = agent_runtime_config_store.load()["agentRuntimes"]
-        claude_runtime = runtime_settings.get("claude_code", {})
-        command = _string_list(claude_runtime.get("command"))
-        if not command:
-            command = agent_runtime_config_store.managed_claude_command()
-        from code_lite_backend.agents.runtimes import claude_env
-        logs_dir = str(runtime_config.logs_dir / "claude-agent-acp")
-        env = claude_env(claude_runtime, logs_dir=logs_dir)
-        default_mode = str(claude_runtime.get("mode") or descriptor.default_mode)
-    else:
-        command = descriptor.default_command
-        env = dict(__import__("os").environ)
-        default_mode = descriptor.default_mode
+    command = profile.resolve_command(services.agent_runtime_config_store)
+    env = profile.build_env(services.agent_runtime_config_store, services.runtime_config)
+    default_mode = profile.default_mode(services.agent_runtime_config_store)
 
     logger.info("  command: %s", command)
     logger.info("  default_mode: %s", default_mode)

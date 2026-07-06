@@ -19,6 +19,7 @@ from acp.transports import default_environment
 
 from code_lite_backend.agents.acp.client import AcpClientHandler
 from code_lite_backend.agents.runtimes import RuntimeDescriptor
+from code_lite_backend.core.structured_logging import write_runtime_stderr
 from code_lite_backend.services.approvals import ApprovalBroker
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,10 @@ class AcpRuntimeManager:
         self._handshake_timeout = 30.0
         self._session_timeout = 30.0
         self._conversation_store = conversation_store  # ConversationStore (optional)
+        self._logs_dir: Path | None = None
+
+    def set_logs_dir(self, logs_dir: Path) -> None:
+        self._logs_dir = logs_dir
 
     def get_turn_lock(self, conversation_id: str) -> asyncio.Lock:
         """获取指定 conversation 的 turn lock（串行化同一会话的 prompt）。"""
@@ -426,13 +431,25 @@ class AcpRuntimeManager:
                 cwd=str(workspace),
             )
         except FileNotFoundError:
-            logger.error("[spawn] executable not found: %s", command[0])
+            logger.error(
+                "[spawn] executable not found: %s",
+                command[0],
+                extra={"category": "acp", "runtime": descriptor.id, "stage": "spawn"},
+            )
             raise
         except Exception:
-            logger.exception("[spawn] failed to create subprocess: %s", command)
+            logger.exception(
+                "[spawn] failed to create subprocess: %s",
+                command,
+                extra={"category": "acp", "runtime": descriptor.id, "stage": "spawn"},
+            )
             raise
 
-        logger.info("[spawn] subprocess started, pid=%s", process.pid)
+        logger.info(
+            "[spawn] subprocess started, pid=%s",
+            process.pid,
+            extra={"category": "acp", "runtime": descriptor.id, "stage": "spawn", "fields": {"pid": process.pid}},
+        )
 
         if process.stdout is None or process.stdin is None:
             process.kill()
@@ -489,12 +506,14 @@ class AcpRuntimeManager:
                 "[spawn] initialize() OK — agent_info=%s load_session=%s",
                 getattr(initialize_result, "agent_info", None),
                 getattr(getattr(initialize_result, "agent_capabilities", None), "load_session", None),
+                extra={"category": "acp", "runtime": descriptor.id, "stage": "initialize"},
             )
         except asyncio.TimeoutError:
             stderr_dump = "\n".join(client_handler.stderr_tail)
             logger.error(
                 "[spawn] initialize() TIMEOUT after 30s. returncode=%s stderr:\n%s",
                 process.returncode, stderr_dump or "(empty)",
+                extra={"category": "acp", "runtime": descriptor.id, "stage": "initialize"},
             )
             with contextlib.suppress(Exception):
                 process.kill()
@@ -509,6 +528,7 @@ class AcpRuntimeManager:
             logger.error(
                 "[spawn] initialize() FAILED: %s: %s. returncode=%s stderr:\n%s",
                 type(exc).__name__, exc, process.returncode, stderr_dump or "(empty)",
+                extra={"category": "acp", "runtime": descriptor.id, "stage": "initialize"},
             )
             with contextlib.suppress(Exception):
                 process.kill()
@@ -550,6 +570,15 @@ class AcpRuntimeManager:
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     client.stderr_tail.append(text)
+                    if self._logs_dir is not None:
+                        write_runtime_stderr(
+                            self._logs_dir,
+                            runtime=client.runtime,
+                            message=text,
+                            conversation_id=client.conversation_id,
+                            turn_id=client.turn_id,
+                            native_session_id=client.native_session_id,
+                        )
         except (asyncio.CancelledError, Exception):
             pass
 

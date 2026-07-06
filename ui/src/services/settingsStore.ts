@@ -11,6 +11,8 @@ import type {
   ModelGeneration,
   ModelLimits,
   ModelProtocol,
+  LogFilesResult,
+  LogTailResult,
   ModelProviderModelsResult,
   ModelSettingsState,
   SavedModelProviderResult
@@ -37,6 +39,27 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadAppAbout(): Promise<AppAboutInfo> {
   return requestJson<AppAboutInfo>("/api/settings/about");
+}
+
+export async function loadLogFiles(): Promise<LogFilesResult> {
+  return requestJson<LogFilesResult>("/api/logs/files");
+}
+
+export async function loadLogTail(options: {
+  category?: string;
+  level?: string;
+  runtime?: string;
+  query?: string;
+  limit?: number;
+} = {}): Promise<LogTailResult> {
+  const params = new URLSearchParams();
+  if (options.category) params.set("category", options.category);
+  if (options.level) params.set("level", options.level);
+  if (options.runtime) params.set("runtime", options.runtime);
+  if (options.query) params.set("query", options.query);
+  if (options.limit) params.set("limit", String(options.limit));
+  const suffix = params.toString() ? `?${params}` : "";
+  return requestJson<LogTailResult>(`/api/logs/tail${suffix}`);
 }
 
 export async function loadAgentRuntimeSettings(): Promise<AgentRuntimeSettingsState> {

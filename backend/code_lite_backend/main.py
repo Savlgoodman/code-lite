@@ -14,10 +14,10 @@ from code_lite_backend.app import create_app
 from code_lite_backend.core.config import resolve_runtime_config
 from code_lite_backend.core.encoding import configure_stdio_encoding
 from code_lite_backend.core.paths import DEFAULT_WORKSPACE
+from code_lite_backend.core.structured_logging import configure_logging
 
 logger = logging.getLogger(__name__)
 
-_LOG_FILE_HANDLE = None
 _RUNTIME_MANAGER = None
 
 
@@ -36,19 +36,6 @@ def parse_args() -> argparse.Namespace:
         help="Agent adapter to use. Defaults to CODE_LITE_ADAPTER or router.",
     )
     return parser.parse_args()
-
-
-def configure_log_file(log_file: str | None) -> None:
-    if not log_file:
-        return
-
-    path = Path(log_file).expanduser().resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    global _LOG_FILE_HANDLE
-    _LOG_FILE_HANDLE = path.open("a", encoding="utf-8", buffering=1)
-    sys.stdout = _LOG_FILE_HANDLE
-    sys.stderr = _LOG_FILE_HANDLE
 
 
 def _setup_shutdown_hooks(app_instance) -> None:
@@ -92,35 +79,9 @@ def _setup_shutdown_hooks(app_instance) -> None:
             signal.signal(signal.SIGBREAK, _win_signal_handler)
 
 
-def configure_logging() -> None:
-    """配置根 logger，让所有模块的 logger.info/error 输出到 stdout。
-
-    没有这个配置，uvicorn 的 log_level 只影响 uvicorn 自己的 logger，
-    我们模块里的 logging.getLogger(__name__) 会被静默丢弃。
-    """
-    root = logging.getLogger()
-    if root.handlers:
-        # 已配置（如被 uvicorn 提前初始化），只调整级别
-        root.setLevel(logging.INFO)
-        return
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            datefmt="%H:%M:%S",
-        )
-    )
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
-    # code_lite_backend 命名空间显式设为 INFO
-    logging.getLogger("code_lite_backend").setLevel(logging.INFO)
-
-
 def main() -> None:
     configure_stdio_encoding()
     args = parse_args()
-    configure_log_file(args.log_file)
-    configure_logging()
     workspace = Path(args.workspace).resolve()
     runtime_config = resolve_runtime_config(
         workspace=workspace,
@@ -128,6 +89,7 @@ def main() -> None:
         data_dir_override=Path(args.data_dir) if args.data_dir else None,
         agent_adapter_override=args.agent_adapter,
     )
+    configure_logging(log_file=args.log_file, logs_dir=runtime_config.logs_dir)
     app = create_app(runtime_config=runtime_config, workspace=workspace)
     _setup_shutdown_hooks(app)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

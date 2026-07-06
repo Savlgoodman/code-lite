@@ -7,7 +7,7 @@ from typing import AsyncIterator
 from code_lite_backend.agents.acp import AcpAgentAdapter
 from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
 from code_lite_backend.agents.nanobot import NanobotAgentAdapter
-from code_lite_backend.agents.runtimes import CODEX_DESCRIPTOR, get_descriptor
+from code_lite_backend.agents.runtimes import get_descriptor
 from code_lite_backend.core.config import RuntimeConfig
 from code_lite_backend.schemas.agent import AgentAdapterCapabilities, AgentEvent, AgentRunRequest
 from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigStore
@@ -50,10 +50,7 @@ class AgentRouterAdapter:
             return existing
 
         # ACP runtime：通过 descriptor 创建
-        if adapter_name == "codex":
-            descriptor = CODEX_DESCRIPTOR
-        else:
-            descriptor = get_descriptor(adapter_name)
+        descriptor = get_descriptor(adapter_name)
         if descriptor is None:
             return None
 

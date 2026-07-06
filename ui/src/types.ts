@@ -401,6 +401,40 @@ export interface AgentRuntimeSettingsState {
   runtimes: AgentRuntimeConfig[];
 }
 
+export interface LogFileInfo {
+  bytes: number;
+  category: string;
+  exists: boolean;
+  name: string;
+  path: string;
+  size: string;
+}
+
+export interface LogFilesResult {
+  files: LogFileInfo[];
+  logsDir: string;
+}
+
+export interface LogEntry {
+  category?: string;
+  conversationId?: string;
+  fields?: Record<string, unknown>;
+  id?: string;
+  level?: string;
+  message?: string;
+  nativeSessionId?: string;
+  runtime?: string;
+  source?: string;
+  stage?: string;
+  timestamp?: string;
+  turnId?: string;
+}
+
+export interface LogTailResult {
+  entries: LogEntry[];
+  logsDir: string;
+}
+
 export type AgentEvent =
   | {
       type: "conversation.turn.started";
@@ -518,6 +552,7 @@ export type AgentEvent =
       type: "agent.run.failed";
       conversationId: string;
       turnId: string;
+      diagnostic?: Record<string, unknown>;
       error?: string;
       session?: Session;
     };

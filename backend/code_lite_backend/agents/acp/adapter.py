@@ -15,14 +15,9 @@ from code_lite_backend.agents.acp.capabilities import (
 from code_lite_backend.agents.acp.client import AcpClientHandler
 from code_lite_backend.agents.acp.mapper import extract_prompt_response_usage, to_jsonable
 from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
-from code_lite_backend.agents.runtimes import (
-    RuntimeDescriptor,
-    claude_env,
-    codex_env,
-    resolve_codex_mode,
-)
-from code_lite_backend.agents.runtimes import CODEX_DESCRIPTOR
+from code_lite_backend.agents.runtimes import RuntimeDescriptor, get_runtime_profile
 from code_lite_backend.core.config import RuntimeConfig
+from code_lite_backend.core.structured_logging import DiagnosticError, log_diagnostic
 from code_lite_backend.schemas.agent import (
     AgentAdapterCapabilities,
     AgentEvent,
@@ -60,6 +55,9 @@ class AcpAgentAdapter:
         self._agent_runtime_config_store = agent_runtime_config_store
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
         self._runtime_manager = runtime_manager or AcpRuntimeManager()
+        self._profile = get_runtime_profile(runtime)
+        if self._profile is None:
+            raise ValueError(f"Unsupported ACP runtime profile: {runtime}")
 
     @property
     def capabilities(self) -> AgentAdapterCapabilities:
@@ -115,8 +113,8 @@ class AcpAgentAdapter:
 
     async def list_models(self, workspace: Path) -> dict[str, Any]:
         """启动临时 ACP session，提取可用模型列表。"""
-        command = self._resolve_command()
-        env = self._resolve_env()
+        command = self._profile.resolve_command(self._agent_runtime_config_store)
+        env = self._profile.build_env(self._agent_runtime_config_store, self._runtime_config)
         client = AcpClientHandler(
             runtime=self.descriptor.id,
             conversation_id="model-probe",
@@ -159,6 +157,63 @@ class AcpAgentAdapter:
                 payload["agentInfo"] = to_jsonable(getattr(initialize_result, "agent_info", None))
                 payload["command"] = command
                 return payload
+        except FileNotFoundError as exc:
+            diagnostic = DiagnosticError(
+                code="acp.model_probe_command_not_found",
+                message=f"{self.descriptor.label} 模型探测失败：{exc}",
+                category="acp",
+                stage="model_probe.spawn",
+                runtime=self.descriptor.id,
+                conversation_id="model-probe",
+                turn_id="model-probe",
+                retryable=True,
+                user_action="请在设置页安装或修正该 Agent Runtime 的 ACP 命令。",
+                details={"errorType": type(exc).__name__, "command": command},
+            )
+            log_diagnostic(self._runtime_config.logs_dir, diagnostic)
+            logger.error(
+                "ACP model probe process not found for %s: %s",
+                self.name,
+                exc,
+                extra={
+                    "category": "acp",
+                    "runtime": self.descriptor.id,
+                    "conversationId": "model-probe",
+                    "turnId": "model-probe",
+                    "stage": "model_probe.spawn",
+                },
+            )
+            raise
+        except Exception as exc:
+            diagnostic = DiagnosticError(
+                code="acp.model_probe_failed",
+                message=f"{self.descriptor.label} 模型探测失败：{type(exc).__name__}: {exc}",
+                category="acp",
+                stage="model_probe",
+                runtime=self.descriptor.id,
+                conversation_id="model-probe",
+                turn_id="model-probe",
+                retryable=True,
+                user_action="请查看设置页日志中的 ACP 与 runtime stderr 详情。",
+                details={
+                    "errorType": type(exc).__name__,
+                    "command": command,
+                    "stderrTail": list(client.stderr_tail),
+                },
+            )
+            log_diagnostic(self._runtime_config.logs_dir, diagnostic)
+            logger.exception(
+                "ACP model probe failed for %s",
+                self.name,
+                extra={
+                    "category": "acp",
+                    "runtime": self.descriptor.id,
+                    "conversationId": "model-probe",
+                    "turnId": "model-probe",
+                    "stage": "model_probe",
+                },
+            )
+            raise
         finally:
             if stderr_task is not None:
                 stderr_task.cancel()
@@ -174,8 +229,8 @@ class AcpAgentAdapter:
         client: AcpClientHandler,
         output_queue: asyncio.Queue[AgentEvent | None],
     ) -> None:
-        command = self._resolve_command()
-        env = self._resolve_env()
+        command = self._profile.resolve_command(self._agent_runtime_config_store)
+        env = self._profile.build_env(self._agent_runtime_config_store, self._runtime_config)
         logger.info(
             "Starting turn %s for conversation %s (runtime=%s, command=%s)",
             request.turn_id, request.conversation_id, self.name, command[0],
@@ -239,8 +294,11 @@ class AcpAgentAdapter:
                     request.conversation_id[:12], binding.native_session_id[:12],
                 )
 
-                # 配置 session（mode, model, reasoning effort）
-                await self._configure_session(connection_sdk, binding, request)
+                await self._profile.apply_turn_config(
+                    conn=connection_sdk,
+                    session_id=binding.native_session_id,
+                    request=request,
+                )
 
                 # 发送 prompt
                 logger.info("Sending prompt to session %s", binding.native_session_id[:12])
@@ -298,157 +356,83 @@ class AcpAgentAdapter:
             })
             raise
         except FileNotFoundError as exc:
-            logger.error("ACP process not found for %s: %s", self.name, exc)
+            diagnostic = DiagnosticError(
+                code="acp.command_not_found",
+                message=f"{self.descriptor.label} ACP 启动失败：{exc}",
+                category="acp",
+                stage="spawn",
+                runtime=self.descriptor.id,
+                conversation_id=request.conversation_id,
+                turn_id=request.turn_id,
+                retryable=True,
+                user_action="请在设置页安装或修正该 Agent Runtime 的 ACP 命令。",
+                details={"errorType": type(exc).__name__, "command": command},
+            )
+            log_diagnostic(self._runtime_config.logs_dir, diagnostic)
+            logger.error(
+                "ACP process not found for %s: %s",
+                self.name,
+                exc,
+                extra={
+                    "category": "acp",
+                    "runtime": self.descriptor.id,
+                    "conversationId": request.conversation_id,
+                    "turnId": request.turn_id,
+                    "stage": "spawn",
+                },
+            )
             await output_queue.put({
                 "type": "agent.run.failed",
                 "conversationId": request.conversation_id,
                 "turnId": request.turn_id,
-                "error": f"{self.descriptor.label} ACP 启动失败：{exc}",
+                "error": diagnostic.message,
+                "diagnostic": diagnostic.to_dict(),
             })
         except Exception as exc:
-            logger.exception("Turn %s failed for conversation %s", request.turn_id, request.conversation_id)
+            logger.exception(
+                "Turn %s failed for conversation %s",
+                request.turn_id,
+                request.conversation_id,
+                extra={
+                    "category": "acp",
+                    "runtime": self.descriptor.id,
+                    "conversationId": request.conversation_id,
+                    "turnId": request.turn_id,
+                    "stage": "prompt",
+                },
+            )
             # 尝试从 connection 获取 stderr
             connection = self._runtime_manager.get_connection_for_conversation(request.conversation_id)
             stderr = ""
             if connection is not None:
                 stderr = "\n".join(connection.stderr_ring_buffer)
             suffix = f"\n\n{self.descriptor.label} stderr:\n{stderr}" if stderr else ""
+            diagnostic = DiagnosticError(
+                code="acp.prompt_failed",
+                message=f"{self.descriptor.label} ACP 运行失败：{type(exc).__name__}: {exc}",
+                category="acp",
+                stage="prompt",
+                runtime=self.descriptor.id,
+                conversation_id=request.conversation_id,
+                turn_id=request.turn_id,
+                native_session_id=client.native_session_id,
+                retryable=True,
+                user_action="请查看设置页日志中的 ACP 与 runtime stderr 详情。",
+                details={
+                    "errorType": type(exc).__name__,
+                    "stderrTail": list(connection.stderr_ring_buffer) if connection is not None else [],
+                },
+            )
+            log_diagnostic(self._runtime_config.logs_dir, diagnostic)
             await output_queue.put({
                 "type": "agent.run.failed",
                 "conversationId": request.conversation_id,
                 "turnId": request.turn_id,
-                "error": f"{self.descriptor.label} ACP 运行失败：{type(exc).__name__}: {exc}{suffix}",
+                "error": f"{diagnostic.message}{suffix}",
+                "diagnostic": diagnostic.to_dict(),
             })
         finally:
             await output_queue.put(None)
-
-    async def _configure_session(
-        self, conn: Any, session_binding: Any, request: AgentRunRequest
-    ) -> None:
-        session_id = session_binding.native_session_id
-
-        # ─── 设置模式 ───
-        mode = self._resolve_mode(request.access_mode)
-        logger.info(
-            "[configure] turn=%s conversation=%s session=%s access_mode=%s -> resolved_mode=%s runtime=%s",
-            request.turn_id, request.conversation_id[:12], session_id[:12],
-            request.access_mode, mode, self.name,
-        )
-        if mode:
-            try:
-                await asyncio.wait_for(
-                    conn.set_session_mode(session_id=session_id, mode_id=mode),
-                    timeout=10,
-                )
-                logger.info("[configure] set_session_mode(%s) OK", mode)
-            except Exception as exc:
-                logger.warning("[configure] set_session_mode(%s) failed: %s", mode, exc)
-
-        # ── 设置模型 ──
-        # Claude Code: 模型通过 set_config_option(config_id="model", value="haiku") 设置
-        # Codex: 模型通过 set_session_model 设置（如果支持）
-        model = str(
-            request.runtime_model or request.model_metadata.get("model") or ""
-        ).strip()
-        logger.info(
-            "[configure] turn=%s conversation=%s runtime_model=%s model_metadata.model=%s -> final_model=%s",
-            request.turn_id, request.conversation_id[:12],
-            request.runtime_model, request.model_metadata.get("model"), model,
-        )
-        if model:
-            if self.name == "claude_code":
-                # Claude Code 不支持 set_session_model，通过 config option 设置
-                try:
-                    await asyncio.wait_for(
-                        conn.set_config_option(
-                            session_id=session_id,
-                            config_id="model",
-                            value=model,
-                        ),
-                        timeout=10,
-                    )
-                    logger.info("[configure] set_config_option(model=%s) OK", model)
-                except Exception as exc:
-                    logger.warning("[configure] set_config_option(model=%s) failed: %s", model, exc)
-            else:
-                # Codex 等其他 runtime 尝试 set_session_model
-                try:
-                    await asyncio.wait_for(
-                        conn.set_session_model(session_id=session_id, model_id=model),
-                        timeout=10,
-                    )
-                    logger.info("[configure] set_session_model(%s) OK", model)
-                except Exception as exc:
-                    logger.warning("[configure] set_session_model(%s) failed: %s", model, exc)
-
-        # ─── 设置 reasoning effort ───
-        reasoning_effort = (
-            request.reasoning_effort or request.model_metadata.get("reasoningEffort") or ""
-        ).strip()
-        effort_config_id = "effort" if self.name == "claude_code" else "reasoning_effort"
-        logger.info(
-            "[configure] turn=%s conversation=%s reasoning_effort=%s config_id=%s runtime=%s",
-            request.turn_id, request.conversation_id[:12],
-            reasoning_effort, effort_config_id, self.name,
-        )
-        if reasoning_effort and reasoning_effort != "none":
-            try:
-                await asyncio.wait_for(
-                    conn.set_config_option(
-                        session_id=session_id,
-                        config_id=effort_config_id,
-                        value=reasoning_effort,
-                    ),
-                    timeout=10,
-                )
-                logger.info("[configure] set_config_option(%s=%s) OK", effort_config_id, reasoning_effort)
-            except Exception as exc:
-                logger.warning("[configure] set_config_option(%s=%s) failed: %s", effort_config_id, reasoning_effort, exc)
-        else:
-            logger.info("[configure] skipping set_config_option (effort=%s)", reasoning_effort or "(empty)")
-
-    def _resolve_command(self) -> list[str]:
-        """解析当前 runtime 的可执行命令。"""
-        if self.name == "codex":
-            return self._agent_runtime_config_store.codex_command()
-        if self.name == "claude_code":
-            runtime_settings = self._agent_runtime_config_store.load()["agentRuntimes"]
-            claude_runtime = runtime_settings.get("claude_code", {})
-            from code_lite_backend.services.agent_runtime_config import _string_list
-            command = _string_list(claude_runtime.get("command"))
-            if command:
-                return command
-            return self._agent_runtime_config_store.managed_claude_command()
-        return self.descriptor.default_command
-
-    def _resolve_env(self) -> dict[str, str]:
-        """解析当前 runtime 的环境变量。"""
-        if self.name == "codex":
-            runtime_config = self._agent_runtime_config_store.load()
-            codex_runtime = runtime_config["agentRuntimes"].get("codex", {})
-            logs_dir = str(self._runtime_config.logs_dir / "codex-acp")
-            isolated_home = None
-            if codex_runtime.get("configMode") == "isolated":
-                codex_home = self._runtime_config.data_dir / "runtime-state" / "codex-home"
-                codex_home.mkdir(parents=True, exist_ok=True)
-                isolated_home = str(codex_home)
-            return codex_env(codex_runtime, logs_dir=logs_dir, isolated_codex_home=isolated_home)
-        if self.name == "claude_code":
-            runtime_config = self._agent_runtime_config_store.load()
-            claude_runtime = runtime_config["agentRuntimes"].get("claude_code", {})
-            logs_dir = str(self._runtime_config.logs_dir / "claude-agent-acp")
-            return claude_env(claude_runtime, logs_dir=logs_dir)
-        return dict(__import__("os").environ)
-
-    def _resolve_mode(self, fallback: str | None = None) -> str | None:
-        """解析当前 runtime 的模式。"""
-        if self.name == "codex":
-            return resolve_codex_mode(fallback)
-        if self.name == "claude_code":
-            # 前端发送的是 Claude Code 真实的 mode id（default/plan/acceptEdits/...），
-            # 直接透传即可，不要用 CLAUDE_MODE_MAP 映射（会错误映射成 ask）
-            return str(fallback).strip() if fallback else None
-        return None
 
     async def _drain_stderr(self, process: Any, client: AcpClientHandler) -> None:
         stderr = getattr(process, "stderr", None)

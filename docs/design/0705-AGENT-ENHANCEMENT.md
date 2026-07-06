@@ -179,9 +179,9 @@ else:
     usage_dict = handler_usage.to_dict() if handler_usage else None
 ```
 
-#### 2.3.3 Codex adapter 同步修改
+#### 2.3.3 Codex runtime profile 同步修改
 
-**文件**: `backend/code_lite_backend/agents/codex/adapter.py` — 同样逻辑
+旧 `backend/code_lite_backend/agents/codex/adapter.py` 已从主线移除。Codex 相关差异应通过通用 `AcpAgentAdapter`、`RuntimeProfile` 和 `agents/runtimes/codex` 方向承载，不再维护独立 Codex adapter。
 
 #### 2.3.4 消息记录
 
@@ -884,7 +884,7 @@ const handleTextAreaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 | `backend/.../agents/acp/capabilities.py` | 新增 `parse_commands_from_session_result()` |
 | `backend/.../agents/acp/mapper.py` | 扩展 `UsageSnapshot`，新增 `extract_prompt_response_usage()`，新增压缩检测 |
 | `backend/.../agents/acp/adapter.py` | 读取 `prompt_result.usage`，合并分项 + context window 数据 |
-| `backend/.../agents/codex/adapter.py` | 同步 adapter.py 的改动 |
+| `backend/.../agents/runtimes/profiles.py` | Codex / Claude Code / opencode 的 runtime-specific 配置归位 |
 | `backend/.../agents/conversation_recorder.py` | 无需改动（自动记录新的 usage 字段） |
 
 ### 7.2 前端（TypeScript/React）
