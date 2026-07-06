@@ -53,6 +53,7 @@ docs/
 | 文档 | 类型 | 用途 |
 | --- | --- | --- |
 | `design/0703-RUNTIME-MODEL-PROVIDER.md` | 设计 | runtime 原生配置、产品模型配置和 legacy LLM provider 配置边界 |
+| `design/0706-BILLING-DAILY-USAGE.md` | 设计 | 日统计、项目总计和费用总览的数据结构与落盘方案 |
 | `design/0702-REMOTE-SYNC.md` | 设计 | 远程只读观看、事件补偿、权限和审计 |
 | `refactor/0703-RUNTIME-DATA-CHAT-UI.md` | 重构 | 运行时数据目录、会话事件存储和聊天 UI 优化 |
 | `guides/BUILD_AND_RELEASE.md` | 说明 | Windows 编译、打包和发布产物整理 |
