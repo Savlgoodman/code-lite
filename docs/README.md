@@ -1,6 +1,6 @@
 # code-lite 文档中心
 
-更新时间：2026-07-03
+更新时间：2026-07-06
 
 当前技术路线已经收敛为：
 
@@ -55,6 +55,7 @@ docs/
 | `design/0703-RUNTIME-MODEL-PROVIDER.md` | 设计 | runtime 原生配置、产品模型配置和 legacy LLM provider 配置边界 |
 | `design/0706-BILLING-DAILY-USAGE.md` | 设计 | 日统计、项目总计和费用总览的数据结构与落盘方案 |
 | `design/0702-REMOTE-SYNC.md` | 设计 | 远程只读观看、事件补偿、权限和审计 |
+| `refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` | 重构 | Agent adapter 归位、结构化日志、诊断错误和设置页日志查看 |
 | `refactor/0703-RUNTIME-DATA-CHAT-UI.md` | 重构 | 运行时数据目录、会话事件存储和聊天 UI 优化 |
 | `guides/BUILD_AND_RELEASE.md` | 说明 | Windows 编译、打包和发布产物整理 |
 | `guides/RELEASE_AND_UPDATE.md` | 说明 | 发布与后续自动更新规划 |

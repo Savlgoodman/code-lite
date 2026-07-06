@@ -58,6 +58,7 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 | `docs/development/DEVELOPMENT_WORKFLOW.md` | 开发流程规范，记录 dev 集成、分支命名、master 使用范围、变基合并和版本升级要求 |
 | `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` | ACP Agent Adapter 实施设计，记录 Codex、Claude Code、opencode 的主线接入方案 |
 | `docs/design/0703-AGENT-UNIFIED-ACP.md` | 统一前端交互协议设计，记录 session capabilities、模型、模式和事件映射 |
+| `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` | Agent adapter 归位、结构化日志、诊断错误和设置页日志查看重构方案 |
 | `docs/design/0702-REMOTE-SYNC.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
 | `docs/design/0703-RUNTIME-MODEL-PROVIDER.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
 | `docs/guides/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
@@ -68,10 +69,10 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 1. 做产品需求相关任务，先读 `docs/README.md` 和 `docs/guides/PRD.md`。
 2. 做架构、模块边界相关任务，先读 `docs/architecture/ARCHITECTURE.md` 和 `docs/architecture/PROJECT_STRUCTURE.md`。
 3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/guides/UI_DEVELOPMENT.md`。
-4. 做 Codex、Claude Code、opencode、ACP adapter 和 runtime 事件相关任务，先读 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` 和 `docs/design/0703-AGENT-UNIFIED-ACP.md`。
+4. 做 Codex、Claude Code、opencode、ACP adapter 和 runtime 事件相关任务，先读 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md`、`docs/design/0703-AGENT-UNIFIED-ACP.md` 和 `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md`。
 5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/design/0702-REMOTE-SYNC.md`。
 6. 做模型供应商、模型选择和 runtime 配置相关任务，先读 `docs/design/0703-RUNTIME-MODEL-PROVIDER.md`。
-7. 做运行时数据、聊天 UI、迁移或重构相关任务，先读 `docs/refactor/0703-RUNTIME-DATA-CHAT-UI.md`。
+7. 做运行时数据、聊天 UI、adapter 迁移、日志或诊断重构相关任务，先读 `docs/refactor/0703-RUNTIME-DATA-CHAT-UI.md` 和 `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md`。
 8. 做 ACP 协议、Python backend ACP client 或 SDK 探针相关调研，先读 `docs/research/0702-AGENT-ACP-RESEARCH.md` 和 `docs/research/0703-BACKEND-ACP-RESEARCH.md`。
 9. 做 legacy nanobot demo 相关任务，只参考 `demo/nanobot-demo/README.md` 和当前代码，不把 nanobot 作为新功能主线。
 10. 做功能开发、Bug 修复、性能优化、重构或发布合并前，先读 `docs/development/DEVELOPMENT_WORKFLOW.md`。
