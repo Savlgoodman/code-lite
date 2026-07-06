@@ -34,7 +34,6 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     model_config_store = ModelConfigStore(runtime_config)
     agent_runtime_config_store = AgentRuntimeConfigStore(runtime_config)
     runtime_manager = AcpRuntimeManager(conversation_store=conversation_store)
-    runtime_manager.set_logs_dir(runtime_config.logs_dir)
     services = AppServices(
         runtime_config=runtime_config,
         workspace=workspace,

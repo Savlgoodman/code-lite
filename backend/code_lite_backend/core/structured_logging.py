@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import threading
 import uuid
@@ -23,6 +24,13 @@ LOG_CATEGORIES = {
 }
 
 _TEXT_LOG_HANDLE: Any | None = None
+_ANSI_RESET = "\033[0m"
+_CATEGORY_COLORS = {
+    "acp": "\033[31m",
+    "runtime.stderr": "\033[91m",
+    "diagnostic": "\033[91m",
+    "python": "\033[34m",
+}
 
 
 def _utc_now() -> str:
@@ -143,12 +151,42 @@ class StructuredLogHandler(logging.Handler):
             self.handleError(record)
 
 
+class CategoryColorFormatter(logging.Formatter):
+    def __init__(self, *args: Any, use_color: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.use_color = use_color
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        if not self.use_color:
+            return message
+        category = str(getattr(record, "category", "") or _category_from_logger(record.name))
+        color = _CATEGORY_COLORS.get(category)
+        if not color:
+            return message
+        return f"{color}{message}{_ANSI_RESET}"
+
+
 def _category_from_logger(name: str) -> str:
     if ".api." in name:
         return "api"
     if ".agents.acp" in name or ".agents.runtimes" in name:
         return "acp"
     return "python"
+
+
+def _console_color_enabled(stream: Any, *, log_file: str | None) -> bool:
+    if log_file:
+        return False
+    color_mode = os.environ.get("CODE_LITE_LOG_COLOR", "").lower()
+    if color_mode in {"1", "true", "yes", "always"}:
+        return True
+    if color_mode in {"0", "false", "no", "never"}:
+        return False
+    if os.environ.get("NO_COLOR"):
+        return False
+    isatty = getattr(stream, "isatty", None)
+    return bool(isatty and isatty())
 
 
 def configure_logging(*, log_file: str | None = None, logs_dir: Path | None = None) -> None:
@@ -166,9 +204,10 @@ def configure_logging(*, log_file: str | None = None, logs_dir: Path | None = No
         handler.close()
     root.setLevel(logging.INFO)
 
-    formatter = logging.Formatter(
+    formatter = CategoryColorFormatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
+        use_color=_console_color_enabled(sys.stdout, log_file=log_file),
     )
 
     stream_handler = logging.StreamHandler(sys.stdout)

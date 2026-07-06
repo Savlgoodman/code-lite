@@ -178,17 +178,18 @@ prompt_result = await conn.prompt(...)
 
 日志分类建议使用稳定 category，而不是只靠颜色：
 
-| category | 含义 | UI 颜色建议 |
+| category | 含义 | 控制台颜色 | UI 颜色建议 |
 | --- | --- | --- |
-| `api` | HTTP API 请求、响应、参数摘要 | 沿用当前默认色 |
-| `acp` | ACP spawn、initialize、session、prompt、permission、JSON-RPC 阶段 | 红色 |
-| `python` | backend 内部任务、存储、billing、配置、启动关闭 | 蓝色 |
-| `runtime.stderr` | codex-acp / claude-agent-acp / opencode 的 stderr | 红色弱化 |
-| `tauri` | Tauri sidecar 启动、停止、复用 backend | 默认色 |
-| `ui` | 前端捕获的可诊断错误，后续可选 | 默认色 |
-| `audit` | 审批、远程操作、权限相关审计 | 高对比色 |
+| `api` | HTTP API 请求、响应、参数摘要 | 沿用当前默认色 | 沿用当前默认色 |
+| `acp` | ACP spawn、initialize、session、prompt、permission、JSON-RPC 阶段 | 红色 | 红色 |
+| `python` | backend 内部任务、存储、billing、配置、启动关闭 | 蓝色 | 蓝色 |
+| `runtime.stderr` | codex-acp / claude-agent-acp / opencode 的 stderr | 浅红色 | 红色弱化 |
+| `diagnostic` | 结构化错误诊断 | 浅红色 | 深红色 |
+| `tauri` | Tauri sidecar 启动、停止、复用 backend | 默认色 | 默认色 |
+| `ui` | 前端捕获的可诊断错误，后续可选 | 默认色 | 默认色 |
+| `audit` | 审批、远程操作、权限相关审计 | 默认色 | 高对比色 |
 
-颜色只用于 UI 展示，不写入日志文件。
+颜色只用于控制台和 UI 展示，不写入 JSONL 日志文件。backend 使用 `--log-file` 写文本文件时也默认关闭 ANSI 颜色，避免日志文件出现转义码。
 
 ### 6.2 文件布局
 
@@ -456,6 +457,7 @@ uv run --project backend python -m code_lite_backend.main --help
 2. backend 启动时会在 `data/logs/current/` 下写入分类 JSONL 日志。
 3. `runtime.stderr` 会同时保留 ring buffer，并写入 `runtime-stderr.jsonl`。
 4. 旧 `--log-file` 文本日志仍保留。
+5. 控制台输出已按 category 上色：ACP 红色、runtime stderr / diagnostic 浅红、Python 蓝色、API 默认色。`CODE_LITE_LOG_COLOR=always` 可强制开启，`CODE_LITE_LOG_COLOR=never` 或 `NO_COLOR=1` 可关闭。
 
 建议验证：
 
@@ -499,7 +501,7 @@ uv run --project backend python -m code_lite_backend.main --help
 1. 已新增 `/api/logs/files`、`/api/logs/tail`、`/api/logs/diagnostics/{conversation_id}`。
 2. 设置页已新增“日志”栏目，可刷新、按 category / level / query 过滤、展开 JSON 详情。
 3. MVP 暂未加入复制诊断摘要按钮，详情 JSON 已可直接查看。
-4. 日志颜色约定已落地：ACP 红色、runtime stderr 浅红、API 中性灰、Python 蓝色、diagnostic 深红。
+4. UI 日志颜色约定已落地：ACP 红色、runtime stderr 浅红、API 中性灰、Python 蓝色、diagnostic 深红。
 
 建议验证：
 
@@ -571,7 +573,7 @@ uv run --project backend python -m code_lite_backend.main --help
 
 ## 15. 2026-07-06 实施记录
 
-本轮实现已完成 adapter 归位、结构化日志、基础诊断和设置页日志查看。
+本轮实现已完成 adapter 归位、结构化日志、基础诊断、控制台日志颜色和设置页日志查看。
 
 已验证：
 

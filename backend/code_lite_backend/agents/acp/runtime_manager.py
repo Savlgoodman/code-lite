@@ -19,7 +19,6 @@ from acp.transports import default_environment
 
 from code_lite_backend.agents.acp.client import AcpClientHandler
 from code_lite_backend.agents.runtimes import RuntimeDescriptor
-from code_lite_backend.core.structured_logging import write_runtime_stderr
 from code_lite_backend.services.approvals import ApprovalBroker
 
 logger = logging.getLogger(__name__)
@@ -100,10 +99,6 @@ class AcpRuntimeManager:
         self._handshake_timeout = 30.0
         self._session_timeout = 30.0
         self._conversation_store = conversation_store  # ConversationStore (optional)
-        self._logs_dir: Path | None = None
-
-    def set_logs_dir(self, logs_dir: Path) -> None:
-        self._logs_dir = logs_dir
 
     def get_turn_lock(self, conversation_id: str) -> asyncio.Lock:
         """获取指定 conversation 的 turn lock（串行化同一会话的 prompt）。"""
@@ -570,15 +565,16 @@ class AcpRuntimeManager:
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     client.stderr_tail.append(text)
-                    if self._logs_dir is not None:
-                        write_runtime_stderr(
-                            self._logs_dir,
-                            runtime=client.runtime,
-                            message=text,
-                            conversation_id=client.conversation_id,
-                            turn_id=client.turn_id,
-                            native_session_id=client.native_session_id,
-                        )
+                    logger.warning(
+                        text,
+                        extra={
+                            "category": "runtime.stderr",
+                            "runtime": client.runtime,
+                            "conversationId": client.conversation_id,
+                            "turnId": client.turn_id,
+                            "nativeSessionId": client.native_session_id,
+                        },
+                    )
         except (asyncio.CancelledError, Exception):
             pass
 
