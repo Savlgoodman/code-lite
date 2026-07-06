@@ -374,6 +374,32 @@ class AcpRuntimeManager:
             capabilities=data.get("capabilities"),
         )
 
+    def load_text_baselines(self, conversation_id: str) -> dict[str, str]:
+        """读取已持久化的 assistant 文本，用于过滤 ACP session 历史重放。"""
+        if self._conversation_store is None:
+            return {"content": "", "reasoning": ""}
+        try:
+            messages = self._conversation_store.load_messages(conversation_id)
+        except Exception as exc:
+            logger.warning("Failed to load ACP text baselines for %s: %s", conversation_id[:12], exc)
+            return {"content": "", "reasoning": ""}
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        for message in messages:
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content:
+                content_parts.append(content)
+            reasoning = message.get("reasoning")
+            if isinstance(reasoning, str) and reasoning:
+                reasoning_parts.append(reasoning)
+        return {
+            "content": "".join(content_parts),
+            "reasoning": "".join(reasoning_parts),
+        }
+
     def _persist_binding(self, binding: AcpSessionBinding) -> None:
         """持久化绑定到 native-session.json。"""
         if self._conversation_store is None:

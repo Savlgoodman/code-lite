@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -276,8 +277,11 @@ class AcpAgentAdapter:
                     original_handler.turn_id = request.turn_id
                     original_handler.output_queue = output_queue  # type: ignore[assignment]
                     original_handler.native_session_id = None
-                    # 重置 mapper 去重状态（新 turn）
-                    original_handler.mapper.reset_dedup()
+                    baselines = self._runtime_manager.load_text_baselines(request.conversation_id)
+                    original_handler.mapper.start_turn(
+                        text_baseline=baselines["content"],
+                        reasoning_baseline=baselines["reasoning"],
+                    )
 
                 # 确保 native session 存在
                 binding = await self._runtime_manager.ensure_session(
@@ -305,6 +309,7 @@ class AcpAgentAdapter:
                 prompt_result = await connection_sdk.prompt(
                     session_id=binding.native_session_id,
                     prompt=[acp.text_block(request.prompt)],
+                    message_id=str(uuid.uuid4()),
                 )
                 logger.info("Prompt completed for %s (stop=%s)", request.turn_id, getattr(prompt_result, "stop_reason", None))
 

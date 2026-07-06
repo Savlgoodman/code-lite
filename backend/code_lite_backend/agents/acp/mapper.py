@@ -8,6 +8,9 @@ from typing import Any, Callable
 from code_lite_backend.agents.risk import describe_risk, risk_level
 
 
+HISTORY_REPLAY_MIN_CHARS = 8
+
+
 def _to_jsonable(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -68,15 +71,45 @@ def _base_event(event_type: str, ctx: EventContext) -> dict[str, Any]:
 class TextDedupState:
     """文本 chunk 去重状态。
 
-    部分 runtime 可能既发送 delta，又发送完整 snapshot。
-    按 channel 维护累计文本，只输出增量。
+    部分 runtime 可能既发送 delta，又发送完整 snapshot，或者在复用 native
+    session 时重放历史消息。状态需要同时记住跨 turn 的 native messageId，
+    以及本 turn 开始前 code-lite 已经持久化过的文本基线。
     """
     accumulated: str = ""
+    history_text: str = ""
+    history_offset: int = 0
+    seen_message_ids: set[str] = field(default_factory=set)
+    current_turn_message_ids: set[str] = field(default_factory=set)
 
-    def dedup(self, chunk: str) -> str:
+    def start_turn(self, history_text: str = "") -> None:
+        """开始新的 turn，保留跨 turn 的 seen messageId。"""
+        self.accumulated = ""
+        self.history_text = history_text
+        self.history_offset = 0
+        self.current_turn_message_ids.clear()
+
+    def reset(self) -> None:
+        self.accumulated = ""
+        self.history_text = ""
+        self.history_offset = 0
+        self.seen_message_ids.clear()
+        self.current_turn_message_ids.clear()
+
+    def dedup(self, chunk: str, *, message_id: str | None = None) -> str:
         """返回实际需要追加的增量文本。"""
         if not chunk:
             return ""
+
+        if message_id:
+            if message_id in self.seen_message_ids and message_id not in self.current_turn_message_ids:
+                return ""
+            self.seen_message_ids.add(message_id)
+            self.current_turn_message_ids.add(message_id)
+
+        chunk = self._strip_history_replay(chunk, allow_partial=message_id is not None)
+        if not chunk:
+            return ""
+
         if chunk == self.accumulated:
             return ""  # 完整 snapshot 重放，丢弃
         if self.accumulated and chunk.startswith(self.accumulated):
@@ -85,18 +118,50 @@ class TextDedupState:
             return delta
         # 正常增量或首次
         self.accumulated = chunk if not self.accumulated else self.accumulated + chunk
-        return chunk if not self.accumulated.startswith(chunk) else chunk
+        return chunk
+
+    def _strip_history_replay(self, chunk: str, *, allow_partial: bool) -> str:
+        """去掉 runtime 在新 turn 开头重放的历史文本。"""
+        if not self.history_text:
+            return chunk
+
+        if not allow_partial and len(self.history_text) < HISTORY_REPLAY_MIN_CHARS:
+            return chunk
+
+        if chunk.startswith(self.history_text):
+            self.history_offset = len(self.history_text)
+            return chunk[len(self.history_text):]
+
+        if not allow_partial:
+            return chunk
+
+        remaining = self.history_text[self.history_offset:]
+        if remaining and remaining.startswith(chunk):
+            self.history_offset += len(chunk)
+            return ""
+
+        if remaining and chunk.startswith(remaining):
+            self.history_offset = len(self.history_text)
+            return chunk[len(remaining):]
+
+        return chunk
 
 
 def _map_agent_message_chunk(update: Any, ctx: EventContext) -> dict[str, Any]:
     event = _base_event("agent.text.delta", ctx)
     event["delta"] = _text_from_content(getattr(update, "content", None))
+    message_id = getattr(update, "message_id", None)
+    if message_id:
+        event["metadata"]["nativeMessageId"] = str(message_id)
     return event
 
 
 def _map_agent_thought_chunk(update: Any, ctx: EventContext) -> dict[str, Any]:
     event = _base_event("agent.reasoning.delta", ctx)
     event["delta"] = _text_from_content(getattr(update, "content", None))
+    message_id = getattr(update, "message_id", None)
+    if message_id:
+        event["metadata"]["nativeMessageId"] = str(message_id)
     return event
 
 
@@ -292,18 +357,29 @@ class AcpEventMapper:
                 return None
             # 对文本事件应用去重
             if kind in ("agent_message_chunk", "agent_thought_chunk"):
-                channel = f"{ctx.conversation_id}:{ctx.turn_id}:{kind}"
+                channel = kind
                 dedup = self._get_dedup(channel)
                 raw_delta = event.get("delta", "")
-                deduped = dedup.dedup(raw_delta)
+                metadata = event.get("metadata")
+                message_id = None
+                if isinstance(metadata, dict) and metadata.get("nativeMessageId"):
+                    message_id = str(metadata["nativeMessageId"])
+                deduped = dedup.dedup(raw_delta, message_id=message_id)
                 if not deduped:
                     return None  # 重复 snapshot，丢弃
                 event["delta"] = deduped
             return event
         return None
 
+    def start_turn(self, *, text_baseline: str = "", reasoning_baseline: str = "") -> None:
+        """开始新 turn，设置已保存历史文本基线。"""
+        self._get_dedup("agent_message_chunk").start_turn(text_baseline)
+        self._get_dedup("agent_thought_chunk").start_turn(reasoning_baseline)
+
     def reset_dedup(self) -> None:
-        """重置去重状态（新 turn 时调用）。"""
+        """完全重置去重状态。"""
+        for state in self._text_dedup.values():
+            state.reset()
         self._text_dedup.clear()
 
     def map_permission_request(
