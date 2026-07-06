@@ -19,49 +19,11 @@ function hasMarkdownPlanEntries(markdown: string | undefined) {
   });
 }
 
-function normalizePlanEntryText(value: string) {
-  return value
-    .replace(/^\s*[-*]\s+\[[ xX]\]\s*/, "")
-    .replace(/^\s*(?:\d+|[一二三四五六七八九十]+)[.、]\s*/, "")
-    .replace(/^\s*#{1,6}\s*/, "")
-    .replace(/^\s*(?:步骤|Step|Task)\s*[\w一二三四五六七八九十]*[：:.\-\s]+/i, "")
-    .replace(/\*\*/g, "")
-    .replace(/__/g, "")
-    .trim()
-    .toLowerCase();
-}
-
-function comparablePlanEntryText(value: string) {
-  return normalizePlanEntryText(value).replace(/[\s`"'_*()[\]{}<>（）【】]/g, "");
-}
-
-function isGenericPlanEntryId(value: string | undefined) {
-  return !value || /^plan-entry-\d+$/.test(value) || /^markdown-plan-\d+$/.test(value);
-}
-
-function planEntryContentMatches(currentContent: string, nextContent: string) {
-  const current = comparablePlanEntryText(currentContent);
-  const next = comparablePlanEntryText(nextContent);
-  if (!current || !next) {
-    return false;
-  }
-  if (current === next) {
-    return true;
-  }
-  const shorter = current.length <= next.length ? current : next;
-  const longer = current.length <= next.length ? next : current;
-  return shorter.length >= 6 && longer.includes(shorter);
-}
-
-function planEntriesMatch(current: PlanEntry, next: PlanEntry) {
-  if (!isGenericPlanEntryId(current.id) && current.id === next.id) {
-    return true;
-  }
-  return planEntryContentMatches(current.content, next.content);
-}
-
 function findPlanEntryIndex(currentEntries: PlanEntry[], nextEntry: PlanEntry) {
-  return currentEntries.findIndex((entry) => planEntriesMatch(entry, nextEntry));
+  if (!nextEntry.id) {
+    return -1;
+  }
+  return currentEntries.findIndex((entry) => entry.id === nextEntry.id);
 }
 
 function mergePlanEntries(currentEntries: PlanEntry[], nextEntries: PlanEntry[]) {
@@ -75,8 +37,7 @@ function mergePlanEntries(currentEntries: PlanEntry[], nextEntries: PlanEntry[])
     merged[existingIndex] = {
       ...merged[existingIndex],
       ...entry,
-      content: merged[existingIndex].content || entry.content,
-      id: merged[existingIndex].id || entry.id,
+      id: merged[existingIndex].id,
     };
   }
   return merged;

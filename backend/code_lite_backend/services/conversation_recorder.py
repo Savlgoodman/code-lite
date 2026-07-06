@@ -64,59 +64,12 @@ def _event_record(event: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-def _normalize_plan_entry_text(value: Any) -> str:
-    text = str(value or "").strip()
-    for prefix in ("- [ ] ", "- [x] ", "- [X] ", "* [ ] ", "* [x] ", "* [X] "):
-        if text.startswith(prefix):
-            text = text[len(prefix):]
-            break
-    while text.startswith("#"):
-        text = text[1:].strip()
-    text = text.replace("**", "").replace("__", "").strip()
-    lowered = text.lower()
-    for marker in ("步骤", "step", "task"):
-        if lowered.startswith(marker):
-            rest = text[len(marker):].strip()
-            while rest and (rest[0].isalnum() or rest[0] in "一二三四五六七八九十"):
-                rest = rest[1:].strip()
-            rest = rest.lstrip("：:.- ").strip()
-            if rest:
-                text = rest
-            break
-    return text.lower()
-
-
-def _comparable_plan_entry_text(value: Any) -> str:
-    return re.sub(r"[\s`\"'_*()[\]{}<>（）【】]", "", _normalize_plan_entry_text(value))
-
-
-def _is_generic_plan_entry_id(value: Any) -> bool:
-    text = str(value or "")
-    return not text or bool(re.match(r"^(?:plan-entry|markdown-plan)-\d+$", text))
-
-
-def _plan_entry_content_matches(current_content: Any, next_content: Any) -> bool:
-    current = _comparable_plan_entry_text(current_content)
-    next_text = _comparable_plan_entry_text(next_content)
-    if not current or not next_text:
-        return False
-    if current == next_text:
-        return True
-    shorter, longer = (current, next_text) if len(current) <= len(next_text) else (next_text, current)
-    return len(shorter) >= 6 and shorter in longer
-
-
-def _plan_entries_match(current: dict[str, Any], next_entry: dict[str, Any]) -> bool:
-    current_id = current.get("id")
-    next_id = next_entry.get("id")
-    if not _is_generic_plan_entry_id(current_id) and current_id == next_id:
-        return True
-    return _plan_entry_content_matches(current.get("content"), next_entry.get("content"))
-
-
 def _find_plan_entry_index(current_entries: list[Any], next_entry: dict[str, Any]) -> int | None:
+    next_id = next_entry.get("id")
+    if not next_id:
+        return None
     for index, current in enumerate(current_entries):
-        if isinstance(current, dict) and _plan_entries_match(current, next_entry):
+        if isinstance(current, dict) and current.get("id") == next_id:
             return index
     return None
 
@@ -158,8 +111,7 @@ def _merge_plan_entries(current_entries: list[Any], next_entries: list[Any]) -> 
             merged[existing_index] = {
                 **current,
                 **entry,
-                "content": current.get("content") or entry.get("content"),
-                "id": current.get("id") or entry.get("id"),
+                "id": current.get("id"),
             }
     return merged
 
