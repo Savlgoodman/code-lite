@@ -64,6 +64,11 @@ def _event_record(event: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def _event_metadata(event: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = event.get("metadata")
+    return metadata if isinstance(metadata, dict) else None
+
+
 def _has_visible_plan(plan: Any) -> bool:
     if not isinstance(plan, dict):
         return False
@@ -238,6 +243,7 @@ class ConversationRecorder:
                     "name": str(event.get("name") or ""),
                     "risk": event.get("risk"),
                     "status": "running",
+                    "metadata": _event_metadata(event),
                 },
             )
         elif event_type == "agent.tool.delta":
@@ -248,6 +254,7 @@ class ConversationRecorder:
                     "name": str(event.get("name") or ""),
                     "status": "running",
                     "resultText": format_json(event.get("progress")) if event.get("progress") is not None else None,
+                    "metadata": _event_metadata(event),
                 },
             )
         elif event_type == "agent.tool.completed":
@@ -261,6 +268,7 @@ class ConversationRecorder:
                     "name": str(event.get("name") or ""),
                     "resultText": format_json(event.get("result") if "result" in event else event.get("metadata")),
                     "status": "complete",
+                    "metadata": _event_metadata(event),
                 },
             )
         elif event_type == "agent.tool.failed":
@@ -271,6 +279,7 @@ class ConversationRecorder:
                     "error": event.get("error") or "工具调用失败",
                     "name": str(event.get("name") or ""),
                     "status": "error",
+                    "metadata": _event_metadata(event),
                 },
             )
         elif event_type == "approval.required":
@@ -286,6 +295,7 @@ class ConversationRecorder:
                     "name": str(event.get("name") or ""),
                     "risk": event.get("risk"),
                     "status": "approval",
+                    "metadata": _event_metadata(event),
                 },
             )
             self._update_active_session(conversation_id, {"status": "approval"})

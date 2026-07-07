@@ -7,6 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from code_lite_backend.services.conversation_recorder import _merge_plan_snapshot
+from code_lite_backend.storage.conversations import ConversationStore
+from code_lite_backend.services.conversation_recorder import ConversationRecorder
 
 
 def acp_plan(*contents: str) -> dict[str, object]:
@@ -37,6 +39,45 @@ class ConversationRecorderPlanTest(unittest.TestCase):
         next_plan = {"entries": [], "source": "acp.plan"}
 
         self.assertIsNone(_merge_plan_snapshot(current, next_plan))
+
+
+class ConversationRecorderToolMetadataTest(unittest.TestCase):
+    def test_tool_call_projection_keeps_event_metadata(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            recorder = ConversationRecorder(ConversationStore(Path(directory)))
+            turn = recorder.start_turn(conversation_id="conv-1", prompt="edit")
+            metadata = {
+                "runtime": "codex",
+                "rawUpdate": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "call-edit-1",
+                    "content": [
+                        {
+                            "type": "diff",
+                            "path": "README.md",
+                            "oldText": "# Demo\n",
+                            "newText": "# Demo\n\nChanged.\n",
+                        }
+                    ],
+                },
+            }
+
+            recorder.apply_agent_event(
+                conversation_id="conv-1",
+                assistant_message_id=str(turn.assistant_message["id"]),
+                event={
+                    "type": "agent.tool.completed",
+                    "toolCallId": "call-edit-1",
+                    "name": "Editing files",
+                    "result": {"written": True},
+                    "metadata": metadata,
+                },
+            )
+
+            tool_call = turn.assistant_message["toolCalls"][0]
+            self.assertEqual(tool_call["metadata"]["rawUpdate"]["content"][0]["type"], "diff")
 
 
 if __name__ == "__main__":

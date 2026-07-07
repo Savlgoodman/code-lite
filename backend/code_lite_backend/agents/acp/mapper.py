@@ -423,7 +423,7 @@ def _map_agent_message_chunk(update: Any, ctx: EventContext) -> dict[str, Any]:
     message_id = getattr(update, "message_id", None)
     if message_id:
         event["metadata"]["nativeMessageId"] = str(message_id)
-    return event
+    return _attach_raw_update(event, update)
 
 
 def _map_agent_thought_chunk(update: Any, ctx: EventContext) -> dict[str, Any]:
@@ -432,7 +432,7 @@ def _map_agent_thought_chunk(update: Any, ctx: EventContext) -> dict[str, Any]:
     message_id = getattr(update, "message_id", None)
     if message_id:
         event["metadata"]["nativeMessageId"] = str(message_id)
-    return event
+    return _attach_raw_update(event, update)
 
 
 def _map_session_info_update(update: Any, ctx: EventContext) -> dict[str, Any] | None:
@@ -441,7 +441,7 @@ def _map_session_info_update(update: Any, ctx: EventContext) -> dict[str, Any] |
         return None
     event = _base_event("agent.session.updated", ctx)
     event["title"] = title
-    return event
+    return _attach_raw_update(event, update)
 
 
 def _map_plan_update(update: Any, ctx: EventContext) -> dict[str, Any]:
@@ -518,7 +518,7 @@ def _map_tool_call(update: Any, ctx: EventContext) -> dict[str, Any]:
     plan = _plan_from_tool_payload(update, "acp.tool_call.switch_mode")
     if plan is not None:
         event["plan"] = plan
-    return event
+    return _attach_raw_update(event, update)
 
 
 def _map_tool_call_update(update: Any, ctx: EventContext) -> dict[str, Any] | None:
@@ -540,7 +540,7 @@ def _map_tool_call_update(update: Any, ctx: EventContext) -> dict[str, Any] | No
         plan = _plan_from_tool_result(result)
         if plan is not None:
             event["plan"] = plan
-        return event
+        return _attach_raw_update(event, update)
 
     if status == "failed":
         event = _base_event("agent.tool.failed", ctx)
@@ -553,7 +553,7 @@ def _map_tool_call_update(update: Any, ctx: EventContext) -> dict[str, Any] | No
             "status": status,
             "content": content,
         })
-        return event
+        return _attach_raw_update(event, update)
 
     # 中间状态 → agent.tool.delta（长命令的中间进度）
     if status and status not in ("completed", "failed"):
@@ -567,7 +567,7 @@ def _map_tool_call_update(update: Any, ctx: EventContext) -> dict[str, Any] | No
             event["progress"] = raw_output
         elif content is not None:
             event["progress"] = content
-        return event
+        return _attach_raw_update(event, update)
 
     return None
 
@@ -746,6 +746,8 @@ class AcpEventMapper:
             "metadata": {
                 **_base_metadata(ctx),
                 "options": [_to_jsonable(option) for option in options],
+                "rawToolCall": sanitize_log_value(_to_jsonable(tool_call)),
+                "rawOptions": sanitize_log_value([_to_jsonable(option) for option in options]),
             },
         }
         plan = _plan_from_tool_payload(tool_call, "acp.permission.switch_mode")

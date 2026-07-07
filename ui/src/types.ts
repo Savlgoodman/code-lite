@@ -182,6 +182,7 @@ export interface ToolCallItem {
   risk?: "low" | "medium" | "high" | "blocked";
   error?: string;
   anchorOffset?: number;
+  metadata?: Record<string, unknown> | null;
   createdAt: number;
   updatedAt: number;
 }

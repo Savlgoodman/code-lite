@@ -18,6 +18,7 @@ from code_lite_backend.agents.acp.mapper import (
     AcpEventMapper,
     EventContext,
     extract_usage,
+    to_jsonable,
 )
 from code_lite_backend.agents.acp.mapper import (
     UsageSnapshot,
@@ -157,6 +158,11 @@ class AcpClientHandler:
                 await self._put({
                     "type": "agent.context.updated",
                     "context": usage_dict,
+                    "metadata": {
+                        "runtime": self.runtime,
+                        "nativeSessionId": self.native_session_id,
+                        "rawUpdate": sanitize_log_value(to_jsonable(update)),
+                    },
                 })
             return
 

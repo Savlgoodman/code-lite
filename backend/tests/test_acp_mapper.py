@@ -7,6 +7,9 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import acp
+from acp import schema as acp_schema
+
 from code_lite_backend.agents.acp.mapper import AcpEventMapper, EventContext
 
 
@@ -23,6 +26,40 @@ def thought_update(text: str, *, message_id: str | None = None) -> SimpleNamespa
         session_update="agent_thought_chunk",
         content={"type": "text", "text": text},
         message_id=message_id,
+    )
+
+
+def tool_call_update() -> object:
+    return acp.start_tool_call(
+        "call-edit-1",
+        "Editing files",
+        kind="edit",
+        status="in_progress",
+        raw_input={"path": "README.md"},
+        content=[
+            acp_schema.FileEditToolCallContent(
+                type="diff",
+                path="README.md",
+                oldText="# Demo\n",
+                newText="# Demo\n\nChanged.\n",
+            )
+        ],
+    )
+
+
+def tool_completed_update() -> object:
+    return acp.update_tool_call(
+        "call-edit-1",
+        status="completed",
+        raw_output={"written": True},
+        content=[
+            acp_schema.FileEditToolCallContent(
+                type="diff",
+                path="README.md",
+                oldText="# Demo\n",
+                newText="# Demo\n\nChanged.\n",
+            )
+        ],
     )
 
 
@@ -107,6 +144,30 @@ class AcpEventMapperTest(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event["type"], "agent.reasoning.delta")
         self.assertEqual(event["delta"], "new thought")
+
+    def test_tool_call_keeps_raw_update_payload(self) -> None:
+        mapper = AcpEventMapper(runtime="codex")
+
+        event = mapper.map_update(tool_call_update(), self.ctx)
+
+        self.assertIsNotNone(event)
+        metadata = event.get("metadata")
+        self.assertIsInstance(metadata, dict)
+        raw_update = metadata["rawUpdate"]
+        self.assertEqual(raw_update["rawInput"]["path"], "README.md")
+        self.assertEqual(raw_update["content"][0]["type"], "diff")
+
+    def test_tool_completion_keeps_raw_update_payload(self) -> None:
+        mapper = AcpEventMapper(runtime="codex")
+
+        event = mapper.map_update(tool_completed_update(), self.ctx)
+
+        self.assertIsNotNone(event)
+        metadata = event.get("metadata")
+        self.assertIsInstance(metadata, dict)
+        raw_update = metadata["rawUpdate"]
+        self.assertTrue(raw_update["rawOutput"]["written"])
+        self.assertEqual(raw_update["content"][0]["newText"], "# Demo\n\nChanged.\n")
 
 
 if __name__ == "__main__":
