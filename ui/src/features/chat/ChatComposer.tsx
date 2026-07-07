@@ -495,7 +495,7 @@ export function ChatComposer({
                 onDraftImagesAdd(files);
               }
             }}
-            placeholder="描述电脑问题，或要求继续变更"
+            placeholder="随心输入"
             rows={2}
           />
           <div className="composer-actions">
