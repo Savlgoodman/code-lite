@@ -2,10 +2,12 @@
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(BackendState::default())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             ensure_backend,
             minimize_window,
+            pick_workspace_directory,
             shutdown_app,
             toggle_maximize_window
         ])
@@ -43,6 +45,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 #[cfg(windows)]
@@ -189,6 +192,17 @@ fn toggle_maximize_window(window: tauri::Window) -> Result<(), String> {
             .maximize()
             .map_err(|error| format!("failed to maximize window: {error}"))
     }
+}
+
+#[tauri::command]
+async fn pick_workspace_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let folder = app
+        .dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|path| path.to_string());
+
+    Ok(folder)
 }
 
 #[tauri::command]

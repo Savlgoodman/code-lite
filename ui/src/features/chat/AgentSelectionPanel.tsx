@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { Bot, ChevronRight, FolderOpen, Shield, ShieldAlert, ShieldCheck, Zap } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { Bot, ChevronRight, FolderOpen, Loader2, Shield, ShieldAlert, ShieldCheck, Zap } from "lucide-react";
 
 import { AgentIcon } from "../../components/AgentIcon";
 import "./AgentSelectionPanel.css";
@@ -54,6 +55,8 @@ export function AgentSelectionPanel({
     ?? ""
   );
   const [workspace, setWorkspace] = useState<string>(initialWorkspace);
+  const [workspacePickerError, setWorkspacePickerError] = useState<string | null>(null);
+  const [isPickingWorkspace, setIsPickingWorkspace] = useState(false);
 
   useEffect(() => {
     setWorkspace(initialWorkspace);
@@ -67,6 +70,22 @@ export function AgentSelectionPanel({
       return;
     }
     onSelect(selectedId, workspace.trim());
+  }
+
+  async function pickWorkspaceDirectory() {
+    setWorkspacePickerError(null);
+    setIsPickingWorkspace(true);
+    try {
+      const selectedWorkspace = await invoke<string | null>("pick_workspace_directory");
+      if (selectedWorkspace) {
+        setWorkspace(selectedWorkspace);
+      }
+    } catch (error) {
+      console.error("Failed to pick workspace directory:", error);
+      setWorkspacePickerError("当前环境无法打开目录选择器，请手动输入目录。");
+    } finally {
+      setIsPickingWorkspace(false);
+    }
   }
 
   return (
@@ -112,20 +131,35 @@ export function AgentSelectionPanel({
             <FolderOpen size={14} />
             工作区路径
           </span>
-          <input
-            value={workspace}
-            onChange={(event) => setWorkspace(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                handleStart();
-              }
-            }}
-            placeholder="留空则为普通会话（~/.code-lite/workspace）"
-            spellCheck={false}
-          />
+          <div className="workspace-input-row">
+            <input
+              value={workspace}
+              onChange={(event) => {
+                setWorkspace(event.target.value);
+                setWorkspacePickerError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handleStart();
+                }
+              }}
+              placeholder="留空则为普通会话（~/.code-lite/workspace）"
+              spellCheck={false}
+            />
+            <button
+              className="workspace-browse-button"
+              disabled={isPickingWorkspace}
+              onClick={pickWorkspaceDirectory}
+              type="button"
+            >
+              {isPickingWorkspace ? <Loader2 size={14} /> : <FolderOpen size={14} />}
+              浏览
+            </button>
+          </div>
+          {workspacePickerError ? <span className="workspace-error">{workspacePickerError}</span> : null}
           <span className="workspace-hint">
-            指定项目目录后，此会话的所有操作都固定在该目录进行，且会按工作区在侧栏归类。
+            可浏览选择目录，也可手动输入绝对路径；指定后，此会话会按工作区在侧栏归类。
           </span>
         </label>
 
