@@ -17,7 +17,7 @@ code-lite 后续需要支持用户在聊天输入框中粘贴、拖拽或选择�
 2. 图片预览为裁剪式矩形，仅影响展示，不裁剪真实发送内容。
 3. 多张图片保持同一行展示。
 4. 文本过多时输入框自动增高，直到达到 ChatPage 高度的一半，再出现滚动条。
-5. 粘贴但未发送的图片不进入持久化附件库，用户撤回图片时不留下数据。
+5. 粘贴但未发送的图片只存在于前端草稿态，不传给后端、不进入持久化附件库，用户撤回图片时不留下数据。
 
 本文在已有 ACP 图片输入调研基础上，补充图片数量、大小、压缩策略和输入框 UI 设计。
 
@@ -60,9 +60,9 @@ Claude Code 官方文档确认支持三种图片输入：拖拽图片、复制�
 
 影响：
 
-1. 5 张图片远低于 Claude 的数量上限，适合作为 code-lite 默认。
-2. 单张传输目标控制在 5 MB base64 encoded，可以覆盖 Bedrock / Google Cloud 等更保守路径，也与 opencode 默认一致。
-3. 图片尺寸压到 2000x2000 以内，可以避开 many-image request 的跨平台尺寸问题。
+1. 20 张图片与 claude.ai 单条消息数量上限一致，且远低于 Claude API 数量上限。
+2. 单张 10 MB 与 Claude API 直连上限一致，但高于 Bedrock / Google Cloud 和 opencode 的 5 MB 默认；后续需按 runtime profile 做二次压缩或阻断。
+3. 图片尺寸压到 2000x2000 以内，可以避开 many-image request 的跨平台尺寸问题，也对齐 opencode 默认 resize 策略。
 
 ### 2.4 opencode
 
@@ -85,8 +85,8 @@ opencode 入门文档也确认可以拖拽图片到 terminal，将图片加入 p
 
 影响：
 
-1. code-lite 默认图片规范可以直接对齐 opencode：最长边 2000，base64 payload 5 MiB。
-2. 即便 opencode ACP 后续支持图片，code-lite 也不应把超大图直接传给它。
+1. opencode 默认上限比 code-lite 产品上限更保守，因此 opencode runtime profile 需要继续执行 2000x2000 / 5 MiB 的二次压缩或阻断。
+2. 即便 opencode ACP 后续支持图片，code-lite 也不应把超过该 runtime profile 的图片直接传给它。
 3. `max_base64_bytes` 是编码后的大小，不是原始文件大小；实现时不能只看 `File.size`。
 
 ## 3. 产品默认限制
@@ -95,16 +95,16 @@ opencode 入门文档也确认可以拖拽图片到 terminal，将图片加入 p
 
 | 项 | 默认值 | 说明 |
 | --- | --- | --- |
-| 单轮图片数量 | 5 张 | 贴近用户设计参考、截图对比、错误截图场景；远低于 OpenAI / Claude API 上限 |
-| 单张传输上限 | 5 MiB base64 bytes | 对齐 opencode 默认和 Claude 保守平台限制 |
-| 单轮传输总量 | 20 MiB base64 bytes | 给 JSON、文本、历史上下文和 runtime 包装预留空间 |
-| 最大发送尺寸 | 2000x2000 px box | 保持宽高比缩放，避免 Claude many-image request 问题 |
-| 草稿导入硬上限 | 20 MiB raw file | 只用于允许压缩；超过直接拒绝，避免浏览器内存风险 |
+| 单轮图片数量 | 20 张 | 产品决策；覆盖多截图对比和设计参考场景 |
+| 单张产品上限 | 10 MB normalized image bytes | 产品决策；前端压缩后仍超过则拒绝 |
+| 单轮产品总量 | 200 MB normalized image bytes | 产品决策；20 张图片的总上限 |
+| 默认发送尺寸 | 2000x2000 px box | 保持宽高比缩放，兼容 Claude many-image 建议和 opencode 默认策略 |
+| 草稿导入硬上限 | 50 MB raw file | 仅用于保护浏览器内存；超过直接拒绝，避免前端解码风险 |
 | 支持格式 | PNG、JPEG、WEBP | MVP 先不支持 GIF、SVG |
 | GIF | 暂不支持 | GIF 多帧语义和不同 runtime 处理不一致 |
 | SVG | 不支持 | 避免脚本、外链和解析差异 |
 
-这里的“单张 5 MiB”建议按 base64 payload 计算，而不是按原始文件大小计算。原因是 ACP `ImageContentBlock.data`、Claude API 和 opencode 默认限制都更接近“编码后的请求负载”。用户看到的文案可以简化为“单张约 5MB，过大将自动压缩”。
+这里的“10 MB / 200 MB”是产品口径，按前端归一化后的图片 Blob bytes 计算。发送给 ACP runtime 时仍会转成 base64，编码后体积大约增加三分之一；因此不能把 200 MB 图片直接作为 base64 塞进 `/api/turns/stream` JSON 请求。发送阶段应先把图片作为附件传给 backend，backend 落到 `AttachmentStore` 后，再按 runtime profile 读取并转为 ACP `image_block()`。
 
 ## 4. 压缩策略
 
@@ -136,7 +136,7 @@ interface DraftImage {
 interface NormalizedDraftImage {
   blob: Blob;
   mimeType: "image/jpeg" | "image/png" | "image/webp";
-  base64Bytes: number;
+  normalizedBytes: number;
   width: number;
   height: number;
   wasCompressed: boolean;
@@ -148,9 +148,9 @@ interface NormalizedDraftImage {
 ```text
 read File metadata
   -> reject unsupported mime
-  -> reject raw file > 20 MiB
+  -> reject raw file > 50 MB
   -> decode image dimensions
-  -> if dimensions <= 2000 box and base64Bytes <= 5 MiB:
+  -> if dimensions <= 2000 box and normalizedBytes <= 10 MB:
        keep original blob
      else:
        draw to canvas with max width/height 2000
@@ -171,12 +171,12 @@ read File metadata
 
 前端压缩只是体验优化，backend 仍必须校验：
 
-1. 图片数量不超过 5。
-2. 单张 base64 payload 不超过 5 MiB。
-3. 单轮总 base64 payload 不超过 20 MiB。
+1. 图片数量不超过 20。
+2. 单张归一化图片不超过 10 MB。
+3. 单轮归一化图片总量不超过 200 MB。
 4. mime 在 allowlist 中。
-5. base64 可解码。
-6. 不把 base64 写入日志或诊断。
+5. 附件文件可读取，hash 和 metadata 与上传结果一致。
+6. 不把图片二进制或 base64 写入日志或诊断。
 
 如果后端发现超限，返回 `agent.run.failed`，并保留前端草稿，方便用户删图或重试。
 
@@ -184,7 +184,7 @@ read File metadata
 
 ### 5.1 总原则
 
-粘贴或拖拽到输入框中的图片，在发送前只存在于前端内存和浏览器 object URL，不进入 `AttachmentStore`。
+粘贴或拖拽到输入框中的图片，在发送前只存在于前端内存和浏览器 object URL，不调用 backend API，不进入 `AttachmentStore`。
 
 这样用户删除草稿图片时，不会产生孤儿附件，也不会留下隐私图片。
 
@@ -197,17 +197,18 @@ read File metadata
   -> 前端完成压缩和校验
   -> 用户可删除 DraftImage
   -> 用户点击发送
-  -> /api/turns/stream 携带 normalized image inline block
-  -> backend 创建或确认 conversationId
-  -> backend 将图片写入 AttachmentStore
+  -> frontend 创建或确认 conversationId / turnId
+  -> frontend 将本轮 DraftImage 作为 multipart 附件传给 backend
+  -> backend 将图片写入 AttachmentStore 并返回 attachment metadata
+  -> frontend 调用 /api/turns/stream，contentBlocks 只携带 attachmentId
   -> backend 将 userMessage.attachments 写入会话记录
-  -> backend 构造 ACP image_block 发给 runtime
+  -> backend 读取 AttachmentStore，按 runtime profile 构造 ACP image_block 发给 runtime
 ```
 
 撤回规则：
 
 1. 发送前删除：仅 `URL.revokeObjectURL()`，不调用后端。
-2. 发送中失败且未创建 turn：backend 应清理本轮已写入的临时附件。
+2. 点击发送后上传失败：不启动 agent turn，并保留前端草稿供用户重试或删图。
 3. 发送成功进入 turn：图片成为会话记录的一部分，不再随草稿删除。
 4. 用户删除整条会话：级联删除该会话的 attachments。
 
@@ -218,7 +219,8 @@ read File metadata
 1. 用户经常会误粘贴或撤回图片。
 2. 截图可能包含敏感信息，未发送前不应落盘。
 3. 新会话发送前可能还没有真实 conversationId。
-4. 先落盘会引入草稿附件清理、超时 GC 和孤儿文件问题。
+4. 先传给后端会引入草稿附件清理、超时 GC 和孤儿文件问题。
+5. 前端 object URL 已能满足草稿预览，不需要后端参与。
 
 ### 5.4 发送后的存储内容
 
@@ -286,7 +288,7 @@ composer-wrap
 4. 真实发送图片不裁剪。
 5. 右上角提供删除按钮。
 6. 多张图片使用单行 `flex-wrap: nowrap`。
-7. 由于单轮最多 5 张，桌面宽度通常足够；窄窗口下允许 image strip 横向滚动，但不换行。
+7. 由于单轮最多 20 张，image strip 必须支持横向滚动，但不换行。
 
 示意：
 
@@ -343,7 +345,46 @@ textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : 
 
 ### 7.1 turn 请求
 
-发送时前端传递归一化后的 inline image block：
+发送时前端先上传本轮归一化后的图片附件，随后 turn 请求只携带 `attachmentId`。不要把图片 base64 放进 `/api/turns/stream` JSON。
+
+如果当前是无 id 的新会话草稿，发送前需要先创建会话或预留 turn：
+
+```text
+POST /api/conversations
+  -> 返回 conversationId
+```
+
+然后再上传附件并启动 `/api/turns/stream`。这样附件目录能稳定归属到真实 conversation。
+
+附件上传建议使用 multipart API：
+
+```text
+POST /api/conversations/{conversationId}/turns/{turnId}/attachments
+Content-Type: multipart/form-data
+files: image[]
+```
+
+返回：
+
+```json
+{
+  "attachments": [
+    {
+      "id": "att_...",
+      "kind": "image",
+      "name": "screenshot.png",
+      "mimeType": "image/jpeg",
+      "sizeBytes": 482193,
+      "width": 1600,
+      "height": 900,
+      "sha256": "...",
+      "wasCompressed": true
+    }
+  ]
+}
+```
+
+随后 `/api/turns/stream` 请求：
 
 ```json
 {
@@ -359,12 +400,11 @@ textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : 
       "type": "image",
       "mimeType": "image/jpeg",
       "source": {
-        "kind": "inline_base64",
-        "data": "<base64>"
+        "kind": "attachment",
+        "attachmentId": "att_..."
       },
       "name": "screenshot.png",
       "sizeBytes": 482193,
-      "base64Bytes": 642924,
       "width": 1600,
       "height": 900,
       "wasCompressed": true
@@ -375,9 +415,9 @@ textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : 
 
 backend 接收后：
 
-1. 校验 inline image。
-2. 写入 AttachmentStore。
-3. 将会话消息中的图片替换成 attachment metadata。
+1. 校验 attachmentId 属于当前 conversation / turn。
+2. 将会话消息中的图片保存为 attachment metadata。
+3. 读取 AttachmentStore 中的图片文件，按 runtime profile 做必要的二次压缩。
 4. 构造 ACP `image_block(data, mime_type)`。
 5. 不把 base64 写入 `messages.json`、`events.ndjson`、日志或远程同步事件。
 
@@ -418,8 +458,8 @@ interface SessionInputCapabilities {
     supported: boolean;
     acceptedMimeTypes: string[];
     maxImagesPerTurn: number;
-    maxBase64BytesPerImage: number;
-    maxBase64BytesPerTurn: number;
+    maxImageBytesPerImage: number;
+    maxImageBytesPerTurn: number;
     maxWidth: number;
     maxHeight: number;
     autoResize: boolean;
@@ -454,14 +494,14 @@ UI 根据 `image.supported` 控制图片入口是否可用。backend 即使收�
 
 目标：
 
-1. 前端压缩到 2000x2000 box 和 5 MiB base64。
-2. 单轮最多 5 张。
-3. 单轮总 base64 不超过 20 MiB。
+1. 前端压缩到 2000x2000 box 和 10 MB normalized image bytes。
+2. 单轮最多 20 张。
+3. 单轮总 normalized image bytes 不超过 200 MB。
 4. 错误以图片 chip 或 composer 内提示展示，不清空草稿。
 
 验证：
 
-1. 6 张图片第 6 张被拒绝。
+1. 21 张图片第 21 张被拒绝。
 2. 大图自动压缩。
 3. 压缩后仍超限的图片提示失败。
 4. SVG、GIF 被拒绝或按明确策略处理。
@@ -471,7 +511,7 @@ UI 根据 `image.supported` 控制图片入口是否可用。backend 即使收�
 目标：
 
 1. `/api/turns/stream` 支持 `contentBlocks`。
-2. 发送后才把图片写入 AttachmentStore。
+2. 点击发送后才上传图片并写入 AttachmentStore。
 3. user message 保存 attachment metadata。
 4. ACP adapter 发送 image block。
 5. 日志和 events 不包含 base64。
@@ -487,7 +527,7 @@ UI 根据 `image.supported` 控制图片入口是否可用。backend 即使收�
 
 目标：
 
-1. Codex ACP：1 张和 5 张小图 smoke。
+1. Codex ACP：1 张、5 张和 20 张小图 smoke。
 2. Claude Code ACP：initialize capability 和真实图片 turn。
 3. opencode ACP：initialize capability 和真实图片 turn。
 4. 不支持图片的 runtime 在 UI 和 backend 都有清晰阻断。
@@ -496,24 +536,24 @@ UI 根据 `image.supported` 控制图片入口是否可用。backend 即使收�
 
 | 风险 | 决策 |
 | --- | --- |
-| 各 runtime 图片限制不同 | code-lite 默认使用更保守的 5 张、5 MiB base64、2000x2000 |
-| base64 请求过大影响 NDJSON 和内存 | 第一阶段只在发送请求中短暂携带，落盘后只保存附件引用 |
-| 用户误粘贴隐私截图 | 发送前不落盘；删除草稿只清理内存 |
+| 各 runtime 图片限制不同 | 产品默认 20 张、单张 10 MB、总 200 MB；runtime profile 可继续降级压缩或阻断 |
+| base64 请求过大影响 NDJSON 和内存 | `/api/turns/stream` 不传 base64，发送时先 multipart 上传附件，再传 attachmentId |
+| 用户误粘贴隐私截图 | 粘贴后只存在前端草稿；发送前不传后端、不落盘 |
 | UI 预览裁剪被误认为真实裁剪 | 文档和实现都区分 `object-fit: cover` 与真实图片压缩 |
-| 前端压缩不可信 | backend 重复校验数量、mime、base64 大小和总量 |
+| 前端压缩不可信 | backend 重复校验数量、mime、图片大小和总量 |
 | Claude / opencode 可用性随模型变化 | 以 runtime initialize capability 和 smoke 结果为准 |
 
 ## 10. 验收标准
 
-1. 粘贴图片后，未发送状态下不会写入 AttachmentStore。
-2. 删除草稿图片不会产生本地附件文件。
-3. 单轮最多 5 张图片。
-4. 单张图片超过目标限制时自动压缩到 2000x2000 box 和 5 MiB base64 内。
+1. 粘贴图片后，未发送状态下不会调用 backend，也不会写入 AttachmentStore。
+2. 删除草稿图片不会产生本地附件文件或后端请求。
+3. 单轮最多 20 张图片。
+4. 单张图片超过目标限制时自动压缩到 2000x2000 box 和 10 MB normalized image bytes 内。
 5. 压缩后仍超限时拒绝发送，并保留用户文本和其他图片草稿。
 6. 输入框能随文本增长，最大高度不超过 ChatPage 高度的 1/2。
 7. 到达最大高度后，只有 textarea 出现滚动条。
 8. 图片缩略图在一行内展示，真实发送图片不被 UI 裁剪。
-9. 发送成功后，图片作为 attachment metadata 写入会话记录，base64 不写入日志、事件和消息 JSON。
+9. 点击发送后，图片才上传到 backend 并作为 attachment metadata 写入会话记录，base64 不写入日志、事件和消息 JSON。
 10. runtime 不支持图片时，图片入口不可用；旧客户端强行发送图片时 backend 返回明确错误。
 
 ## 11. 参考来源

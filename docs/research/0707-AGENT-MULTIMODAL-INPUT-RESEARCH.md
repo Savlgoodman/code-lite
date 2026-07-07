@@ -25,7 +25,7 @@ React ChatComposer
   -> codex-acp / claude-agent-acp / opencode acp
 ```
 
-短期 MVP 可以使用 base64 图片直传，因为 ACP `ImageContentBlock` 已经定义 `data` 和 `mimeType` 字段，Python SDK 也已提供 `acp.image_block(data, mime_type, uri=None)`。中长期应引入 code-lite 附件存储，把 UI、会话记录、远程同步和审计里的图片保存为引用，只有发送给 runtime 时再按能力转换为 base64 或资源块。
+ACP runtime 最终仍需要 `ImageContentBlock.data`，Python SDK 也已提供 `acp.image_block(data, mime_type, uri=None)`。但产品定稿后，code-lite 不应把图片 base64 作为 `/api/turns/stream` 的长期协议：粘贴后图片只留在前端草稿态，点击发送后才上传到 backend `AttachmentStore`，随后 turn 请求只携带 `attachmentId`，由 backend 读取附件并转换为 ACP image block。
 
 ## 2. 官方资料与本地验证
 
@@ -136,15 +136,10 @@ interface TextInputBlock {
 interface ImageInputBlock {
   type: "image";
   mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-  source:
-    | {
-        kind: "inline_base64";
-        data: string;
-      }
-    | {
-        kind: "attachment";
-        attachmentId: string;
-      };
+  source: {
+    kind: "attachment";
+    attachmentId: string;
+  };
   name?: string;
   sizeBytes?: number;
   width?: number;
@@ -153,7 +148,7 @@ interface ImageInputBlock {
 }
 ```
 
-MVP 可只实现 `inline_base64`。但类型上建议一次预留 `attachment`，因为会话记录和远程同步最终不适合长期塞大 base64。
+粘贴后的草稿态可以用浏览器 `File`、`Blob` 和 object URL 保存；进入 backend API 后只接受 `attachment` 引用。这样会话记录、远程同步和审计不会长期塞入大块 base64。
 
 ### 4.2 turn 请求
 
@@ -170,8 +165,8 @@ MVP 可只实现 `inline_base64`。但类型上建议一次预留 `attachment`�
       "type": "image",
       "mimeType": "image/png",
       "source": {
-        "kind": "inline_base64",
-        "data": "<base64>"
+        "kind": "attachment",
+        "attachmentId": "att_..."
       },
       "name": "screenshot.png",
       "sizeBytes": 183245
@@ -188,7 +183,7 @@ MVP 可只实现 `inline_base64`。但类型上建议一次预留 `attachment`�
 1. 新客户端优先发送 `contentBlocks`。
 2. 旧客户端只发送 `input` 时，backend 自动构造一个 text block。
 3. `input` 在兼容期保留，用于标题、preview、日志摘要和 legacy adapter。
-4. 禁止把完整 base64 写入普通日志；日志只记录图片数量、mime、大小和 hash。
+4. `/api/turns/stream` 不接收完整 base64；日志只记录图片数量、mime、大小和 hash。
 
 ### 4.3 会话消息
 
@@ -229,7 +224,7 @@ def build_acp_prompt_blocks(request: AgentRunRequest) -> list[Any]:
         if block.type == "text":
             blocks.append(acp.text_block(block.text))
         elif block.type == "image":
-            data = load_inline_or_attachment_base64(block)
+            data = load_attachment_as_base64(block.source.attachment_id)
             blocks.append(acp.image_block(data, block.mime_type, uri=block.uri))
     return blocks
 ```
@@ -292,30 +287,35 @@ interface SessionCapabilities {
 
 ## 6. 附件存储与远程同步
 
-### 6.1 MVP：inline base64
+### 6.1 发送期附件上传
+
+粘贴、拖拽或选择图片后，图片只保存在前端草稿态。用户点击发送后，前端再把本轮图片通过附件上传接口传给 backend，backend 写入 `AttachmentStore`，并返回 `attachmentId`。随后 `/api/turns/stream` 只携带 `attachmentId`。
 
 优点：
 
-1. 实现最快，不需要新增文件 API。
-2. 与 ACP `ImageContentBlock.data` 完全匹配。
-3. 适合小图、截图、设计参考图的首轮 smoke。
+1. 粘贴但未发送的图片不会传给后端。
+2. 用户撤回图片时不产生本地附件文件。
+3. 支持单轮 20 张、总 200 MB 的产品限制，不需要把巨大 base64 放进 JSON。
+4. 与远程同步和审计天然兼容：事件只记录 attachment metadata。
 
-缺点：
+代价：
 
-1. NDJSON 请求和会话消息体会变大。
-2. 远程同步事件可能携带大量 base64。
-3. 日志和诊断更容易误泄露用户图片。
+1. 首版就需要 AttachmentStore 和附件上传 API。
+2. 新会话草稿首次发送前，需要先创建 conversationId 或预留 turnId。
+3. backend 需要在发送 ACP prompt 时读取附件并转 base64。
 
-MVP 限制建议：
+产品限制定稿：
 
 | 项 | 建议 |
 | --- | --- |
-| 单张图片 | 5 MB |
-| 单轮图片数量 | 4 张 |
-| 单轮图片总大小 | 10 MB |
+| 单张图片 | 10 MB normalized image bytes |
+| 单轮图片数量 | 20 张 |
+| 单轮图片总大小 | 200 MB normalized image bytes |
 | mime allowlist | `image/png`, `image/jpeg`, `image/webp` |
 | GIF | 先拒绝或只取首帧，避免多帧语义不一致 |
 | SVG | 先拒绝，避免脚本和外链风险 |
+
+注意：20 张、总 200 MB 不适合通过 `/api/turns/stream` JSON 直接携带 base64。粘贴、拖拽或选择图片后，图片只应保存在前端草稿内存中；用户点击发送后，再通过附件上传接口传给 backend，写入 `AttachmentStore`，随后 turn 请求只携带 `attachmentId`。
 
 ### 6.2 正式版：AttachmentStore
 
@@ -388,12 +388,27 @@ assistant 消息：
 
 ## 8. 后端实施步骤
 
-### 阶段 1：协议与 schema
+### 阶段 1：前端草稿与输入协议
 
-1. 新增 `UserContentBlock` / `ImageInputBlock` Python dataclass 或 Pydantic schema。
-2. 扩展 `AgentRunRequest`：保留 `prompt: str`，新增 `input_blocks: list[InputContentBlock]`。
-3. `/api/turns/stream` 解析 `contentBlocks`，旧 `input` 自动降级为 text block。
-4. `ConversationRecorder.start_turn()` 保存 `contentBlocks` 或 `attachments`，标题仍使用 text 摘要。
+1. `ChatComposer` 增加图片选择、粘贴、拖拽。
+2. 粘贴后的图片只保存在前端 `DraftImage[]`，不调用后端。
+3. 前端按 20 张、单张 10 MB、总 200 MB 做草稿校验和压缩。
+4. 新增 `UserContentBlock` / `ImageInputBlock` 类型，backend API 中 image block 只接受 `attachmentId`。
+
+验证：
+
+```powershell
+npm run ui:build
+```
+
+### 阶段 2：AttachmentStore 与发送期上传
+
+1. 新增 backend attachment API。
+2. 点击发送后，前端先创建或确认 `conversationId` / `turnId`。
+3. 前端通过 multipart 上传本轮图片。
+4. backend 写入 `AttachmentStore`，返回 attachment metadata。
+5. `/api/turns/stream` 解析 `contentBlocks`，旧 `input` 自动降级为 text block，图片只接受 `attachmentId`。
+6. `ConversationRecorder.start_turn()` 保存 `attachments`，标题仍使用 text 摘要。
 
 验证：
 
@@ -401,10 +416,10 @@ assistant 消息：
 uv run --project backend python -m py_compile backend/code_lite_backend/schemas/agent.py backend/code_lite_backend/api/routes/turns.py
 ```
 
-### 阶段 2：ACP adapter
+### 阶段 3：ACP adapter
 
 1. 新增 `agents/acp/prompt_blocks.py`。
-2. 实现 text/image 到 `acp.text_block()` / `acp.image_block()` 的转换。
+2. 实现 text / attachment image 到 `acp.text_block()` / `acp.image_block()` 的转换。
 3. 在 `AcpAgentAdapter._run_turn()` 中替换固定 text prompt。
 4. 从 runtime connection initialize result 提取 `promptCapabilities.image` 做发送前校验。
 5. 对不支持图片的 runtime 返回清晰错误。
@@ -416,27 +431,19 @@ uv run --project backend pytest
 uv run --project backend python -m py_compile backend/code_lite_backend/agents/acp/adapter.py
 ```
 
-### 阶段 3：SessionCapabilities
+### 阶段 4：SessionCapabilities
 
 1. `schemas/session.py` 增加 `inputCapabilities`。
 2. `build_session_capabilities()` 从 initialize result 或 connection binding 读取 prompt capability。
 3. nanobot capabilities 从产品模型 vision 字段构建。
 4. 前端 `SessionCapabilities` 类型同步。
 
-### 阶段 4：前端输入与展示
+### 阶段 5：前端历史展示与远程同步准备
 
-1. `ChatComposer` 增加图片选择、粘贴、拖拽。
-2. `agentClient.streamAgentTurn()` 支持 `contentBlocks`。
-3. `ChatPage` 草稿状态增加 pending images。
-4. `MessageList` 渲染用户图片缩略图。
-5. 图片按钮由 `capabilities.inputCapabilities.image.supported` 控制。
-
-### 阶段 5：附件存储
-
-1. 新增 backend attachment API。
-2. 图片上传先写 `AttachmentStore`，turn 请求只带 `attachmentId`。
-3. 发送给 ACP runtime 时再读取文件并 base64 编码。
-4. 远程同步只发送 metadata 和授权 preview。
+1. `MessageList` 渲染用户图片缩略图。
+2. 图片按钮由 `capabilities.inputCapabilities.image.supported` 控制。
+3. 远程同步只发送 metadata 和授权 preview。
+4. 日志、事件和 messages JSON 不写 base64。
 
 ## 9. Runtime 验证矩阵
 
@@ -494,12 +501,13 @@ uv run --project backend python .\demo\acp-demo\python_sdk_acp_probe.py --agent 
 
 1. `contentBlocks` 请求协议。
 2. `AgentRunRequest.input_blocks`。
-3. ACP text/image block 转换。
-4. `promptCapabilities.image` 能力协商。
-5. 前端图片选择、粘贴、缩略图。
-6. Codex ACP 小图 smoke。
+3. 发送期附件上传和 `AttachmentStore`。
+4. ACP text/image block 转换。
+5. `promptCapabilities.image` 能力协商。
+6. 前端图片选择、粘贴、缩略图，草稿期不传后端。
+7. Codex ACP 小图 smoke。
 
-第二阶段再做附件存储和远程同步，不要在第一阶段就把文件系统、签名 URL、远端授权全部铺开。这样既能尽快验证核心 runtime 路径，又不会把 base64 长期固化进会话和事件协议。
+附件存储应随首个可用版本一起进入发送链路：发送前不写入，点击发送后上传到 `AttachmentStore`，再由 backend 读取附件并转换为 ACP `image_block()`。远程同步、签名 URL 和远端授权可以后置，但 base64 不应长期固化进会话、事件或 `/api/turns/stream` JSON 协议。
 
 ## 14. 参考来源
 
