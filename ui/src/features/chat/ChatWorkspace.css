@@ -20,7 +20,7 @@
 .empty-chat-welcome {
   position: absolute;
   right: 24px;
-  bottom: calc(50% + 108px);
+  bottom: calc(50% + (var(--chat-composer-current-height) / 2) + 44px);
   left: 24px;
   z-index: 6;
   display: flex;
@@ -67,7 +67,7 @@
 @media (max-width: 780px) {
   .empty-chat-welcome {
     right: 18px;
-    bottom: calc(50% + 104px);
+    bottom: calc(50% + (var(--chat-composer-current-height) / 2) + 38px);
     left: 18px;
   }
 
