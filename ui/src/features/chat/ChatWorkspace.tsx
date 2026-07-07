@@ -53,6 +53,16 @@ interface ChatWorkspaceProps {
   sessionId: string;
   title: string;
   updatedAt: number;
+  workspace?: string;
+}
+
+function workspaceBasename(workspace?: string): string {
+  const trimmed = (workspace ?? "").replace(/[\\/]+$/, "");
+  if (!trimmed) {
+    return "code-lite";
+  }
+  const parts = trimmed.split(/[\\/]/);
+  return parts[parts.length - 1] || "code-lite";
 }
 
 export function ChatWorkspace({
@@ -90,16 +100,18 @@ export function ChatWorkspace({
   selectedModelFamily,
   sessionId,
   title,
-  updatedAt
+  updatedAt,
+  workspace
 }: ChatWorkspaceProps) {
   const activePlan = latestMergedPlanFromMessages(messages) ?? null;
   const showEmptyWelcome = messages.length === 0 && !isRunning && !pendingApproval && !pendingInput;
+  const workspaceName = workspaceBasename(workspace);
 
   return (
     <main className={`chat-workspace ${showEmptyWelcome ? "empty-chat" : ""}`}>
       <ConversationHeader agent={agent} isRunning={isRunning} title={title} />
       <section className="empty-chat-welcome" aria-hidden={!showEmptyWelcome}>
-        <h2>我们应该在 code-lite 中构建什么？</h2>
+        <h2>我们应该在 {workspaceName} 中构建什么？</h2>
       </section>
       <MessageList
         isRunning={isRunning}

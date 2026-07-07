@@ -1560,6 +1560,7 @@ export function ChatPage() {
               sessionId={activeSession.id}
               title={activeSession.title}
               updatedAt={activeSession.updatedAt}
+              workspace={activeSession.workspace}
             />
           )}
         </>
