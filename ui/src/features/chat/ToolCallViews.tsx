@@ -1,11 +1,11 @@
 import { AlertTriangle, CheckCircle2, Circle, FileCode2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { formatRisk } from "../../lib/formatters";
 import type { ToolCallItem } from "../../types";
+import { formatRisk } from "../../lib/formatters";
 import "./ToolCallViews.css";
 
-interface FileDiffContent {
+export interface FileDiffContent {
   newText: string;
   oldText?: string | null;
   path: string;
@@ -15,6 +15,11 @@ interface FileDiffContent {
 interface DiffLine {
   kind: "add" | "remove" | "context";
   text: string;
+}
+
+interface DiffStats {
+  added: number;
+  removed: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -33,7 +38,7 @@ function isFileDiffContent(value: unknown): value is FileDiffContent {
   );
 }
 
-function diffContentFromTool(tool: ToolCallItem): FileDiffContent[] {
+export function diffContentFromTool(tool: ToolCallItem): FileDiffContent[] {
   const rawUpdate = isRecord(tool.metadata) ? tool.metadata.rawUpdate : null;
   const content = isRecord(rawUpdate) ? rawUpdate.content : null;
   if (!Array.isArray(content)) {
@@ -52,17 +57,13 @@ function fileChangeLabel(diff: FileDiffContent) {
   return "修改";
 }
 
-function summarizeDiff(diff: FileDiffContent) {
-  const oldLines = (diff.oldText ?? "").split(/\r?\n/);
-  const newLines = diff.newText.split(/\r?\n/);
-  const removed = oldLines.length === 1 && oldLines[0] === "" ? 0 : oldLines.length;
-  const added = newLines.length === 1 && newLines[0] === "" ? 0 : newLines.length;
-  return diff.oldText == null ? `${added} 行` : `${added} 行 / 原 ${removed} 行`;
+function splitVisibleLines(value: string) {
+  return value.split(/\r?\n/).filter((line, index, list) => line || index < list.length - 1);
 }
 
 function buildPreviewLines(diff: FileDiffContent): DiffLine[] {
-  const oldLines = (diff.oldText ?? "").split(/\r?\n/).filter((line, index, list) => line || index < list.length - 1);
-  const newLines = diff.newText.split(/\r?\n/).filter((line, index, list) => line || index < list.length - 1);
+  const oldLines = splitVisibleLines(diff.oldText ?? "");
+  const newLines = splitVisibleLines(diff.newText);
   if (diff.oldText == null) {
     return newLines.slice(0, 12).map((text) => ({ kind: "add", text }));
   }
@@ -86,11 +87,56 @@ function buildPreviewLines(diff: FileDiffContent): DiffLine[] {
   return preview;
 }
 
-function toolResultSummary(tool: ToolCallItem) {
-  const diffs = diffContentFromTool(tool);
-  if (diffs.length > 0) {
-    return diffs.length === 1 ? `${fileChangeLabel(diffs[0])} ${diffs[0].path}` : `${diffs.length} 个文件变更`;
+function diffStats(diff: FileDiffContent): DiffStats {
+  const oldLines = splitVisibleLines(diff.oldText ?? "");
+  const newLines = splitVisibleLines(diff.newText);
+  if (diff.oldText == null) {
+    return { added: newLines.length, removed: 0 };
   }
+
+  let added = 0;
+  let removed = 0;
+  const maxLines = Math.max(oldLines.length, newLines.length);
+  for (let index = 0; index < maxLines; index += 1) {
+    const oldText = oldLines[index];
+    const newText = newLines[index];
+    if (oldText === newText) {
+      continue;
+    }
+    if (oldText != null) {
+      removed += 1;
+    }
+    if (newText != null) {
+      added += 1;
+    }
+  }
+  return { added, removed };
+}
+
+function mergeDiffStats(diffs: FileDiffContent[]): DiffStats {
+  return diffs.reduce(
+    (total, diff) => {
+      const current = diffStats(diff);
+      return {
+        added: total.added + current.added,
+        removed: total.removed + current.removed,
+      };
+    },
+    { added: 0, removed: 0 },
+  );
+}
+
+function DiffStatsLabel({ label, stats }: { label: string; stats: DiffStats }) {
+  return (
+    <span className="diff-stats" aria-label={`新增 ${stats.added} 行，删除 ${stats.removed} 行`}>
+      <span className="diff-stats-label">{label}</span>
+      <span className="diff-stats-add">+{stats.added} 行</span>
+      <span className="diff-stats-remove">-{stats.removed} 行</span>
+    </span>
+  );
+}
+
+function toolResultSummary(tool: ToolCallItem) {
   const value = tool.error ?? tool.resultText ?? "";
   const compact = value.replace(/\s+/g, " ").trim();
   if (!compact) {
@@ -101,15 +147,23 @@ function toolResultSummary(tool: ToolCallItem) {
 
 function FileDiffPreview({ diff }: { diff: FileDiffContent }) {
   const previewLines = buildPreviewLines(diff);
+  const stats = diffStats(diff);
+  const [open, setOpen] = useState(true);
 
   return (
-    <section className="tool-file-diff">
-      <header className="tool-file-diff-head">
+    <details
+      className="tool-file-diff"
+      open={open}
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary className="tool-file-diff-head">
         <span className="tool-file-diff-icon"><FileCode2 size={14} /></span>
         <strong title={diff.path}>{diff.path}</strong>
         <em>{fileChangeLabel(diff)}</em>
-        <small>{summarizeDiff(diff)}</small>
-      </header>
+        <DiffStatsLabel label="本次修改" stats={stats} />
+      </summary>
       <pre className="tool-file-diff-preview">
         {previewLines.map((line, index) => (
           <span className={`diff-line ${line.kind}`} key={`${line.kind}-${index}-${line.text}`}>
@@ -118,13 +172,12 @@ function FileDiffPreview({ diff }: { diff: FileDiffContent }) {
           </span>
         ))}
       </pre>
-    </section>
+    </details>
   );
 }
 
 export function ToolCallCard({ tool }: { tool: ToolCallItem }) {
-  const diffs = diffContentFromTool(tool);
-  const defaultOpen = tool.status !== "complete" || diffs.length > 0;
+  const defaultOpen = tool.status !== "complete";
 
   return (
     <details className={`tool-call-card ${tool.status}`} open={defaultOpen}>
@@ -143,13 +196,6 @@ export function ToolCallCard({ tool }: { tool: ToolCallItem }) {
         {tool.status === "complete" ? <em>{toolResultSummary(tool)}</em> : null}
       </summary>
       <div className="tool-call-detail">
-        {diffs.length > 0 ? (
-          <div className="tool-file-diff-list">
-            {diffs.map((diff, index) => (
-              <FileDiffPreview diff={diff} key={`${diff.path}-${index}`} />
-            ))}
-          </div>
-        ) : null}
         <span>入参</span>
         <pre>{tool.argumentsText}</pre>
         {tool.resultText || tool.error ? (
@@ -163,6 +209,39 @@ export function ToolCallCard({ tool }: { tool: ToolCallItem }) {
   );
 }
 
+export function FileEditGroup({ tools }: { tools: ToolCallItem[] }) {
+  const diffs = tools.flatMap(diffContentFromTool);
+  const [open, setOpen] = useState(true);
+
+  if (diffs.length === 0) {
+    return null;
+  }
+
+  const fileCount = new Set(diffs.map((diff) => diff.path)).size;
+  const stats = mergeDiffStats(diffs);
+
+  return (
+    <details
+      className="file-edit-group"
+      open={open}
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary className="file-edit-group-head">
+        <span className="tool-file-diff-icon"><FileCode2 size={14} /></span>
+        <strong>已完成 {fileCount} 个文件的编辑与创建</strong>
+        <DiffStatsLabel label="本次修改总计" stats={stats} />
+      </summary>
+      <div className="tool-file-diff-list">
+        {diffs.map((diff, index) => (
+          <FileDiffPreview diff={diff} key={`${diff.path}-${index}`} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export function ToolCallGroup({
   collapseWhenFollowedByText,
   tools
@@ -171,8 +250,7 @@ export function ToolCallGroup({
   tools: ToolCallItem[];
 }) {
   const hasActiveTools = tools.some((tool) => tool.status === "running" || tool.status === "approval" || tool.status === "error");
-  const hasFileDiffs = tools.some((tool) => diffContentFromTool(tool).length > 0);
-  const shouldAutoOpen = hasFileDiffs || (tools.length === 1 && tools[0]?.status !== "complete");
+  const shouldAutoOpen = tools.length === 1 && tools[0]?.status !== "complete";
   const [open, setOpen] = useState(hasActiveTools || shouldAutoOpen);
   const isAutoControlledRef = useRef(true);
 
@@ -180,12 +258,12 @@ export function ToolCallGroup({
     if (!isAutoControlledRef.current) {
       return;
     }
-    if (collapseWhenFollowedByText && !hasFileDiffs) {
+    if (collapseWhenFollowedByText) {
       setOpen(false);
       return;
     }
     setOpen(hasActiveTools || shouldAutoOpen);
-  }, [collapseWhenFollowedByText, hasActiveTools, hasFileDiffs, shouldAutoOpen]);
+  }, [collapseWhenFollowedByText, hasActiveTools, shouldAutoOpen]);
 
   return (
     <details

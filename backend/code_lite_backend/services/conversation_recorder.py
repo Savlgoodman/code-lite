@@ -69,6 +69,33 @@ def _event_metadata(event: dict[str, Any]) -> dict[str, Any] | None:
     return metadata if isinstance(metadata, dict) else None
 
 
+def _deep_merge_records(previous: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(previous)
+    for key, value in incoming.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_records(current, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _merge_tool_metadata(previous: Any, incoming: Any) -> Any:
+    if isinstance(previous, dict) and isinstance(incoming, dict):
+        return _deep_merge_records(previous, incoming)
+    if incoming is None:
+        return previous
+    return incoming
+
+
+def _merge_tool_name(previous: Any, incoming: Any) -> str:
+    previous_name = str(previous or "")
+    incoming_name = str(incoming or "")
+    if previous_name and incoming_name in {"", "tool"}:
+        return previous_name
+    return incoming_name or previous_name
+
+
 def _has_visible_plan(plan: Any) -> bool:
     if not isinstance(plan, dict):
         return False
@@ -389,9 +416,14 @@ class ConversationRecorder:
         tool_calls = message.setdefault("toolCalls", [])
         for index, tool_call in enumerate(tool_calls):
             if tool_call.get("id") == tool_call_id:
+                merged_patch = {
+                    **patch,
+                    "metadata": _merge_tool_metadata(tool_call.get("metadata"), patch.get("metadata")),
+                    "name": _merge_tool_name(tool_call.get("name"), patch.get("name")),
+                }
                 tool_calls[index] = {
                     **tool_call,
-                    **patch,
+                    **merged_patch,
                     "updatedAt": timestamp,
                 }
                 return

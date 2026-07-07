@@ -2,6 +2,7 @@ import type { ToolCallItem } from "../../types";
 
 export interface AssistantInlineEntry {
   content: string;
+  fileEditGroups: ToolCallItem[][];
   key: string;
   toolGroups: ToolCallItem[][];
 }
@@ -88,6 +89,16 @@ function moveOffsetAfterMarkdownTable(offset: number, tableRanges: TextRange[]) 
   return offset;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasFileDiffContent(tool: ToolCallItem) {
+  const rawUpdate = isRecord(tool.metadata) ? tool.metadata.rawUpdate : null;
+  const content = isRecord(rawUpdate) ? rawUpdate.content : null;
+  return Array.isArray(content) && content.some((item) => isRecord(item) && item.type === "diff");
+}
+
 export function buildAssistantInlineEntries(content: string, toolCalls: ToolCallItem[]) {
   const entries: AssistantInlineEntry[] = [];
   const contentLength = content.length;
@@ -109,15 +120,21 @@ export function buildAssistantInlineEntries(content: string, toolCalls: ToolCall
     if (text.trim()) {
       entries.push({
         content: text,
+        fileEditGroups: [],
         key: `text-${cursor}`,
         toolGroups: []
       });
     }
 
+    const tools = toolsByOffset.get(offset) ?? [];
+    const fileEditTools = tools.filter(hasFileDiffContent);
+    const regularTools = tools.filter((tool) => !hasFileDiffContent(tool));
+
     entries.push({
       content: "",
+      fileEditGroups: fileEditTools.length > 0 ? [fileEditTools] : [],
       key: `tools-${offset}`,
-      toolGroups: [toolsByOffset.get(offset) ?? []]
+      toolGroups: regularTools.length > 0 ? [regularTools] : []
     });
     cursor = offset;
   }
@@ -126,6 +143,7 @@ export function buildAssistantInlineEntries(content: string, toolCalls: ToolCall
   if (tail.trim()) {
     entries.push({
       content: tail,
+      fileEditGroups: [],
       key: `text-${cursor}`,
       toolGroups: []
     });

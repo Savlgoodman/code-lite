@@ -68,6 +68,39 @@ function isDraftSessionId(sessionId: string) {
   return sessionId === DRAFT_SESSION_ID;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeRecords(previous: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
+  return Object.entries(incoming).reduce<Record<string, unknown>>((merged, [key, value]) => {
+    const current = merged[key];
+    if (isRecord(current) && isRecord(value)) {
+      merged[key] = mergeRecords(current, value);
+    } else {
+      merged[key] = value;
+    }
+    return merged;
+  }, { ...previous });
+}
+
+function mergeToolMetadata(
+  previous: ToolCallItem["metadata"],
+  incoming: ToolCallItem["metadata"],
+): ToolCallItem["metadata"] {
+  if (isRecord(previous) && isRecord(incoming)) {
+    return mergeRecords(previous, incoming);
+  }
+  return incoming ?? previous;
+}
+
+function mergeToolName(previous: string | undefined, incoming: string | undefined) {
+  if (previous && (!incoming || incoming === "tool")) {
+    return previous;
+  }
+  return incoming ?? previous ?? "";
+}
+
 function upsertToolCall(
   toolCalls: ToolCallItem[],
   item: Partial<ToolCallItem> & Pick<ToolCallItem, "id" | "name">,
@@ -93,6 +126,8 @@ function upsertToolCall(
           ...tool,
           ...item,
           anchorOffset: item.anchorOffset ?? tool.anchorOffset,
+          metadata: mergeToolMetadata(tool.metadata, item.metadata),
+          name: mergeToolName(tool.name, item.name),
           updatedAt: now
         }
       : tool

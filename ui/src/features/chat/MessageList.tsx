@@ -7,7 +7,7 @@ import { attachmentImageUrl } from "../../services/agentClient";
 import type { ChatMessage } from "../../types";
 import { ImagePreview, type PreviewImage } from "./ImagePreview";
 import { buildAssistantInlineEntries } from "./messageTools";
-import { ToolCallGroup } from "./ToolCallViews";
+import { FileEditGroup, ToolCallGroup } from "./ToolCallViews";
 import "./MessageList.css";
 
 const COMPACT_SIGNALS = [
@@ -70,8 +70,14 @@ function AssistantMessageContent({ isCompactTurn, message }: { isCompactTurn: bo
             />
           ) : null}
 
-          {entry.toolGroups.length > 0 ? (
+          {entry.fileEditGroups.length > 0 || entry.toolGroups.length > 0 ? (
             <div className="tool-call-list inline-tool-call-list">
+              {entry.fileEditGroups.map((tools) => (
+                <FileEditGroup
+                  key={`file-edit-${tools.map((tool) => tool.id).join("-")}`}
+                  tools={tools}
+                />
+              ))}
               {entry.toolGroups.map((tools) => (
                 <ToolCallGroup
                   collapseWhenFollowedByText={entries.slice(index + 1).some((nextEntry) => nextEntry.content.trim())}
