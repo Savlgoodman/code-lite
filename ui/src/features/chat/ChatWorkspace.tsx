@@ -93,10 +93,14 @@ export function ChatWorkspace({
   updatedAt
 }: ChatWorkspaceProps) {
   const activePlan = latestMergedPlanFromMessages(messages) ?? null;
+  const showEmptyWelcome = messages.length === 0 && !isRunning && !pendingApproval && !pendingInput;
 
   return (
-    <main className="chat-workspace">
+    <main className={`chat-workspace ${showEmptyWelcome ? "empty-chat" : ""}`}>
       <ConversationHeader agent={agent} isRunning={isRunning} title={title} />
+      <section className="empty-chat-welcome" aria-hidden={!showEmptyWelcome}>
+        <h2>我们应该在 code-lite 中构建什么？</h2>
+      </section>
       <MessageList
         isRunning={isRunning}
         messages={messages}
