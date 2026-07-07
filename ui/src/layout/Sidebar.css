@@ -118,6 +118,29 @@
   padding: 2px 0;
 }
 
+.session-group-more {
+  width: 100%;
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px 0 22px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #8a9098;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.session-group-more:hover,
+.session-group-more:focus-visible {
+  background: rgba(30, 35, 42, 0.05);
+  color: #626973;
+  outline: 0;
+}
+
 .sidebar-footer {
   flex: 0 0 auto;
   padding-top: 8px;

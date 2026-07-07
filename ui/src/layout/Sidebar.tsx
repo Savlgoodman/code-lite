@@ -27,6 +27,7 @@ interface SidebarProps {
 }
 
 const GENERAL_GROUP_KEY = "__general__";
+const MAX_VISIBLE_PROJECT_SESSIONS = 5;
 
 interface SessionGroup {
   key: string;
@@ -89,6 +90,7 @@ export function Sidebar({
   sessions
 }: SidebarProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [expandedSessionGroups, setExpandedSessionGroups] = useState<Set<string>>(new Set());
 
   const groups = useMemo(() => groupSessions(sessions), [sessions]);
 
@@ -102,6 +104,18 @@ export function Sidebar({
 
   function toggleGroup(key: string) {
     setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function toggleSessionGroup(key: string) {
+    setExpandedSessionGroups((current) => {
       const next = new Set(current);
       if (next.has(key)) {
         next.delete(key);
@@ -144,6 +158,12 @@ export function Sidebar({
       <div className="session-list" aria-label="会话列表">
         {groups.map((group) => {
           const collapsed = collapsedGroups.has(group.key);
+          const canFoldSessions = group.kind === "project" && group.sessions.length > MAX_VISIBLE_PROJECT_SESSIONS;
+          const sessionsExpanded = expandedSessionGroups.has(group.key);
+          const visibleSessions = canFoldSessions && !sessionsExpanded
+            ? group.sessions.slice(0, MAX_VISIBLE_PROJECT_SESSIONS)
+            : group.sessions;
+          const hiddenSessionCount = group.sessions.length - MAX_VISIBLE_PROJECT_SESSIONS;
           return (
             <div className="session-group" key={group.key}>
               <SidebarGroupHeader
@@ -156,7 +176,7 @@ export function Sidebar({
               />
               {collapsed ? null : (
                 <div className="session-group-body">
-                  {group.sessions.map((session) => (
+                  {visibleSessions.map((session) => (
                     <SidebarSessionItem
                       active={session.id === activeSessionId}
                       key={session.id}
@@ -165,6 +185,15 @@ export function Sidebar({
                       session={session}
                     />
                   ))}
+                  {canFoldSessions ? (
+                    <button
+                      className="session-group-more"
+                      onClick={() => toggleSessionGroup(group.key)}
+                      type="button"
+                    >
+                      {sessionsExpanded ? "收起显示" : `展开显示 ${hiddenSessionCount} 个会话`}
+                    </button>
+                  ) : null}
                 </div>
               )}
             </div>
