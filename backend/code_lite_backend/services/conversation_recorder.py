@@ -64,16 +64,6 @@ def _event_record(event: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-def _find_plan_entry_index(current_entries: list[Any], next_entry: dict[str, Any]) -> int | None:
-    next_id = next_entry.get("id")
-    if not next_id:
-        return None
-    for index, current in enumerate(current_entries):
-        if isinstance(current, dict) and current.get("id") == next_id:
-            return index
-    return None
-
-
 def _has_visible_plan(plan: Any) -> bool:
     if not isinstance(plan, dict):
         return False
@@ -96,56 +86,16 @@ def _has_markdown_plan_entries(markdown: Any) -> bool:
     return False
 
 
-def _merge_plan_entries(current_entries: list[Any], next_entries: list[Any]) -> list[Any]:
-    merged = [dict(entry) if isinstance(entry, dict) else entry for entry in current_entries]
-
-    for entry in next_entries:
-        if not isinstance(entry, dict):
-            continue
-        existing_index = _find_plan_entry_index(merged, entry)
-        if existing_index is None:
-            merged.append(dict(entry))
-            continue
-        current = merged[existing_index]
-        if isinstance(current, dict):
-            merged[existing_index] = {
-                **current,
-                **entry,
-                "id": current.get("id"),
-            }
-    return merged
-
-
-def _has_matching_plan_entry(current_entries: list[Any], next_entries: list[Any]) -> bool:
-    return any(
-        isinstance(entry, dict) and _find_plan_entry_index(current_entries, entry) is not None
-        for entry in next_entries
-    )
-
-
 def _merge_plan_snapshot(current: Any, next_plan: Any) -> dict[str, Any] | None:
+    if not isinstance(next_plan, dict):
+        return current if isinstance(current, dict) else None
+    if next_plan.get("source") == "acp.plan":
+        return next_plan if _has_visible_plan(next_plan) else None
     if not _has_visible_plan(next_plan):
         return current if isinstance(current, dict) else None
     if not isinstance(current, dict) or not _has_visible_plan(current):
-        return next_plan if isinstance(next_plan, dict) else None
-
-    current_entries = current.get("entries") if isinstance(current.get("entries"), list) else []
-    next_entries = next_plan.get("entries") if isinstance(next_plan.get("entries"), list) else []
-    if (
-        len(current_entries) > 1
-        and 0 < len(next_entries) < len(current_entries)
-        and next_plan.get("source") == "acp.plan"
-        and _has_matching_plan_entry(current_entries, next_entries)
-    ):
-        return {
-            **current,
-            **next_plan,
-            "entries": _merge_plan_entries(current_entries, next_entries),
-            "markdown": next_plan.get("markdown") or current.get("markdown"),
-            "title": next_plan.get("title") or current.get("title"),
-            "uri": next_plan.get("uri") or current.get("uri"),
-        }
-    return next_plan if isinstance(next_plan, dict) else current
+        return next_plan
+    return next_plan
 
 
 @dataclass(frozen=True)
@@ -253,7 +203,7 @@ class ConversationRecorder:
         elif event_type == "agent.plan.updated":
             plan = event.get("plan")
             if isinstance(plan, dict):
-                assistant["plan"] = self._merge_message_plan(messages, assistant, plan)
+                assistant["plan"] = self._merge_message_plan(assistant, plan)
                 assistant["updatedAt"] = now_ms()
             self._append_runtime_event(assistant, event)
         elif event_type in {
@@ -275,7 +225,7 @@ class ConversationRecorder:
         elif event_type == "agent.tool.started":
             plan = event.get("plan")
             if isinstance(plan, dict):
-                assistant["plan"] = self._merge_message_plan(messages, assistant, plan)
+                assistant["plan"] = self._merge_message_plan(assistant, plan)
             self._upsert_tool_call(
                 assistant,
                 event.get("toolCallId") or create_message_id("tool"),
@@ -300,7 +250,7 @@ class ConversationRecorder:
         elif event_type == "agent.tool.completed":
             plan = event.get("plan")
             if isinstance(plan, dict):
-                assistant["plan"] = self._merge_message_plan(messages, assistant, plan)
+                assistant["plan"] = self._merge_message_plan(assistant, plan)
             self._upsert_tool_call(
                 assistant,
                 event.get("toolCallId") or create_message_id("tool"),
@@ -323,7 +273,7 @@ class ConversationRecorder:
         elif event_type == "approval.required":
             plan = event.get("plan")
             if isinstance(plan, dict):
-                assistant["plan"] = self._merge_message_plan(messages, assistant, plan)
+                assistant["plan"] = self._merge_message_plan(assistant, plan)
             self._upsert_tool_call(
                 assistant,
                 event.get("toolCallId") or event.get("approvalId") or create_message_id("tool"),
@@ -410,26 +360,15 @@ class ConversationRecorder:
         return None
 
     @staticmethod
-    def _latest_plan(messages: list[dict[str, Any]], exclude_message_id: str) -> dict[str, Any] | None:
-        for message in reversed(messages):
-            if message.get("id") == exclude_message_id:
-                continue
-            if message.get("role") == "assistant" and _has_visible_plan(message.get("plan")):
-                plan = message.get("plan")
-                return plan if isinstance(plan, dict) else None
-        return None
-
-    @classmethod
     def _merge_message_plan(
-        cls,
-        messages: list[dict[str, Any]],
         assistant: dict[str, Any],
         next_plan: dict[str, Any],
     ) -> dict[str, Any] | None:
+        if isinstance(next_plan, dict) and next_plan.get("source") == "acp.plan":
+            return _merge_plan_snapshot(None, next_plan)
         if not _has_visible_plan(next_plan):
             return assistant.get("plan") if isinstance(assistant.get("plan"), dict) else None
-        current = assistant.get("plan") or cls._latest_plan(messages, str(assistant.get("id") or ""))
-        return _merge_plan_snapshot(current, next_plan)
+        return _merge_plan_snapshot(assistant.get("plan"), next_plan)
 
     @staticmethod
     def _upsert_tool_call(message: dict[str, Any], tool_call_id: str, patch: dict[str, Any]) -> None:

@@ -86,7 +86,7 @@ export interface ChatMessage {
   error?: string;
   toolCalls: ToolCallItem[];
   usage?: UsageStats;
-  plan?: PlanSnapshot;
+  plan?: PlanSnapshot | null;
   runtimeEvents?: RuntimeEventRecord[];
 }
 

@@ -1,4 +1,4 @@
-import type { ChatMessage, PlanEntry, PlanSnapshot } from "../../types";
+import type { ChatMessage, PlanSnapshot } from "../../types";
 
 export function hasVisiblePlan(plan: PlanSnapshot | undefined | null): plan is PlanSnapshot {
   return Boolean(
@@ -19,76 +19,30 @@ function hasMarkdownPlanEntries(markdown: string | undefined) {
   });
 }
 
-function findPlanEntryIndex(currentEntries: PlanEntry[], nextEntry: PlanEntry) {
-  if (!nextEntry.id) {
-    return -1;
-  }
-  return currentEntries.findIndex((entry) => entry.id === nextEntry.id);
-}
-
-function mergePlanEntries(currentEntries: PlanEntry[], nextEntries: PlanEntry[]) {
-  const merged = currentEntries.map((entry) => ({ ...entry }));
-  for (const entry of nextEntries) {
-    const existingIndex = findPlanEntryIndex(merged, entry);
-    if (existingIndex < 0) {
-      merged.push({ ...entry });
-      continue;
-    }
-    merged[existingIndex] = {
-      ...merged[existingIndex],
-      ...entry,
-      id: merged[existingIndex].id,
-    };
-  }
-  return merged;
-}
-
-function hasMatchingPlanEntry(currentEntries: PlanEntry[], nextEntries: PlanEntry[]) {
-  return nextEntries.some((entry) => findPlanEntryIndex(currentEntries, entry) >= 0);
-}
-
-function isPartialPlanUpdate(currentEntries: PlanEntry[], nextEntries: PlanEntry[], next: PlanSnapshot) {
-  return currentEntries.length > 1
-    && nextEntries.length > 0
-    && nextEntries.length < currentEntries.length
-    && next.source === "acp.plan"
-    && hasMatchingPlanEntry(currentEntries, nextEntries);
-}
-
 export function mergePlanSnapshot(
   current: PlanSnapshot | undefined | null,
   next: PlanSnapshot | undefined | null,
-): PlanSnapshot | undefined {
+): PlanSnapshot | undefined | null {
+  if (next?.source === "acp.plan") {
+    return hasVisiblePlan(next) ? next : null;
+  }
   if (!hasVisiblePlan(next)) {
     return current ?? undefined;
   }
-  const nextPlan = next;
-  if (!current || !hasVisiblePlan(current)) {
-    return nextPlan;
-  }
-
-  const currentEntries = current.entries ?? [];
-  const nextEntries = nextPlan.entries ?? [];
-  if (isPartialPlanUpdate(currentEntries, nextEntries, nextPlan)) {
-    return {
-      ...current,
-      ...nextPlan,
-      entries: mergePlanEntries(currentEntries, nextEntries),
-      markdown: nextPlan.markdown ?? current.markdown,
-      title: nextPlan.title ?? current.title,
-      uri: nextPlan.uri ?? current.uri,
-    };
-  }
-  return nextPlan;
+  return next;
 }
 
 export function latestMergedPlanFromMessages(items: ChatMessage[] | undefined, excludeMessageId?: string) {
-  let current: PlanSnapshot | undefined;
+  let current: PlanSnapshot | undefined | null;
   for (const message of items ?? []) {
     if (message.id === excludeMessageId) {
       continue;
     }
     if (message.role !== "assistant") {
+      continue;
+    }
+    if (message.plan === null) {
+      current = null;
       continue;
     }
     current = mergePlanSnapshot(current, message.plan);

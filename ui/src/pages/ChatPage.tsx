@@ -119,7 +119,10 @@ function mergeMessagePlan(
   message: ChatMessage,
   sessionMessages: ChatMessage[] | undefined,
   nextPlan: PlanSnapshot | undefined | null,
-) {
+): PlanSnapshot | null | undefined {
+  if (nextPlan?.source === "acp.plan") {
+    return mergePlanSnapshot(null, nextPlan);
+  }
   if (!hasVisiblePlan(nextPlan)) {
     return message.plan;
   }
