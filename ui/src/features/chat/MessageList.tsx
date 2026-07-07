@@ -1,4 +1,4 @@
-import { ArrowDown, ChevronRight, Minimize2 } from "lucide-react";
+import { ArrowDown, ChevronRight, Minimize2, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageRenderer } from "../../components/MessageRenderer";
@@ -86,7 +86,20 @@ function AssistantMessageContent({ isCompactTurn, message }: { isCompactTurn: bo
   );
 }
 
-function UserMessageAttachments({ message, sessionId }: { message: ChatMessage; sessionId: string }) {
+type PreviewImage = {
+  name: string;
+  url: string;
+};
+
+function UserMessageAttachments({
+  message,
+  onPreviewImage,
+  sessionId,
+}: {
+  message: ChatMessage;
+  onPreviewImage: (image: PreviewImage) => void;
+  sessionId: string;
+}) {
   const attachments = useMemo(
     () => (message.attachments ?? []).filter((attachment) => attachment.kind === "image"),
     [message.attachments],
@@ -123,16 +136,20 @@ function UserMessageAttachments({ message, sessionId }: { message: ChatMessage; 
   return (
     <div className="user-attachment-strip">
       {attachments.map((attachment) => (
-        <a
+        <button
           className="user-attachment-thumb"
-          href={urls[attachment.id]}
+          disabled={!urls[attachment.id]}
           key={attachment.id}
-          rel="noreferrer"
-          target="_blank"
+          onClick={() => {
+            const url = urls[attachment.id];
+            if (url) {
+              onPreviewImage({ name: attachment.name || "图片预览", url });
+            }
+          }}
           title={attachment.name}
         >
           {urls[attachment.id] ? <img alt={attachment.name} src={urls[attachment.id]} /> : null}
-        </a>
+        </button>
       ))}
     </div>
   );
@@ -149,12 +166,14 @@ function shouldShowTurnEndTime(message: ChatMessage, index: number, messages: Ch
 const MessageItem = memo(function MessageItem({
   isCompactTurn,
   message,
+  onPreviewImage,
   sessionId,
   showTurnEndTime,
   turnEndTime
 }: {
   isCompactTurn: boolean;
   message: ChatMessage;
+  onPreviewImage: (image: PreviewImage) => void;
   sessionId: string;
   showTurnEndTime: boolean;
   turnEndTime: number;
@@ -171,7 +190,7 @@ const MessageItem = memo(function MessageItem({
           <AssistantMessageContent isCompactTurn={isCompactTurn} message={message} />
         ) : (
           <div className="user-message-stack">
-            <UserMessageAttachments message={message} sessionId={sessionId} />
+            <UserMessageAttachments message={message} onPreviewImage={onPreviewImage} sessionId={sessionId} />
             {message.content ? <p className="user-message-text">{message.content}</p> : null}
           </div>
         )}
@@ -226,6 +245,7 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
   const smoothScrollActiveRef = useRef(false);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [scrollbarState, setScrollbarState] = useState({
     thumbHeight: 100,
     thumbTop: 0,
@@ -361,6 +381,19 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
     requestAnimationFrame(() => scrollToBottom("auto"));
   }, [sessionId]);
 
+  useEffect(() => {
+    if (!previewImage) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPreviewImage(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [previewImage]);
+
   return (
     <>
       <section className="chat-scroll" ref={scrollRef}>
@@ -370,6 +403,7 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
               isCompactTurn={message.role === "assistant" && isCompactPrompt(messages[index - 1]?.content)}
               key={`${sessionId}-${message.id}`}
               message={message}
+              onPreviewImage={setPreviewImage}
               sessionId={sessionId}
               showTurnEndTime={shouldShowTurnEndTime(message, index, messages, isRunning)}
               turnEndTime={message.updatedAt ?? (index === messages.length - 1 ? updatedAt : message.createdAt)}
@@ -393,6 +427,24 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
         >
           <ArrowDown size={17} />
         </button>
+      ) : null}
+      {previewImage ? (
+        <div
+          className="image-preview-backdrop"
+          onClick={() => setPreviewImage(null)}
+          role="presentation"
+        >
+          <div className="image-preview-shell" onClick={(event) => event.stopPropagation()}>
+            <button
+              aria-label="关闭图片预览"
+              className="image-preview-close"
+              onClick={() => setPreviewImage(null)}
+            >
+              <X size={18} />
+            </button>
+            <img alt={previewImage.name} className="image-preview-image" src={previewImage.url} />
+          </div>
+        </div>
       ) : null}
     </>
   );
