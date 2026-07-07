@@ -48,6 +48,7 @@ docs/
 | `research/0703-BACKEND-ACP-RESEARCH.md` | 调研 | Python backend 侧 ACP client 设计推导和 demo 记录 |
 | `research/0703-VIBEX-ACP-RESEARCH.md` | 调研 | VibeX ACP runtime 生命周期、会话存储和 code-lite 改进方案 |
 | `research/0706-AGENT-INTERACTION-TOOLS-RESEARCH.md` | 调研 | Codex / Claude Code 交互工具、Plan 模式、用户选择和前端展示边界 |
+| `research/0707-AGENT-MULTIMODAL-INPUT-RESEARCH.md` | 调研 | Agent 多模态图片输入、ACP ContentBlock、附件存储和 runtime 能力协商 |
 
 ### 配套专项
 
@@ -56,6 +57,7 @@ docs/
 | `design/0703-RUNTIME-MODEL-PROVIDER.md` | 设计 | runtime 原生配置、产品模型配置和 legacy LLM provider 配置边界 |
 | `design/0706-BILLING-DAILY-USAGE.md` | 设计 | 日统计、项目总计和费用总览的数据结构与落盘方案 |
 | `design/0706-AGENT-SPECIAL-EVENTS-PLAN-UI.md` | 设计 | ACP 特殊事件、raw 记录、Codex / Claude 计划事件和计划面板展示说明 |
+| `design/0707-AGENT-MULTIMODAL-COMPOSER.md` | 设计 | 多模态输入框、草稿图片生命周期、图片压缩限制和 AttachmentStore 落盘策略 |
 | `design/0702-REMOTE-SYNC.md` | 设计 | 远程只读观看、事件补偿、权限和审计 |
 | `refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` | 重构 | Agent adapter 归位、结构化日志、诊断错误和设置页日志查看 |
 | `refactor/0703-RUNTIME-DATA-CHAT-UI.md` | 重构 | 运行时数据目录、会话事件存储和聊天 UI 优化 |
