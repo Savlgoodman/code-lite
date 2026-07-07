@@ -15,6 +15,7 @@ from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
 from code_lite_backend.storage.attachments import AttachmentStore
 from code_lite_backend.storage.conversations import ConversationStore
+from code_lite_backend.storage.diff_artifacts import DiffArtifactStore
 from code_lite_backend.storage.event_store import ConversationEventStore
 
 
@@ -27,6 +28,7 @@ class AppServices:
     attachment_store: AttachmentStore
     conversation_store: ConversationStore
     conversation_recorder: ConversationRecorder
+    diff_artifact_store: DiffArtifactStore
     billing_price_store: BillingPriceStore
     billing_usage_recorder: BillingUsageRecorder
     model_config_store: ModelConfigStore

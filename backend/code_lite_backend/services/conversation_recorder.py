@@ -4,6 +4,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any
 
 from code_lite_backend.storage.conversations import (
@@ -13,6 +14,7 @@ from code_lite_backend.storage.conversations import (
     create_conversation_id,
     now_ms,
 )
+from code_lite_backend.storage.diff_artifacts import DiffArtifactStore
 
 
 def create_message_id(prefix: str) -> str:
@@ -80,9 +82,39 @@ def _deep_merge_records(previous: dict[str, Any], incoming: dict[str, Any]) -> d
     return merged
 
 
+def _merge_file_diff_summaries(previous: Any, incoming: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(previous, list) and not isinstance(incoming, list):
+        return None
+
+    merged: list[dict[str, Any]] = []
+    seen: dict[str, int] = {}
+    for source in (previous, incoming):
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            diff_id = str(item.get("diffId") or "").strip()
+            if not diff_id:
+                continue
+            if diff_id in seen:
+                merged[seen[diff_id]] = {
+                    **merged[seen[diff_id]],
+                    **item,
+                }
+                continue
+            seen[diff_id] = len(merged)
+            merged.append(dict(item))
+    return merged
+
+
 def _merge_tool_metadata(previous: Any, incoming: Any) -> Any:
     if isinstance(previous, dict) and isinstance(incoming, dict):
-        return _deep_merge_records(previous, incoming)
+        merged = _deep_merge_records(previous, incoming)
+        file_diffs = _merge_file_diff_summaries(previous.get("fileDiffs"), incoming.get("fileDiffs"))
+        if file_diffs is not None:
+            merged["fileDiffs"] = file_diffs
+        return merged
     if incoming is None:
         return previous
     return incoming
@@ -130,6 +162,63 @@ def _merge_plan_snapshot(current: Any, next_plan: Any) -> dict[str, Any] | None:
     return next_plan
 
 
+def _split_lines(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return value.splitlines()
+
+
+def _diff_stats(old_text: str | None, new_text: str | None) -> dict[str, int]:
+    old_lines = _split_lines(old_text)
+    new_lines = _split_lines(new_text)
+    if old_text is None:
+        return {"added": len(new_lines), "removed": 0}
+    if new_text is None:
+        return {"added": 0, "removed": len(old_lines)}
+
+    added = 0
+    removed = 0
+    matcher = SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+    for tag, first_start, first_end, second_start, second_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        removed += first_end - first_start
+        added += second_end - second_start
+    return {"added": added, "removed": removed}
+
+
+def _content_change_kind(content: dict[str, Any], old_text: str | None, new_text: str | None) -> str:
+    meta = content.get("_meta")
+    native_kind = str(meta.get("kind") or "").strip().lower() if isinstance(meta, dict) else ""
+    if old_text is None and new_text is not None:
+        return "create"
+    if old_text is not None and new_text is None:
+        return "delete" if native_kind == "delete" else "clear"
+    if old_text is not None and new_text == "":
+        return "delete" if native_kind == "delete" else "clear"
+    return "modify"
+
+
+def _safe_diff_id(tool_call_id: str, content_index: int) -> str:
+    base = re.sub(r"[^A-Za-z0-9_.-]+", "-", tool_call_id.strip()) or "tool"
+    return f"{base}-{content_index}"
+
+
+def _raw_update_summary(raw_update: dict[str, Any]) -> dict[str, Any]:
+    summary = {key: value for key, value in raw_update.items() if key != "content"}
+    content = raw_update.get("content")
+    if isinstance(content, list):
+        content_types = [
+            str(item.get("type") or "unknown")
+            for item in content
+            if isinstance(item, dict)
+        ]
+        summary["contentCount"] = len(content)
+        summary["contentTypes"] = content_types
+        summary["hasFileDiffs"] = any(item.get("type") == "diff" for item in content if isinstance(item, dict))
+    return summary
+
+
 @dataclass(frozen=True)
 class TurnRecord:
     session: dict[str, Any]
@@ -139,8 +228,9 @@ class TurnRecord:
 
 
 class ConversationRecorder:
-    def __init__(self, store: ConversationStore) -> None:
+    def __init__(self, store: ConversationStore, diff_store: DiffArtifactStore | None = None) -> None:
         self._store = store
+        self._diff_store = diff_store or DiffArtifactStore(store.record_dir)
         self._active_messages: dict[str, list[dict[str, Any]]] = {}
         self._active_sessions: dict[str, dict[str, Any]] = {}
 
@@ -270,7 +360,10 @@ class ConversationRecorder:
                     "name": str(event.get("name") or ""),
                     "risk": event.get("risk"),
                     "status": "running",
-                    "metadata": _event_metadata(event),
+                    "metadata": self._project_tool_metadata(
+                        conversation_id=conversation_id,
+                        event=event,
+                    ),
                 },
             )
         elif event_type == "agent.tool.delta":
@@ -281,7 +374,10 @@ class ConversationRecorder:
                     "name": str(event.get("name") or ""),
                     "status": "running",
                     "resultText": format_json(event.get("progress")) if event.get("progress") is not None else None,
-                    "metadata": _event_metadata(event),
+                    "metadata": self._project_tool_metadata(
+                        conversation_id=conversation_id,
+                        event=event,
+                    ),
                 },
             )
         elif event_type == "agent.tool.completed":
@@ -295,7 +391,10 @@ class ConversationRecorder:
                     "name": str(event.get("name") or ""),
                     "resultText": format_json(event.get("result") if "result" in event else event.get("metadata")),
                     "status": "complete",
-                    "metadata": _event_metadata(event),
+                    "metadata": self._project_tool_metadata(
+                        conversation_id=conversation_id,
+                        event=event,
+                    ),
                 },
             )
         elif event_type == "agent.tool.failed":
@@ -306,7 +405,10 @@ class ConversationRecorder:
                     "error": event.get("error") or "工具调用失败",
                     "name": str(event.get("name") or ""),
                     "status": "error",
-                    "metadata": _event_metadata(event),
+                    "metadata": self._project_tool_metadata(
+                        conversation_id=conversation_id,
+                        event=event,
+                    ),
                 },
             )
         elif event_type == "approval.required":
@@ -322,7 +424,10 @@ class ConversationRecorder:
                     "name": str(event.get("name") or ""),
                     "risk": event.get("risk"),
                     "status": "approval",
-                    "metadata": _event_metadata(event),
+                    "metadata": self._project_tool_metadata(
+                        conversation_id=conversation_id,
+                        event=event,
+                    ),
                 },
             )
             self._update_active_session(conversation_id, {"status": "approval"})
@@ -409,6 +514,99 @@ class ConversationRecorder:
         if not _has_visible_plan(next_plan):
             return assistant.get("plan") if isinstance(assistant.get("plan"), dict) else None
         return _merge_plan_snapshot(assistant.get("plan"), next_plan)
+
+    def _project_tool_metadata(
+        self,
+        *,
+        conversation_id: str,
+        event: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        metadata = _event_metadata(event)
+        if metadata is None:
+            return None
+
+        projected = dict(metadata)
+        raw_update = projected.get("rawUpdate")
+        if not isinstance(raw_update, dict):
+            return projected
+
+        tool_call_id = str(
+            event.get("toolCallId")
+            or raw_update.get("toolCallId")
+            or raw_update.get("id")
+            or create_message_id("tool")
+        )
+        file_diffs = self._save_file_diffs(
+            conversation_id=conversation_id,
+            turn_id=str(event.get("turnId") or ""),
+            tool_call_id=tool_call_id,
+            raw_update=raw_update,
+        )
+
+        if file_diffs:
+            projected["fileDiffs"] = file_diffs
+        projected["rawUpdateSummary"] = _raw_update_summary(raw_update)
+        projected.pop("rawUpdate", None)
+        return projected
+
+    def _save_file_diffs(
+        self,
+        *,
+        conversation_id: str,
+        turn_id: str,
+        tool_call_id: str,
+        raw_update: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        content = raw_update.get("content")
+        if not isinstance(content, list):
+            return []
+
+        summaries: list[dict[str, Any]] = []
+        for index, item in enumerate(content):
+            if not isinstance(item, dict) or item.get("type") != "diff":
+                continue
+            path = str(item.get("path") or "").strip()
+            new_text = item.get("newText")
+            old_text = item.get("oldText")
+            if not path or not isinstance(new_text, str):
+                continue
+            if old_text is not None and not isinstance(old_text, str):
+                continue
+
+            diff_id = _safe_diff_id(tool_call_id, index)
+            stats = _diff_stats(old_text, new_text)
+            meta = item.get("_meta")
+            native_kind = str(meta.get("kind") or "").strip() if isinstance(meta, dict) else None
+            artifact = self._diff_store.save_diff(
+                conversation_id,
+                {
+                    "diffId": diff_id,
+                    "turnId": turn_id,
+                    "toolCallId": tool_call_id,
+                    "contentIndex": index,
+                    "path": path,
+                    "changeType": _content_change_kind(item, old_text, new_text),
+                    "nativeChangeKind": native_kind,
+                    "added": stats["added"],
+                    "removed": stats["removed"],
+                    "oldText": old_text,
+                    "newText": new_text,
+                    "createdAt": now_ms(),
+                },
+            )
+            summaries.append(
+                {
+                    "diffId": diff_id,
+                    "toolCallId": tool_call_id,
+                    "path": path,
+                    "changeType": artifact.get("changeType"),
+                    "nativeChangeKind": artifact.get("nativeChangeKind"),
+                    "added": artifact.get("added") or 0,
+                    "removed": artifact.get("removed") or 0,
+                    "artifactPath": DiffArtifactStore.artifact_relative_path(diff_id),
+                }
+            )
+        return summaries
 
     @staticmethod
     def _upsert_tool_call(message: dict[str, Any], tool_call_id: str, patch: dict[str, Any]) -> None:

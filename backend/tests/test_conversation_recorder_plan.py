@@ -42,7 +42,7 @@ class ConversationRecorderPlanTest(unittest.TestCase):
 
 
 class ConversationRecorderToolMetadataTest(unittest.TestCase):
-    def test_tool_call_projection_keeps_event_metadata(self) -> None:
+    def test_tool_call_projection_saves_diff_artifact(self) -> None:
         from tempfile import TemporaryDirectory
 
         with TemporaryDirectory() as directory:
@@ -77,7 +77,17 @@ class ConversationRecorderToolMetadataTest(unittest.TestCase):
             )
 
             tool_call = turn.assistant_message["toolCalls"][0]
-            self.assertEqual(tool_call["metadata"]["rawUpdate"]["content"][0]["type"], "diff")
+            metadata = tool_call["metadata"]
+            self.assertNotIn("rawUpdate", metadata)
+            self.assertEqual(metadata["rawUpdateSummary"]["contentTypes"], ["diff"])
+            self.assertEqual(metadata["fileDiffs"][0]["path"], "README.md")
+            self.assertEqual(metadata["fileDiffs"][0]["added"], 2)
+            self.assertEqual(metadata["fileDiffs"][0]["removed"], 0)
+
+            diff_id = metadata["fileDiffs"][0]["diffId"]
+            artifact = Path(directory) / "conv-1" / "diffs" / f"{diff_id}.json"
+            self.assertTrue(artifact.exists())
+            self.assertIn('"oldText": "# Demo\\n"', artifact.read_text(encoding="utf-8"))
 
     def test_tool_call_completed_keeps_started_diff_metadata(self) -> None:
         from tempfile import TemporaryDirectory
@@ -137,8 +147,11 @@ class ConversationRecorderToolMetadataTest(unittest.TestCase):
             self.assertEqual(tool_call["name"], "Editing files")
             self.assertEqual(tool_call["status"], "complete")
             self.assertEqual(tool_call["metadata"]["status"], "completed")
-            self.assertEqual(tool_call["metadata"]["rawUpdate"]["status"], "completed")
-            self.assertEqual(tool_call["metadata"]["rawUpdate"]["content"], diff_content)
+            self.assertNotIn("rawUpdate", tool_call["metadata"])
+            self.assertEqual(tool_call["metadata"]["rawUpdateSummary"]["status"], "completed")
+            self.assertEqual(tool_call["metadata"]["fileDiffs"][0]["path"], diff_content[0]["path"])
+            self.assertEqual(tool_call["metadata"]["fileDiffs"][0]["added"], 1)
+            self.assertEqual(tool_call["metadata"]["fileDiffs"][0]["removed"], 0)
 
 
 if __name__ == "__main__":

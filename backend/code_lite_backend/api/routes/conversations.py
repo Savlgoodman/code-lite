@@ -115,6 +115,22 @@ async def get_conversation_events(
     return JSONResponse({"events": events})
 
 
+@router.get("/conversations/{conversation_id}/diffs/{diff_id}")
+async def get_conversation_diff(
+    conversation_id: str,
+    diff_id: str,
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    try:
+        diff = services.diff_artifact_store.load_diff(conversation_id, diff_id)
+    except ValueError:
+        return JSONResponse({"error": "invalid diff id"}, status_code=400)
+
+    if diff is None:
+        return JSONResponse({"error": "diff not found"}, status_code=404)
+    return JSONResponse({"diff": diff})
+
+
 @router.patch("/conversations/{conversation_id}/archive")
 async def update_conversation_archive_state(
     conversation_id: str,
