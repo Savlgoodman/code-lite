@@ -1,10 +1,11 @@
-import { ArrowDown, ChevronRight, Minimize2, X } from "lucide-react";
+import { ArrowDown, ChevronRight, Minimize2 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageRenderer } from "../../components/MessageRenderer";
 import { formatConversationBoundaryTime } from "../../lib/formatters";
 import { attachmentImageUrl } from "../../services/agentClient";
 import type { ChatMessage } from "../../types";
+import { ImagePreview, type PreviewImage } from "./ImagePreview";
 import { buildAssistantInlineEntries } from "./messageTools";
 import { ToolCallGroup } from "./ToolCallViews";
 import "./MessageList.css";
@@ -85,11 +86,6 @@ function AssistantMessageContent({ isCompactTurn, message }: { isCompactTurn: bo
     </div>
   );
 }
-
-type PreviewImage = {
-  name: string;
-  url: string;
-};
 
 function UserMessageAttachments({
   message,
@@ -381,19 +377,6 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
     requestAnimationFrame(() => scrollToBottom("auto"));
   }, [sessionId]);
 
-  useEffect(() => {
-    if (!previewImage) {
-      return;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setPreviewImage(null);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [previewImage]);
-
   return (
     <>
       <section className="chat-scroll" ref={scrollRef}>
@@ -428,24 +411,7 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
           <ArrowDown size={17} />
         </button>
       ) : null}
-      {previewImage ? (
-        <div
-          className="image-preview-backdrop"
-          onClick={() => setPreviewImage(null)}
-          role="presentation"
-        >
-          <div className="image-preview-shell" onClick={(event) => event.stopPropagation()}>
-            <button
-              aria-label="关闭图片预览"
-              className="image-preview-close"
-              onClick={() => setPreviewImage(null)}
-            >
-              <X size={18} />
-            </button>
-            <img alt={previewImage.name} className="image-preview-image" src={previewImage.url} />
-          </div>
-        </div>
-      ) : null}
+      <ImagePreview image={previewImage} onClose={() => setPreviewImage(null)} />
     </>
   );
 }

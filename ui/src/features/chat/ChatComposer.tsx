@@ -40,6 +40,7 @@ import { PlanProgressPanel } from "./PlanProgressPanel";
 import { TokenUsageModal } from "./TokenUsageModal";
 import type { ChatConfigValue } from "./chatTypes";
 import { IMAGE_ACCEPT, type DraftImage } from "./draftImages";
+import { ImagePreview, type PreviewImage } from "./ImagePreview";
 import "./ChatComposer.css";
 
 /** 从模型 ID 提取模型族和推理强度 */
@@ -144,6 +145,7 @@ export function ChatComposer({
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [composerLayoutVersion, setComposerLayoutVersion] = useState(0);
+  const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [billingPrices, setBillingPrices] = useState<BillingPricesResult | null>(null);
   const accessMenuRef = useRef<HTMLDivElement | null>(null);
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
@@ -452,7 +454,15 @@ export function ChatComposer({
             <div className="composer-image-strip" aria-label="待发送图片">
               {draftImages.map((image) => (
                 <div className="composer-image-thumb" key={image.id}>
-                  <img alt={image.name} src={image.objectUrl} />
+                  <button
+                    aria-label={`预览图片 ${image.name}`}
+                    className="composer-image-preview"
+                    onClick={() => setPreviewImage({ name: image.name, url: image.objectUrl })}
+                    title={image.name}
+                    type="button"
+                  >
+                    <img alt={image.name} src={image.objectUrl} />
+                  </button>
                   <button
                     aria-label={`移除图片 ${image.name}`}
                     className="composer-image-remove"
@@ -708,6 +718,7 @@ export function ChatComposer({
       open={isTokenModalOpen}
       onClose={() => setIsTokenModalOpen(false)}
     />
+    <ImagePreview image={previewImage} onClose={() => setPreviewImage(null)} />
     </Fragment>
   );
 }
