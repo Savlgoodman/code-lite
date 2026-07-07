@@ -16,7 +16,7 @@ import { formatJson } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
-import { cancelTurn, createConversation, initializeSession, sendApprovalDecision, streamAgentTurn } from "../services/agentClient";
+import { cancelTurn, createConversation, initializeSession, sendApprovalDecision, sendInputResponse, streamAgentTurn } from "../services/agentClient";
 import {
   deleteConversation,
   listConversations,
@@ -31,6 +31,7 @@ import type {
   AgentSummary,
   ApprovalRequest,
   ChatMessage,
+  InputRequest,
   Session,
   SessionCapabilities,
   SessionConfigOption,
@@ -46,6 +47,7 @@ const DRAFT_SESSION_ID = "__draft_session__";
 const STREAM_DELTA_FLUSH_MS = 60;
 type ActiveView = "chat" | "overview" | "settings";
 type PendingApprovalState = ApprovalRequest & { conversationId: string };
+type PendingInputState = InputRequest & { conversationId: string };
 
 function createDraftSession(): Session {
   return {
@@ -226,6 +228,7 @@ export function ChatPage() {
   const [activeTurnIdBySession, setActiveTurnIdBySession] = useState<Record<string, string>>({});
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
+  const [pendingInput, setPendingInput] = useState<PendingInputState | null>(null);
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
   const [contextUsageBySession, setContextUsageBySession] = useState<Record<string, UsageStats>>({});
   const [showAgentSelection, setShowAgentSelection] = useState(false);
@@ -266,6 +269,7 @@ export function ChatPage() {
   const activeMessages = messages[activeSession.id] ?? [];
   const isActiveSessionRunning = runningSessionIds.has(activeSession.id);
   const activePendingApproval = pendingApproval?.conversationId === activeSession.id ? pendingApproval : null;
+  const activePendingInput = pendingInput?.conversationId === activeSession.id ? pendingInput : null;
   const sessionAgent = activeSession.agent ?? (isDraftSessionId(activeSession.id) ? activeAgent : null);
   const contextUsage = contextUsageBySession[activeSession.id] ?? null;
   const activeTurnId = activeTurnIdBySession[activeSession.id] ?? null;
@@ -592,6 +596,7 @@ export function ChatPage() {
       setActiveView("chat");
       setDraft("");
       setPendingApproval(null);
+      setPendingInput(null);
     } catch (error) {
       console.error("Failed to create conversation:", error);
       // fallback: 创建本地 draft session
@@ -929,8 +934,33 @@ export function ChatPage() {
       return;
     }
 
+    if (event.type === "agent.input.required") {
+      flushQueuedMessageDeltas();
+      setPendingInput({
+        conversationId: targetSessionId,
+        inputRequestId: event.inputRequestId,
+        message: event.message,
+        mode: event.mode,
+        schema: event.schema,
+        toolCallId: event.toolCallId,
+      });
+      updateSession(targetSessionId, (session) => ({ ...session, status: "approval", updatedAt: Date.now() }));
+      setMessages((current) =>
+        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
+          ...message,
+          runtimeEvents: appendRuntimeEvent(message.runtimeEvents, event),
+        }))
+      );
+      return;
+    }
+
+    if (event.type === "agent.input.completed") {
+      setPendingInput((current) => current?.inputRequestId === event.inputRequestId ? null : current);
+    }
+
     if (
       event.type === "agent.config.updated"
+      || event.type === "agent.input.completed"
       || event.type === "agent.raw.rpc"
       || event.type === "agent.raw.update"
     ) {
@@ -1127,6 +1157,7 @@ export function ChatPage() {
     delete activeAssistantMessageIdBySessionRef.current[sessionId];
     delete activeStreamSessionIdByTurnRef.current[sessionId];
     setPendingApproval(null);
+    setPendingInput(null);
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -1209,6 +1240,7 @@ export function ChatPage() {
       return next;
     });
     setPendingApproval(null);
+    setPendingInput(null);
   }
 
   async function resolveApproval(decision: "allow" | "deny") {
@@ -1228,6 +1260,26 @@ export function ChatPage() {
       })
       .catch((error) => {
         updateSession(approval.conversationId, (session) => ({ ...session, status: "error", updatedAt: Date.now() }));
+        console.error(error);
+      });
+  }
+
+  async function resolveInput(action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) {
+    if (!activePendingInput) {
+      return;
+    }
+
+    const input = activePendingInput;
+    setPendingInput(null);
+    updateSession(input.conversationId, (session) => ({ ...session, status: "running", updatedAt: Date.now() }));
+    await sendInputResponse(input.inputRequestId, action, content)
+      .then((result) => {
+        if (result.session) {
+          updateSession(input.conversationId, () => result.session as Session);
+        }
+      })
+      .catch((error) => {
+        updateSession(input.conversationId, (session) => ({ ...session, status: "error", updatedAt: Date.now() }));
         console.error(error);
       });
   }
@@ -1297,9 +1349,11 @@ export function ChatPage() {
               onModelFamilyChange={(value) => updateSessionConfig({ modelFamily: value })}
               onReasoningEffortChange={(value) => updateSessionConfig({ reasoningEffort: value })}
               onResolveApproval={(decision) => void resolveApproval(decision)}
+              onResolveInput={(action, content) => void resolveInput(action, content)}
               onSendMessage={() => void sendMessage()}
               onStopTurn={() => void stopCurrentTurn()}
               pendingApproval={activePendingApproval}
+              pendingInput={activePendingInput}
               reasoningEffort={currentConfig?.reasoningEffort ?? ""}
               sendDisabled={isCurrentConfigLoading || !isCurrentConfigReady}
               selectedConfig={currentConfig?.selectedConfig ?? {}}

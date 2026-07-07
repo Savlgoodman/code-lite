@@ -2,6 +2,7 @@ import type {
   AgentSummary,
   ApprovalRequest,
   ChatMessage,
+  InputRequest,
   SessionConfigOption,
   SessionModel,
   SessionMode,
@@ -35,9 +36,11 @@ interface ChatWorkspaceProps {
   onModelFamilyChange: (value: string) => void;
   onReasoningEffortChange: (value: string) => void;
   onResolveApproval: (decision: "allow" | "deny") => void;
+  onResolveInput: (action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => void;
   onSendMessage: () => void;
   onStopTurn: () => void;
   pendingApproval: ApprovalRequest | null;
+  pendingInput: InputRequest | null;
   reasoningEffort: string;
   selectedConfig: Record<string, ChatConfigValue>;
   selectedModelFamily: string;
@@ -66,9 +69,11 @@ export function ChatWorkspace({
   onModelFamilyChange,
   onReasoningEffortChange,
   onResolveApproval,
+  onResolveInput,
   onSendMessage,
   onStopTurn,
   pendingApproval,
+  pendingInput,
   reasoningEffort,
   selectedConfig,
   selectedModelFamily,
@@ -106,9 +111,11 @@ export function ChatWorkspace({
         onModelFamilyChange={onModelFamilyChange}
         onReasoningEffortChange={onReasoningEffortChange}
         onResolveApproval={onResolveApproval}
+        onResolveInput={onResolveInput}
         onSendMessage={onSendMessage}
         onStopTurn={onStopTurn}
         pendingApproval={pendingApproval}
+        pendingInput={pendingInput}
         plan={activePlan}
         reasoningEffort={reasoningEffort}
         selectedConfig={selectedConfig}

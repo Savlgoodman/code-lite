@@ -1,0 +1,189 @@
+.input-request-panel {
+  padding: 10px 12px;
+  border: 1px solid #c9d7ea;
+  border-radius: 8px;
+  background: #f7faff;
+  box-shadow: 0 12px 34px rgba(38, 84, 134, 0.08);
+  pointer-events: auto;
+}
+
+.input-request-pager {
+  display: grid;
+  grid-template-columns: minmax(82px, auto) minmax(0, 1fr) minmax(82px, auto);
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.input-request-title {
+  min-width: 0;
+  text-align: center;
+}
+
+.input-request-panel strong {
+  display: block;
+  margin-top: 2px;
+  color: #292d34;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.input-request-count {
+  display: block;
+  margin-top: 2px;
+  color: #6a7480;
+  font-size: 12px;
+}
+
+.input-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  width: fit-content;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #d5deea;
+  border-radius: 8px;
+  background: #fff;
+  color: #3d4652;
+  font-size: 12px;
+}
+
+.input-nav-button.right {
+  justify-self: end;
+}
+
+.input-nav-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.input-request-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+  gap: 8px;
+}
+
+.input-request-actions button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #d4dce7;
+  border-radius: 8px;
+  background: #fff;
+  color: #373c44;
+}
+
+.input-request-actions button.primary {
+  border-color: #20242b;
+  background: #20242b;
+  color: #fff;
+}
+
+.input-request-fields {
+  display: grid;
+  margin-top: 10px;
+}
+
+.input-question-page {
+  display: grid;
+  gap: 8px;
+}
+
+.input-field {
+  min-width: 0;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid #dce4ef;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.input-field.companion {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.input-field legend,
+.input-text-field span,
+.input-boolean span {
+  color: #323841;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.input-field p {
+  margin: 4px 0 7px;
+  color: #65707d;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.input-options {
+  display: grid;
+  gap: 6px;
+}
+
+.input-option,
+.input-boolean {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #3d434b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.input-option input,
+.input-boolean input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.input-text-field {
+  display: grid;
+  gap: 6px;
+}
+
+.input-text-field.companion span {
+  color: #47515e;
+  font-size: 12px;
+}
+
+.input-text-field input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #d4dce7;
+  border-radius: 8px;
+  background: #fff;
+  color: #20242b;
+}
+
+.input-request-empty {
+  margin: 0;
+  color: #65707d;
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .input-request-pager {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .input-request-title {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    text-align: left;
+  }
+
+  .input-nav-button {
+    grid-row: 2;
+  }
+
+  .input-nav-button.right {
+    justify-self: end;
+  }
+}

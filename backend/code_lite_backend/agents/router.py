@@ -12,6 +12,7 @@ from code_lite_backend.core.config import RuntimeConfig
 from code_lite_backend.schemas.agent import AgentAdapterCapabilities, AgentEvent, AgentRunRequest
 from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigStore
 from code_lite_backend.services.approvals import ApprovalBroker
+from code_lite_backend.services.inputs import InputBroker
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,13 @@ class AgentRouterAdapter:
         *,
         runtime_config: RuntimeConfig,
         approvals: ApprovalBroker,
+        inputs: InputBroker,
         agent_runtime_config_store: AgentRuntimeConfigStore,
         runtime_manager: AcpRuntimeManager | None = None,
     ) -> None:
         self._runtime_config = runtime_config
         self._approvals = approvals
+        self._inputs = inputs
         self._agent_runtime_config_store = agent_runtime_config_store
         self._runtime_manager = runtime_manager
         # 预创建常用 adapter；ACP runtime 按需懒加载
@@ -59,6 +62,7 @@ class AgentRouterAdapter:
             descriptor=descriptor,
             runtime_config=self._runtime_config,
             approvals=self._approvals,
+            inputs=self._inputs,
             agent_runtime_config_store=self._agent_runtime_config_store,
             runtime_manager=self._runtime_manager,
         )

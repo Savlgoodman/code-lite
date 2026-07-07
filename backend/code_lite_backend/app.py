@@ -16,6 +16,7 @@ from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigSt
 from code_lite_backend.services.billing_prices import BillingPriceStore
 from code_lite_backend.services.billing_usage import BillingUsageRecorder
 from code_lite_backend.services.conversation_recorder import ConversationRecorder
+from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
 from code_lite_backend.services.runtime import AppServices
 from code_lite_backend.storage.conversations import ConversationStore
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     approvals = ApprovalBroker()
+    inputs = InputBroker()
     conversation_store = ConversationStore(runtime_config.record_dir)
     event_store = ConversationEventStore(runtime_config.record_dir)
     billing_price_store = BillingPriceStore(runtime_config.cache_dir)
@@ -38,6 +40,7 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
         runtime_config=runtime_config,
         workspace=workspace,
         approvals=approvals,
+        inputs=inputs,
         conversation_store=conversation_store,
         conversation_recorder=ConversationRecorder(conversation_store),
         billing_price_store=billing_price_store,
@@ -47,6 +50,7 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
         agent_adapter=create_agent_adapter(
             runtime_config=runtime_config,
             approvals=approvals,
+            inputs=inputs,
             agent_runtime_config_store=agent_runtime_config_store,
             runtime_manager=runtime_manager,
         ),

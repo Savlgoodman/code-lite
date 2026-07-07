@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from code_lite_backend.agents.acp.client import AcpClientHandler
+from code_lite_backend.agents.acp.client_capabilities import build_client_capabilities
 from code_lite_backend.agents.runtimes import get_descriptor, get_runtime_profile
 from code_lite_backend.api.dependencies import get_services
 from code_lite_backend.core.structured_logging import DiagnosticError, log_diagnostic
@@ -200,6 +201,7 @@ async def _initialize_acp_session(
         workspace=services.workspace,
         conversation_id=conversation_id,
         approvals=services.approvals,
+        inputs=services.inputs,
     )
     logger.info("  Connection ready, process.returncode=%s", connection.process.returncode)
 
@@ -261,6 +263,7 @@ async def _initialize_acp_session_legacy(
         turn_id="session-probe",
         output_queue=asyncio.Queue(),
         approvals=services.approvals,
+        inputs=services.inputs,
     )
     process = None
     try:
@@ -277,13 +280,7 @@ async def _initialize_acp_session_legacy(
             initialize_result = await asyncio.wait_for(
                 conn.initialize(
                     protocol_version=acp.PROTOCOL_VERSION,
-                    client_capabilities=acp_schema.ClientCapabilities(
-                        fs=acp_schema.FileSystemCapabilities(
-                            read_text_file=False,
-                            write_text_file=False,
-                        ),
-                        terminal=False,
-                    ),
+                    client_capabilities=build_client_capabilities(descriptor.id),
                     client_info=acp_schema.Implementation(
                         name="code-lite",
                         title="code-lite",

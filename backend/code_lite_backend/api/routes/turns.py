@@ -72,6 +72,7 @@ async def cancel_turn(
 ) -> JSONResponse:
     await services.agent_adapter.cancel_turn(turn_id)
     await services.approvals.reject_all()
+    await services.inputs.cancel_all()
     return JSONResponse({"ok": True})
 
 

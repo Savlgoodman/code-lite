@@ -11,6 +11,7 @@ from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigSt
 from code_lite_backend.services.billing_prices import BillingPriceStore
 from code_lite_backend.services.billing_usage import BillingUsageRecorder
 from code_lite_backend.services.conversation_recorder import ConversationRecorder
+from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
 from code_lite_backend.storage.conversations import ConversationStore
 from code_lite_backend.storage.event_store import ConversationEventStore
@@ -21,6 +22,7 @@ class AppServices:
     runtime_config: RuntimeConfig
     workspace: Path
     approvals: ApprovalBroker
+    inputs: InputBroker
     conversation_store: ConversationStore
     conversation_recorder: ConversationRecorder
     billing_price_store: BillingPriceStore

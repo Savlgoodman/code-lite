@@ -7,6 +7,7 @@ from collections import deque
 from typing import Any
 
 from acp.exceptions import RequestError
+from acp import schema as acp_schema
 
 from code_lite_backend.agents.acp.approvals import (
     build_allowed_response,
@@ -21,8 +22,10 @@ from code_lite_backend.agents.acp.mapper import (
 from code_lite_backend.agents.acp.mapper import (
     UsageSnapshot,
 )
+from code_lite_backend.core.structured_logging import sanitize_log_value
 from code_lite_backend.schemas.agent import AgentEvent
 from code_lite_backend.services.approvals import ApprovalBroker
+from code_lite_backend.services.inputs import InputBroker, InputResponse
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,35 @@ _KNOWN_SESSION_UPDATE_KINDS = {
 }
 
 
+def _input_response_to_acp(response: InputResponse) -> Any:
+    if response.action == "accept":
+        return acp_schema.AcceptElicitationResponse(
+            action="accept",
+            content=response.content or {},
+        )
+    if response.action == "decline":
+        return acp_schema.DeclineElicitationResponse(action="decline")
+    return acp_schema.CancelElicitationResponse(action="cancel")
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _first_dict(*values: Any) -> dict[str, Any] | None:
+    for value in values:
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _first_string(*values: Any) -> str:
+    for value in values:
+        if value is not None and value != "":
+            return str(value)
+    return ""
+
+
 class AcpClientHandler:
     """Per-conversation ACP client handler。
 
@@ -56,12 +88,14 @@ class AcpClientHandler:
         turn_id: str,
         output_queue: asyncio.Queue[AgentEvent],
         approvals: ApprovalBroker,
+        inputs: InputBroker,
     ) -> None:
         self.runtime = runtime
         self.conversation_id = conversation_id
         self.turn_id = turn_id
         self.output_queue = output_queue
         self.approvals = approvals
+        self.inputs = inputs
         self.mapper = AcpEventMapper(runtime=runtime)
         self.native_session_id: str | None = None
         self.latest_usage: UsageSnapshot | None = None
@@ -171,6 +205,80 @@ class AcpClientHandler:
         if selected is None:
             return build_denied_response()
         return build_allowed_response(selected)
+
+    async def create_elicitation(self, raw: dict[str, Any], **_: Any) -> Any:
+        mode_payload = _dict_or_empty(raw.get("mode"))
+        mode = _first_string(
+            raw.get("mode") if not isinstance(raw.get("mode"), dict) else None,
+            mode_payload.get("type"),
+            mode_payload.get("mode"),
+        )
+        if not mode and _first_dict(
+            mode_payload.get("requestedSchema"),
+            mode_payload.get("requested_schema"),
+            mode_payload.get("schema"),
+        ):
+            mode = "form"
+        if mode != "form":
+            return acp_schema.CancelElicitationResponse(action="cancel")
+
+        session_id = _first_string(
+            raw.get("sessionId"),
+            raw.get("session_id"),
+            mode_payload.get("sessionId"),
+            mode_payload.get("session_id"),
+            self.native_session_id,
+        )
+        if session_id:
+            self.native_session_id = session_id
+        requested_schema = _first_dict(
+            raw.get("requestedSchema"),
+            raw.get("requested_schema"),
+            raw.get("schema"),
+            mode_payload.get("requestedSchema"),
+            mode_payload.get("requested_schema"),
+            mode_payload.get("schema"),
+        ) or {"type": "object", "properties": {}}
+        tool_call_id = _first_string(
+            raw.get("toolCallId"),
+            raw.get("tool_call_id"),
+            mode_payload.get("toolCallId"),
+            mode_payload.get("tool_call_id"),
+        ) or None
+        input_id = f"input-{uuid.uuid4().hex}"
+        future = await self.inputs.create(
+            input_id=input_id,
+            conversation_id=self.conversation_id,
+            turn_id=self.turn_id,
+        )
+        await self._put({
+            "type": "agent.input.required",
+            "inputRequestId": input_id,
+            "mode": mode,
+            "message": str(raw.get("message") or "需要你的输入"),
+            "schema": requested_schema,
+            "toolCallId": tool_call_id,
+            "metadata": {
+                "runtime": self.runtime,
+                "nativeSessionId": self.native_session_id,
+                "source": "acp.elicitation.create",
+                "rawInput": sanitize_log_value(raw),
+            },
+        })
+
+        response = await future
+        return _input_response_to_acp(response)
+
+    async def complete_elicitation(self, elicitation_id: str, **_: Any) -> None:
+        await self._put({
+            "type": "agent.input.completed",
+            "inputRequestId": str(elicitation_id),
+            "metadata": {
+                "runtime": self.runtime,
+                "nativeSessionId": self.native_session_id,
+                "source": "acp.elicitation.complete",
+            },
+        })
 
     async def read_text_file(self, path: str, session_id: str, **_: Any) -> Any:
         raise RequestError.internal_error({"details": "code-lite fs gateway is disabled"})

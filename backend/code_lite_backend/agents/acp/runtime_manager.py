@@ -13,13 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from acp import schema as acp_schema
-from acp.client.connection import ClientSideConnection
 from acp.meta import PROTOCOL_VERSION as _ACP_PROTOCOL_VERSION
 from acp.transports import default_environment
 
 from code_lite_backend.agents.acp.client import AcpClientHandler
+from code_lite_backend.agents.acp.client_capabilities import build_client_capabilities
+from code_lite_backend.agents.acp.connection import CodeLiteClientSideConnection
 from code_lite_backend.agents.runtimes import RuntimeDescriptor
 from code_lite_backend.services.approvals import ApprovalBroker
+from code_lite_backend.services.inputs import InputBroker
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ class AcpRuntimeConnection:
     command: list[str]
     env: dict[str, str]
     process: aio_subprocess.Process
-    sdk_connection: ClientSideConnection
+    sdk_connection: CodeLiteClientSideConnection
     initialize_result: Any
     stderr_ring_buffer: deque[str] = field(default_factory=lambda: deque(maxlen=20))
     latest_activity_at: float = field(default_factory=time.time)
@@ -136,6 +138,7 @@ class AcpRuntimeManager:
         workspace: Path,
         conversation_id: str,
         approvals: ApprovalBroker,
+        inputs: InputBroker,
     ) -> AcpRuntimeConnection:
         """确保存在 ready 的 ACP 连接。
 
@@ -164,6 +167,7 @@ class AcpRuntimeManager:
             env=env,
             workspace=workspace,
             approvals=approvals,
+            inputs=inputs,
             key=key,
         )
         self._connections[key] = connection
@@ -431,6 +435,7 @@ class AcpRuntimeManager:
         env: dict[str, str],
         workspace: Path,
         approvals: ApprovalBroker,
+        inputs: InputBroker,
         key: ConnectionKey,
     ) -> AcpRuntimeConnection:
         """手动 spawn 子进程并建立持久连接（不使用 context manager）。"""
@@ -484,12 +489,13 @@ class AcpRuntimeManager:
             turn_id="connection-init",
             output_queue=asyncio.Queue(),
             approvals=approvals,
+            inputs=inputs,
         )
 
         # 创建 ClientSideConnection（直接使用 StreamWriter/StreamReader）
         # 注意：ClientSideConnection 的 input_stream 是 StreamWriter（写入到子进程 stdin），
         # output_stream 是 StreamReader（从子进程 stdout 读取）
-        sdk_connection = ClientSideConnection(
+        sdk_connection = CodeLiteClientSideConnection(
             client_handler,
             input_stream=process.stdin,   # StreamWriter -> 写入子进程 stdin
             output_stream=process.stdout,  # StreamReader -> 读取子进程 stdout
@@ -508,13 +514,7 @@ class AcpRuntimeManager:
             initialize_result = await asyncio.wait_for(
                 sdk_connection.initialize(
                     protocol_version=_ACP_PROTOCOL_VERSION,
-                    client_capabilities=acp_schema.ClientCapabilities(
-                        fs=acp_schema.FileSystemCapabilities(
-                            read_text_file=False,
-                            write_text_file=False,
-                        ),
-                        terminal=False,
-                    ),
+                    client_capabilities=build_client_capabilities(descriptor.id),
                     client_info=acp_schema.Implementation(
                         name="code-lite",
                         title="code-lite",

@@ -145,6 +145,14 @@ export interface ApprovalRequest {
   plan?: PlanSnapshot;
 }
 
+export interface InputRequest {
+  inputRequestId: string;
+  mode: "form" | "url" | string;
+  message: string;
+  schema?: Record<string, unknown>;
+  toolCallId?: string | null;
+}
+
 export interface UsageStats {
   inputTokens?: number;
   outputTokens?: number;
@@ -560,6 +568,24 @@ export type AgentEvent =
       risks: string[];
       rollback: string;
       plan?: PlanSnapshot;
+    }
+  | {
+      type: "agent.input.required";
+      conversationId: string;
+      turnId: string;
+      inputRequestId: string;
+      mode: "form" | "url" | string;
+      message: string;
+      schema?: Record<string, unknown>;
+      toolCallId?: string | null;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "agent.input.completed";
+      conversationId: string;
+      turnId: string;
+      inputRequestId: string;
+      metadata?: Record<string, unknown>;
     }
   | {
       type: "agent.plan.updated";

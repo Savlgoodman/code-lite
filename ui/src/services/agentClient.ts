@@ -176,6 +176,27 @@ export async function sendApprovalDecision(
   return response.json() as Promise<{ session?: Session }>;
 }
 
+export async function sendInputResponse(
+  inputRequestId: string,
+  action: "accept" | "decline" | "cancel",
+  content?: Record<string, unknown>,
+): Promise<{ session?: Session }> {
+  const baseUrl = await ensureBackend();
+  const response = await fetch(`${baseUrl}/api/inputs/${inputRequestId}/response`, {
+    body: JSON.stringify({ action, ...(content ? { content } : {}) }),
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+
+  return response.json() as Promise<{ session?: Session }>;
+}
+
 export async function cancelTurn(turnId: string): Promise<void> {
   const baseUrl = await ensureBackend();
   await fetch(`${baseUrl}/api/turns/${turnId}/cancel`, {

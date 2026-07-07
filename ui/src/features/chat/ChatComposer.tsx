@@ -20,6 +20,7 @@ import type {
   ApprovalRequest,
   BillingPricesResult,
   ChatMessage,
+  InputRequest,
   PlanSnapshot,
   SessionConfigOption,
   SessionModel,
@@ -31,6 +32,7 @@ import { loadBillingPrices } from "../../services/billingStore";
 import { ApprovalCard } from "./ApprovalCard";
 import { buildSessionBillingSummary } from "./billing";
 import { ContextRing } from "./ContextRing";
+import { InputRequestCard } from "./InputRequestCard";
 import { PlanProgressPanel } from "./PlanProgressPanel";
 import { TokenUsageModal } from "./TokenUsageModal";
 import type { ChatConfigValue } from "./chatTypes";
@@ -81,9 +83,11 @@ interface ChatComposerProps {
   onModelFamilyChange: (familyId: string) => void;
   onReasoningEffortChange: (value: string) => void;
   onResolveApproval: (decision: "allow" | "deny") => void;
+  onResolveInput: (action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => void;
   onSendMessage: () => void;
   onStopTurn: () => void;
   pendingApproval: ApprovalRequest | null;
+  pendingInput: InputRequest | null;
   plan: PlanSnapshot | null;
   reasoningEffort: string;
   sendDisabled: boolean;
@@ -109,9 +113,11 @@ export function ChatComposer({
   onModelFamilyChange,
   onReasoningEffortChange,
   onResolveApproval,
+  onResolveInput,
   onSendMessage,
   onStopTurn,
   pendingApproval,
+  pendingInput,
   plan,
   reasoningEffort,
   sendDisabled,
@@ -360,6 +366,13 @@ export function ChatComposer({
       <div className="composer-stack">
         <PlanProgressPanel plan={plan} />
         {pendingApproval ? <ApprovalCard approval={pendingApproval} onResolve={onResolveApproval} /> : null}
+        {pendingInput ? (
+          <InputRequestCard
+            key={pendingInput.inputRequestId}
+            request={pendingInput}
+            onResolve={onResolveInput}
+          />
+        ) : null}
 
         <div className="composer">
           <textarea

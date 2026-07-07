@@ -13,6 +13,7 @@ from acp import schema as acp_schema
 from code_lite_backend.agents.acp.capabilities import (
     parse_models_from_session_result,
 )
+from code_lite_backend.agents.acp.client_capabilities import build_client_capabilities
 from code_lite_backend.agents.acp.client import AcpClientHandler
 from code_lite_backend.agents.acp.mapper import extract_prompt_response_usage, to_jsonable
 from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
@@ -26,6 +27,7 @@ from code_lite_backend.schemas.agent import (
 )
 from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigStore
 from code_lite_backend.services.approvals import ApprovalBroker
+from code_lite_backend.services.inputs import InputBroker
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,7 @@ class AcpAgentAdapter:
         descriptor: RuntimeDescriptor,
         runtime_config: RuntimeConfig,
         approvals: ApprovalBroker,
+        inputs: InputBroker,
         agent_runtime_config_store: AgentRuntimeConfigStore,
         runtime_manager: AcpRuntimeManager | None = None,
     ) -> None:
@@ -53,6 +56,7 @@ class AcpAgentAdapter:
         self.descriptor = descriptor
         self._runtime_config = runtime_config
         self._approvals = approvals
+        self._inputs = inputs
         self._agent_runtime_config_store = agent_runtime_config_store
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
         self._runtime_manager = runtime_manager or AcpRuntimeManager()
@@ -88,6 +92,7 @@ class AcpAgentAdapter:
             turn_id=request.turn_id,
             output_queue=output_queue,  # type: ignore[arg-type]
             approvals=self._approvals,
+            inputs=self._inputs,
         )
         producer = asyncio.create_task(self._run_turn(request, client, output_queue))
         self._active_tasks[request.turn_id] = producer
@@ -110,6 +115,7 @@ class AcpAgentAdapter:
             return False
         task.cancel()
         await self._approvals.reject_all()
+        await self._inputs.cancel_all()
         return True
 
     async def list_models(self, workspace: Path) -> dict[str, Any]:
@@ -122,6 +128,7 @@ class AcpAgentAdapter:
             turn_id="model-probe",
             output_queue=asyncio.Queue(),
             approvals=self._approvals,
+            inputs=self._inputs,
         )
         stderr_task: asyncio.Task[None] | None = None
         process: Any | None = None
@@ -139,7 +146,7 @@ class AcpAgentAdapter:
                 initialize_result = await asyncio.wait_for(
                     conn.initialize(
                         protocol_version=acp.PROTOCOL_VERSION,
-                        client_capabilities=_build_client_capabilities(),
+                        client_capabilities=build_client_capabilities(self.descriptor.id),
                         client_info=acp_schema.Implementation(
                             name="code-lite",
                             title="code-lite",
@@ -261,6 +268,7 @@ class AcpAgentAdapter:
                 workspace=request.workspace,
                 conversation_id=request.conversation_id,
                 approvals=self._approvals,
+                inputs=self._inputs,
             )
             logger.info("Connection ready for %s (conversation=%s)", self.name, request.conversation_id[:12])
 
@@ -450,14 +458,3 @@ class AcpAgentAdapter:
             text = line.decode("utf-8", errors="replace").rstrip()
             if text:
                 client.stderr_tail.append(text)
-
-
-def _build_client_capabilities() -> acp_schema.ClientCapabilities:
-    """构建 ACP client capabilities（compat mode）。"""
-    return acp_schema.ClientCapabilities(
-        fs=acp_schema.FileSystemCapabilities(
-            read_text_file=False,
-            write_text_file=False,
-        ),
-        terminal=False,
-    )

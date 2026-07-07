@@ -259,11 +259,15 @@ class ConversationRecorder:
         elif event_type in {
             "agent.command.available.updated",
             "agent.config.updated",
+            "agent.input.completed",
+            "agent.input.required",
             "agent.mode.updated",
             "agent.raw.rpc",
             "agent.raw.update",
         }:
             self._append_runtime_event(assistant, event)
+            if event_type == "agent.input.required":
+                self._update_active_session(conversation_id, {"status": "approval"})
         elif event_type == "agent.session.updated":
             title = str(event.get("title") or "").strip()
             if title:
