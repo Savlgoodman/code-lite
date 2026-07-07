@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from acp.core import DEFAULT_STDIO_BUFFER_LIMIT_BYTES
 from acp import schema as acp_schema
 from acp.meta import PROTOCOL_VERSION as _ACP_PROTOCOL_VERSION
 from acp.transports import default_environment
@@ -455,6 +456,7 @@ class AcpRuntimeManager:
                 stderr=aio_subprocess.PIPE,
                 env=merged_env,
                 cwd=str(workspace),
+                limit=DEFAULT_STDIO_BUFFER_LIMIT_BYTES,
             )
         except FileNotFoundError:
             logger.error(
