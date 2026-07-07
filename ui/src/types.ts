@@ -187,6 +187,27 @@ export interface ToolCallItem {
   updatedAt: number;
 }
 
+export interface FileDiffSummary {
+  added: number;
+  artifactPath?: string;
+  changeType?: "create" | "modify" | "delete" | "clear" | string;
+  diffId: string;
+  nativeChangeKind?: string | null;
+  path: string;
+  removed: number;
+  toolCallId?: string;
+}
+
+export interface FileDiffArtifact extends FileDiffSummary {
+  contentIndex?: number;
+  conversationId?: string;
+  createdAt?: number;
+  newText: string;
+  oldText?: string | null;
+  schemaVersion?: number;
+  turnId?: string;
+}
+
 export interface ApprovalRequest {
   approvalId: string;
   toolCallId?: string;

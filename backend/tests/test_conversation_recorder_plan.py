@@ -153,6 +153,45 @@ class ConversationRecorderToolMetadataTest(unittest.TestCase):
             self.assertEqual(tool_call["metadata"]["fileDiffs"][0]["added"], 1)
             self.assertEqual(tool_call["metadata"]["fileDiffs"][0]["removed"], 0)
 
+    def test_project_agent_event_for_ui_strips_raw_diff(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            recorder = ConversationRecorder(ConversationStore(Path(directory)))
+            event = {
+                "type": "agent.tool.started",
+                "conversationId": "conv-1",
+                "turnId": "turn-1",
+                "toolCallId": "call-edit-1",
+                "name": "Editing files",
+                "metadata": {
+                    "runtime": "codex",
+                    "rawUpdate": {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "call-edit-1",
+                        "content": [
+                            {
+                                "type": "diff",
+                                "path": "hello.py",
+                                "newText": "print(\"hello\")\n",
+                            }
+                        ],
+                    },
+                },
+            }
+
+            projected = recorder.project_agent_event_for_ui(
+                conversation_id="conv-1",
+                event=event,
+            )
+
+            metadata = projected["metadata"]
+            self.assertNotIn("rawUpdate", metadata)
+            self.assertEqual(metadata["fileDiffs"][0]["diffId"], "call-edit-1-0")
+            self.assertEqual(metadata["fileDiffs"][0]["added"], 1)
+            self.assertEqual(metadata["rawUpdateSummary"]["contentTypes"], ["diff"])
+            self.assertFalse((Path(directory) / "conv-1" / "diffs" / "call-edit-1-0.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

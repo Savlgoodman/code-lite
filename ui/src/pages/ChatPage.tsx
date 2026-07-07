@@ -84,12 +84,41 @@ function mergeRecords(previous: Record<string, unknown>, incoming: Record<string
   }, { ...previous });
 }
 
+function mergeFileDiffs(previous: unknown, incoming: unknown): unknown {
+  if (!Array.isArray(previous) && !Array.isArray(incoming)) {
+    return incoming ?? previous;
+  }
+
+  const merged: Record<string, unknown>[] = [];
+  const seen = new Map<string, number>();
+  for (const source of [previous, incoming]) {
+    if (!Array.isArray(source)) {
+      continue;
+    }
+    for (const item of source) {
+      if (!isRecord(item) || typeof item.diffId !== "string") {
+        continue;
+      }
+      const index = seen.get(item.diffId);
+      if (index == null) {
+        seen.set(item.diffId, merged.length);
+        merged.push({ ...item });
+      } else {
+        merged[index] = { ...merged[index], ...item };
+      }
+    }
+  }
+  return merged;
+}
+
 function mergeToolMetadata(
   previous: ToolCallItem["metadata"],
   incoming: ToolCallItem["metadata"],
 ): ToolCallItem["metadata"] {
   if (isRecord(previous) && isRecord(incoming)) {
-    return mergeRecords(previous, incoming);
+    const merged = mergeRecords(previous, incoming);
+    merged.fileDiffs = mergeFileDiffs(previous.fileDiffs, incoming.fileDiffs);
+    return merged;
   }
   return incoming ?? previous;
 }

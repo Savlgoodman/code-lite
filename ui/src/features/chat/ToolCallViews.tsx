@@ -1,129 +1,22 @@
 import { AlertTriangle, CheckCircle2, Circle, FileCode2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { ToolCallItem } from "../../types";
+import type { FileDiffArtifact, ToolCallItem } from "../../types";
 import { formatRisk } from "../../lib/formatters";
+import { loadConversationDiff } from "../../services/conversationStore";
+import {
+  buildDiffLines,
+  fileChangeLabel,
+  fileDiffSummariesFromTool,
+  mergeDiffStats,
+  type FileDiffContent,
+  type FileDiffViewSummary,
+} from "./fileDiffs";
 import "./ToolCallViews.css";
-
-export interface FileDiffContent {
-  newText: string;
-  oldText?: string | null;
-  path: string;
-  type: "diff";
-}
-
-interface DiffLine {
-  kind: "add" | "remove" | "context";
-  text: string;
-}
 
 interface DiffStats {
   added: number;
   removed: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isFileDiffContent(value: unknown): value is FileDiffContent {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    value.type === "diff"
-    && typeof value.path === "string"
-    && typeof value.newText === "string"
-    && (value.oldText == null || typeof value.oldText === "string")
-  );
-}
-
-export function diffContentFromTool(tool: ToolCallItem): FileDiffContent[] {
-  const rawUpdate = isRecord(tool.metadata) ? tool.metadata.rawUpdate : null;
-  const content = isRecord(rawUpdate) ? rawUpdate.content : null;
-  if (!Array.isArray(content)) {
-    return [];
-  }
-  return content.filter(isFileDiffContent);
-}
-
-function fileChangeLabel(diff: FileDiffContent) {
-  if (diff.oldText == null) {
-    return "创建";
-  }
-  if (!diff.newText) {
-    return "清空";
-  }
-  return "修改";
-}
-
-function splitVisibleLines(value: string) {
-  return value.split(/\r?\n/).filter((line, index, list) => line || index < list.length - 1);
-}
-
-function buildPreviewLines(diff: FileDiffContent): DiffLine[] {
-  const oldLines = splitVisibleLines(diff.oldText ?? "");
-  const newLines = splitVisibleLines(diff.newText);
-  if (diff.oldText == null) {
-    return newLines.slice(0, 12).map((text) => ({ kind: "add", text }));
-  }
-
-  const preview: DiffLine[] = [];
-  const maxLines = Math.max(oldLines.length, newLines.length);
-  for (let index = 0; index < maxLines && preview.length < 14; index += 1) {
-    const oldText = oldLines[index];
-    const newText = newLines[index];
-    if (oldText === newText && oldText != null) {
-      preview.push({ kind: "context", text: oldText });
-      continue;
-    }
-    if (oldText != null) {
-      preview.push({ kind: "remove", text: oldText });
-    }
-    if (newText != null && preview.length < 14) {
-      preview.push({ kind: "add", text: newText });
-    }
-  }
-  return preview;
-}
-
-function diffStats(diff: FileDiffContent): DiffStats {
-  const oldLines = splitVisibleLines(diff.oldText ?? "");
-  const newLines = splitVisibleLines(diff.newText);
-  if (diff.oldText == null) {
-    return { added: newLines.length, removed: 0 };
-  }
-
-  let added = 0;
-  let removed = 0;
-  const maxLines = Math.max(oldLines.length, newLines.length);
-  for (let index = 0; index < maxLines; index += 1) {
-    const oldText = oldLines[index];
-    const newText = newLines[index];
-    if (oldText === newText) {
-      continue;
-    }
-    if (oldText != null) {
-      removed += 1;
-    }
-    if (newText != null) {
-      added += 1;
-    }
-  }
-  return { added, removed };
-}
-
-function mergeDiffStats(diffs: FileDiffContent[]): DiffStats {
-  return diffs.reduce(
-    (total, diff) => {
-      const current = diffStats(diff);
-      return {
-        added: total.added + current.added,
-        removed: total.removed + current.removed,
-      };
-    },
-    { added: 0, removed: 0 },
-  );
 }
 
 function DiffStatsLabel({ label, stats }: { label: string; stats: DiffStats }) {
@@ -145,33 +38,85 @@ function toolResultSummary(tool: ToolCallItem) {
   return compact.length > 120 ? `${compact.slice(0, 120)}...` : compact;
 }
 
-function FileDiffPreview({ diff }: { diff: FileDiffContent }) {
-  const previewLines = buildPreviewLines(diff);
-  const stats = diffStats(diff);
-  const [open, setOpen] = useState(true);
+function artifactToContent(artifact: FileDiffArtifact): FileDiffContent {
+  return {
+    newText: artifact.newText,
+    oldText: artifact.oldText,
+    path: artifact.path,
+    type: "diff",
+  };
+}
+
+function FileDiffPreview({
+  conversationId,
+  diff,
+}: {
+  conversationId: string;
+  diff: FileDiffViewSummary;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loadedDiff, setLoadedDiff] = useState<FileDiffContent | null>(diff.legacyContent ?? null);
+  const [loadState, setLoadState] = useState<"idle" | "loading" | "loaded" | "error">(diff.legacyContent ? "loaded" : "idle");
+  const lines = loadedDiff ? buildDiffLines(loadedDiff) : [];
+  const stats = { added: diff.added, removed: diff.removed };
+
+  useEffect(() => {
+    if (!open || loadedDiff || loadState !== "idle" || diff.legacyContent) {
+      return;
+    }
+    let cancelled = false;
+    setLoadState("loading");
+    loadConversationDiff(conversationId, diff.diffId)
+      .then((artifact) => {
+        if (!cancelled) {
+          setLoadedDiff(artifactToContent(artifact));
+          setLoadState("loaded");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadState("error");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, diff.diffId, diff.legacyContent, loadState, loadedDiff, open]);
 
   return (
     <details
       className="tool-file-diff"
       open={open}
       onToggle={(event) => {
-        setOpen(event.currentTarget.open);
+        const nextOpen = event.currentTarget.open;
+        setOpen(nextOpen);
+        if (!nextOpen && loadState === "error") {
+          setLoadState("idle");
+        }
       }}
     >
       <summary className="tool-file-diff-head">
         <span className="tool-file-diff-icon"><FileCode2 size={14} /></span>
         <strong title={diff.path}>{diff.path}</strong>
-        <em>{fileChangeLabel(diff)}</em>
+        <em>{fileChangeLabel(diff.changeType)}</em>
         <DiffStatsLabel label="本次修改" stats={stats} />
       </summary>
-      <pre className="tool-file-diff-preview">
-        {previewLines.map((line, index) => (
-          <span className={`diff-line ${line.kind}`} key={`${line.kind}-${index}-${line.text}`}>
-            {line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "}
-            {line.text || " "}
-          </span>
-        ))}
-      </pre>
+      {open ? (
+        loadState === "loading" ? (
+          <div className="tool-file-diff-state">正在加载 diff</div>
+        ) : loadState === "error" ? (
+          <div className="tool-file-diff-state error">diff 加载失败，请收起后重试</div>
+        ) : (
+          <pre className="tool-file-diff-preview">
+            {lines.map((line, index) => (
+              <span className={`diff-line ${line.kind}`} key={`${line.kind}-${index}-${line.text}`}>
+                {line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "}
+                {line.text || " "}
+              </span>
+            ))}
+          </pre>
+        )
+      ) : null}
     </details>
   );
 }
@@ -209,8 +154,8 @@ export function ToolCallCard({ tool }: { tool: ToolCallItem }) {
   );
 }
 
-export function FileEditGroup({ tools }: { tools: ToolCallItem[] }) {
-  const diffs = tools.flatMap(diffContentFromTool);
+export function FileEditGroup({ conversationId, tools }: { conversationId: string; tools: ToolCallItem[] }) {
+  const diffs = tools.flatMap(fileDiffSummariesFromTool);
   const [open, setOpen] = useState(true);
 
   if (diffs.length === 0) {
@@ -235,7 +180,7 @@ export function FileEditGroup({ tools }: { tools: ToolCallItem[] }) {
       </summary>
       <div className="tool-file-diff-list">
         {diffs.map((diff, index) => (
-          <FileDiffPreview diff={diff} key={`${diff.path}-${index}`} />
+          <FileDiffPreview conversationId={conversationId} diff={diff} key={`${diff.diffId}-${diff.path}-${index}`} />
         ))}
       </div>
     </details>

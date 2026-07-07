@@ -431,7 +431,11 @@ async def stream_turn(
                             native_session_id=native_session_id,
                         )
 
-                yield encode_ndjson_event(event)
+                ui_event = services.conversation_recorder.project_agent_event_for_ui(
+                    conversation_id=conversation_id,
+                    event=event,
+                )
+                yield encode_ndjson_event(ui_event)
                 if event.get("type") in {"agent.run.completed", "agent.run.failed"}:
                     completed = True
                     logger.info("event_stream: turn %s finished with %s", turn_id, event.get("type"))

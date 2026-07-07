@@ -43,7 +43,15 @@ function scrollCruiseProgress(progress: number) {
   return (t - ramp / 2) / (1 - ramp);
 }
 
-function AssistantMessageContent({ isCompactTurn, message }: { isCompactTurn: boolean; message: ChatMessage }) {
+function AssistantMessageContent({
+  isCompactTurn,
+  message,
+  sessionId,
+}: {
+  isCompactTurn: boolean;
+  message: ChatMessage;
+  sessionId: string;
+}) {
   if (isCompactTurn && !message.error) {
     return null;
   }
@@ -74,6 +82,7 @@ function AssistantMessageContent({ isCompactTurn, message }: { isCompactTurn: bo
             <div className="tool-call-list inline-tool-call-list">
               {entry.fileEditGroups.map((tools) => (
                 <FileEditGroup
+                  conversationId={sessionId}
                   key={`file-edit-${tools.map((tool) => tool.id).join("-")}`}
                   tools={tools}
                 />
@@ -189,7 +198,7 @@ const MessageItem = memo(function MessageItem({
     <article className={`message ${message.role}`}>
       <div className="message-body">
         {message.role === "assistant" ? (
-          <AssistantMessageContent isCompactTurn={isCompactTurn} message={message} />
+          <AssistantMessageContent isCompactTurn={isCompactTurn} message={message} sessionId={sessionId} />
         ) : (
           <div className="user-message-stack">
             <UserMessageAttachments message={message} onPreviewImage={onPreviewImage} sessionId={sessionId} />

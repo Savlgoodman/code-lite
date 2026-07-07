@@ -1,5 +1,5 @@
 import { ensureBackend } from "./agentClient";
-import type { ChatMessage, Session } from "../types";
+import type { ChatMessage, FileDiffArtifact, Session } from "../types";
 
 interface ListConversationsResponse {
   sessions: Session[];
@@ -66,4 +66,11 @@ export async function saveConversationConfig(
     method: "PATCH"
   });
   return response.session;
+}
+
+export async function loadConversationDiff(sessionId: string, diffId: string): Promise<FileDiffArtifact> {
+  const response = await requestJson<{ diff: FileDiffArtifact }>(
+    `/api/conversations/${encodeURIComponent(sessionId)}/diffs/${encodeURIComponent(diffId)}`,
+  );
+  return response.diff;
 }

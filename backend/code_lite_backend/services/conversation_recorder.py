@@ -447,6 +447,34 @@ class ConversationRecorder:
             return self.finish_turn(conversation_id, session_patch)
         return None
 
+    def project_agent_event_for_ui(
+        self,
+        *,
+        conversation_id: str,
+        event: dict[str, Any],
+    ) -> dict[str, Any]:
+        if event.get("type") not in {
+            "agent.tool.started",
+            "agent.tool.delta",
+            "agent.tool.completed",
+            "agent.tool.failed",
+            "approval.required",
+        }:
+            return event
+
+        metadata = _event_metadata(event)
+        if metadata is None or not isinstance(metadata.get("rawUpdate"), dict):
+            return event
+
+        return {
+            **event,
+            "metadata": self._project_tool_metadata(
+                conversation_id=conversation_id,
+                event=event,
+                save_artifact=False,
+            ),
+        }
+
     def update_session(self, conversation_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         session = self._update_active_session(conversation_id, patch)
         if conversation_id not in self._active_messages:
@@ -520,6 +548,7 @@ class ConversationRecorder:
         *,
         conversation_id: str,
         event: dict[str, Any],
+        save_artifact: bool = True,
     ) -> dict[str, Any] | None:
         metadata = _event_metadata(event)
         if metadata is None:
@@ -541,6 +570,7 @@ class ConversationRecorder:
             turn_id=str(event.get("turnId") or ""),
             tool_call_id=tool_call_id,
             raw_update=raw_update,
+            save_artifact=save_artifact,
         )
 
         if file_diffs:
@@ -556,6 +586,7 @@ class ConversationRecorder:
         turn_id: str,
         tool_call_id: str,
         raw_update: dict[str, Any],
+        save_artifact: bool = True,
     ) -> list[dict[str, Any]]:
         content = raw_update.get("content")
         if not isinstance(content, list):
@@ -577,23 +608,22 @@ class ConversationRecorder:
             stats = _diff_stats(old_text, new_text)
             meta = item.get("_meta")
             native_kind = str(meta.get("kind") or "").strip() if isinstance(meta, dict) else None
-            artifact = self._diff_store.save_diff(
-                conversation_id,
-                {
-                    "diffId": diff_id,
-                    "turnId": turn_id,
-                    "toolCallId": tool_call_id,
-                    "contentIndex": index,
-                    "path": path,
-                    "changeType": _content_change_kind(item, old_text, new_text),
-                    "nativeChangeKind": native_kind,
-                    "added": stats["added"],
-                    "removed": stats["removed"],
-                    "oldText": old_text,
-                    "newText": new_text,
-                    "createdAt": now_ms(),
-                },
-            )
+            artifact = {
+                "diffId": diff_id,
+                "turnId": turn_id,
+                "toolCallId": tool_call_id,
+                "contentIndex": index,
+                "path": path,
+                "changeType": _content_change_kind(item, old_text, new_text),
+                "nativeChangeKind": native_kind,
+                "added": stats["added"],
+                "removed": stats["removed"],
+                "oldText": old_text,
+                "newText": new_text,
+                "createdAt": now_ms(),
+            }
+            if save_artifact:
+                artifact = self._diff_store.save_diff(conversation_id, artifact)
             summaries.append(
                 {
                     "diffId": diff_id,

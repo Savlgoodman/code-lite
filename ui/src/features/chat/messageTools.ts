@@ -1,4 +1,5 @@
 import type { ToolCallItem } from "../../types";
+import { fileDiffSummariesFromTool } from "./fileDiffs";
 
 export interface AssistantInlineEntry {
   content: string;
@@ -89,14 +90,8 @@ function moveOffsetAfterMarkdownTable(offset: number, tableRanges: TextRange[]) 
   return offset;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
 function hasFileDiffContent(tool: ToolCallItem) {
-  const rawUpdate = isRecord(tool.metadata) ? tool.metadata.rawUpdate : null;
-  const content = isRecord(rawUpdate) ? rawUpdate.content : null;
-  return Array.isArray(content) && content.some((item) => isRecord(item) && item.type === "diff");
+  return fileDiffSummariesFromTool(tool).length > 0;
 }
 
 export function buildAssistantInlineEntries(content: string, toolCalls: ToolCallItem[]) {
