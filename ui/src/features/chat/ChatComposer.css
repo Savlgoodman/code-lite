@@ -106,17 +106,23 @@
   right: 5px;
   width: 20px;
   height: 20px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 50%;
   background: rgba(27, 31, 36, 0.72);
   color: #fff;
+  line-height: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
 }
 
 .composer-image-remove:hover {
   background: rgba(27, 31, 36, 0.9);
+}
+
+.composer-image-remove svg {
+  display: block;
 }
 
 .composer-image-error {
