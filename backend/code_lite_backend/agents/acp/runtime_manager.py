@@ -10,7 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from acp.core import DEFAULT_STDIO_BUFFER_LIMIT_BYTES
 from acp import schema as acp_schema
@@ -186,9 +186,13 @@ class AcpRuntimeManager:
 
         恢复策略（按优先级）：
         1. 内存中已有绑定 → 复用
-        2. 磁盘上有 native-session.json + runtime 支持 loadSession → 尝试 session/load
-        3. session/load 失败 → fallback 到 session/new
+        2. 磁盘上有 native-session.json + runtime 支持 session/resume → 尝试 session/resume
+        3. session/resume 不可用或失败，且 runtime 支持 loadSession → 尝试 session/load
         4. 无磁盘记录 → session/new
+
+        按 ACP 官方语义，session/load 会重放历史消息；session/resume 恢复
+        上下文但不重放 transcript。这里优先 resume，并在 load fallback
+        期间静音 handler 输出，避免历史 replay 被当作当前 turn 流。
         """
         # 1. 内存中已有绑定则复用
         existing = self._session_bindings.get(conversation_id)
@@ -200,83 +204,14 @@ class AcpRuntimeManager:
 
         # 2. 尝试从磁盘恢复
         saved_binding = self.load_binding_from_disk(conversation_id)
-        if saved_binding is not None:
-            # 如果磁盘绑定的 capabilities 已缓存且 runtime 支持 loadSession，尝试恢复
-            if saved_binding.capabilities and self._supports_load_session(connection):
-                try:
-                    logger.info(
-                        "Attempting session/load for %s (native: %s, caps: cached)",
-                        conversation_id[:12],
-                        saved_binding.native_session_id[:12],
-                    )
-                    result = await asyncio.wait_for(
-                        connection.sdk_connection.load_session(
-                            cwd=saved_binding.workspace or str(workspace),
-                            session_id=saved_binding.native_session_id,
-                        ),
-                        timeout=self._session_timeout,
-                    )
-                    # load 成功 — 复用 saved binding 并更新
-                    saved_binding.updated_at = _now_iso()
-                    # 尝试从 load result 获取更新的 capabilities
-                    from code_lite_backend.agents.acp.mapper import to_jsonable
-                    session_data = to_jsonable(result)
-                    if session_data:
-                        saved_binding.capabilities = session_data
-                    connection.sessions[conversation_id] = saved_binding.native_session_id
-                    self._session_bindings[conversation_id] = saved_binding
-                    self._persist_binding(saved_binding)
-                    connection.touch()
-                    logger.info(
-                        "Successfully loaded native session %s for conversation %s",
-                        saved_binding.native_session_id[:12],
-                        conversation_id[:12],
-                    )
-                    return saved_binding
-                except Exception as exc:
-                    logger.warning(
-                        "session/load failed for %s: %s — falling back to session/new",
-                        conversation_id[:12],
-                        exc,
-                    )
-            # 如果磁盘绑定没有 capabilities 或 load 失败，但 native_session_id 存在
-            # 则尝试 session/load（即使没有缓存的 capabilities）
-            elif saved_binding.native_session_id and self._supports_load_session(connection):
-                try:
-                    logger.info(
-                        "Attempting session/load for %s (native: %s, caps: none)",
-                        conversation_id[:12],
-                        saved_binding.native_session_id[:12],
-                    )
-                    result = await asyncio.wait_for(
-                        connection.sdk_connection.load_session(
-                            cwd=saved_binding.workspace or str(workspace),
-                            session_id=saved_binding.native_session_id,
-                        ),
-                        timeout=self._session_timeout,
-                    )
-                    # load 成功 — 获取 capabilities
-                    from code_lite_backend.agents.acp.mapper import to_jsonable
-                    session_data = to_jsonable(result)
-                    if session_data:
-                        saved_binding.capabilities = session_data
-                    saved_binding.updated_at = _now_iso()
-                    connection.sessions[conversation_id] = saved_binding.native_session_id
-                    self._session_bindings[conversation_id] = saved_binding
-                    self._persist_binding(saved_binding)
-                    connection.touch()
-                    logger.info(
-                        "Successfully loaded native session %s for conversation %s",
-                        saved_binding.native_session_id[:12],
-                        conversation_id[:12],
-                    )
-                    return saved_binding
-                except Exception as exc:
-                    logger.warning(
-                        "session/load failed for %s: %s — falling back to session/new",
-                        conversation_id[:12],
-                        exc,
-                    )
+        if saved_binding is not None and saved_binding.native_session_id:
+            restored = await self._try_restore_saved_session(
+                connection=connection,
+                binding=saved_binding,
+                workspace=workspace,
+            )
+            if restored is not None:
+                return restored
 
         # 3/4. session/new
         logger.info("[session] calling new_session for %s...", conversation_id[:12])
@@ -340,6 +275,111 @@ class AcpRuntimeManager:
         if agent_capabilities is None:
             return False
         return bool(getattr(agent_capabilities, "load_session", False))
+
+    @staticmethod
+    def _supports_resume_session(connection: AcpRuntimeConnection) -> bool:
+        """检查 runtime 是否支持 session/resume。"""
+        init_result = connection.initialize_result
+        if init_result is None:
+            return False
+        agent_capabilities = getattr(init_result, "agent_capabilities", None)
+        if agent_capabilities is None:
+            return False
+        session_capabilities = getattr(agent_capabilities, "session_capabilities", None)
+        if session_capabilities is None:
+            return False
+        return bool(getattr(session_capabilities, "resume", None))
+
+    async def _try_restore_saved_session(
+        self,
+        *,
+        connection: AcpRuntimeConnection,
+        binding: AcpSessionBinding,
+        workspace: Path,
+    ) -> AcpSessionBinding | None:
+        """恢复磁盘上的 native session，优先 resume，load 作为兼容兜底。"""
+        cwd = binding.workspace or str(workspace)
+
+        if self._supports_resume_session(connection):
+            restored = await self._restore_with_method(
+                connection=connection,
+                binding=binding,
+                method="resume",
+                call=lambda: connection.sdk_connection.resume_session(
+                    cwd=cwd,
+                    session_id=binding.native_session_id,
+                    mcp_servers=[],
+                ),
+                suppress_output=False,
+            )
+            if restored is not None:
+                return restored
+
+        if self._supports_load_session(connection):
+            return await self._restore_with_method(
+                connection=connection,
+                binding=binding,
+                method="load",
+                call=lambda: connection.sdk_connection.load_session(
+                    cwd=cwd,
+                    session_id=binding.native_session_id,
+                    mcp_servers=[],
+                ),
+                suppress_output=True,
+            )
+
+        return None
+
+    async def _restore_with_method(
+        self,
+        *,
+        connection: AcpRuntimeConnection,
+        binding: AcpSessionBinding,
+        method: str,
+        call: Callable[[], Awaitable[Any]],
+        suppress_output: bool,
+    ) -> AcpSessionBinding | None:
+        logger.info(
+            "Attempting session/%s for %s (native: %s)",
+            method,
+            binding.conversation_id[:12],
+            binding.native_session_id[:12],
+        )
+        client_handler = connection._client_handler
+        previous_suppression = getattr(client_handler, "suppress_output", False) if client_handler else False
+        if client_handler is not None and suppress_output:
+            client_handler.suppress_output = True
+        try:
+            result = await asyncio.wait_for(call(), timeout=self._session_timeout)
+        except Exception as exc:
+            logger.warning(
+                "session/%s failed for %s: %s - trying next recovery strategy",
+                method,
+                binding.conversation_id[:12],
+                exc,
+            )
+            return None
+        finally:
+            if client_handler is not None and suppress_output:
+                client_handler.suppress_output = previous_suppression
+
+        from code_lite_backend.agents.acp.mapper import to_jsonable
+
+        session_data = to_jsonable(result)
+        if session_data:
+            binding.capabilities = session_data
+        binding.updated_at = _now_iso()
+        connection.sessions[binding.conversation_id] = binding.native_session_id
+        self._session_bindings[binding.conversation_id] = binding
+        self._persist_binding(binding)
+        connection.touch()
+        logger.info(
+            "Successfully restored native session %s for conversation %s via session/%s",
+            binding.native_session_id[:12],
+            binding.conversation_id[:12],
+            method,
+        )
+        return binding
 
     async def close_connection(self, key: ConnectionKey) -> None:
         """关闭指定连接。"""

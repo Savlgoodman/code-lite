@@ -101,6 +101,7 @@ class AcpClientHandler:
         self.native_session_id: str | None = None
         self.latest_usage: UsageSnapshot | None = None
         self.stderr_tail: deque[str] = deque(maxlen=50)
+        self.suppress_output = False
 
     @property
     def context(self) -> EventContext:
@@ -308,6 +309,8 @@ class AcpClientHandler:
         return None
 
     async def _put(self, event: dict[str, Any]) -> None:
+        if self.suppress_output:
+            return
         await self.output_queue.put({
             "conversationId": self.conversation_id,
             "turnId": self.turn_id,
@@ -334,6 +337,8 @@ class AcpClientHandler:
         event = self.mapper.map_raw_rpc_event(payload, self.context)
         if update_kind:
             event["updateKind"] = update_kind
+        if self.suppress_output:
+            return
         logger.info(
             "ACP raw JSON-RPC forwarded: %s",
             method,

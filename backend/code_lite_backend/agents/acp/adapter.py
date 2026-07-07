@@ -283,28 +283,27 @@ class AcpAgentAdapter:
                 connection_sdk = connection.sdk_connection
                 original_handler = connection._client_handler
 
-                # 直接更新 handler 状态（不需要多路复用——每个 connection 只有一个 handler，
-                # 只服务于一个 conversation）
-                if original_handler is not None:
-                    original_handler.conversation_id = request.conversation_id
-                    original_handler.turn_id = request.turn_id
-                    original_handler.output_queue = output_queue  # type: ignore[assignment]
-                    original_handler.native_session_id = None
-                    baselines = self._runtime_manager.load_text_baselines(request.conversation_id)
-                    original_handler.mapper.start_turn(
-                        text_baseline=baselines["content"],
-                        reasoning_baseline=baselines["reasoning"],
-                    )
-
-                # 确保 native session 存在
+                # 先恢复/确保 native session。session/load 按 ACP 语义可能重放历史，
+                # 必须发生在当前 turn 输出队列绑定之前，避免历史 replay 进入本轮消息。
                 binding = await self._runtime_manager.ensure_session(
                     connection=connection,
                     conversation_id=request.conversation_id,
                     workspace=request.workspace,
                 )
 
+                # 直接更新 handler 状态（不需要多路复用——每个 connection 只有一个 handler，
+                # 只服务于一个 conversation）
                 if original_handler is not None:
+                    original_handler.conversation_id = request.conversation_id
+                    original_handler.turn_id = request.turn_id
+                    original_handler.output_queue = output_queue  # type: ignore[assignment]
                     original_handler.native_session_id = binding.native_session_id
+                    baselines = self._runtime_manager.load_text_baselines(request.conversation_id)
+                    original_handler.mapper.start_turn(
+                        text_baseline=baselines["content"],
+                        reasoning_baseline=baselines["reasoning"],
+                    )
+
                 client.native_session_id = binding.native_session_id
                 logger.info(
                     "Session bound: %s -> native %s",
