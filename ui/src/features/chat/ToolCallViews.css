@@ -90,6 +90,87 @@
   font-size: 12px;
 }
 
+.tool-file-diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-file-diff {
+  overflow: hidden;
+  border: 1px solid #e1e6df;
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.tool-file-diff-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  border-bottom: 1px solid #e6ebe4;
+  padding: 7px 9px;
+  color: #454d44;
+  font-size: 12px;
+}
+
+.tool-file-diff-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #252d26;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-file-diff-head em {
+  border-radius: 999px;
+  background: #edf6ee;
+  color: #377348;
+  font-style: normal;
+  padding: 2px 7px;
+}
+
+.tool-file-diff-head small {
+  color: #748072;
+  font-size: 11px;
+}
+
+.tool-file-diff-icon {
+  display: grid;
+  place-items: center;
+  color: #5c8d66;
+}
+
+.tool-call-card pre.tool-file-diff-preview {
+  margin: 0;
+  border-radius: 0;
+  background: #f8faf7;
+  padding: 8px 0;
+}
+
+.diff-line {
+  display: block;
+  min-width: max-content;
+  padding: 0 10px;
+  white-space: pre;
+}
+
+.diff-line.add {
+  background: #eef9ef;
+  color: #236331;
+}
+
+.diff-line.remove {
+  background: #fff0ed;
+  color: #9a3c2b;
+}
+
+.diff-line.context {
+  color: #687066;
+}
+
 .tool-call-icon {
   display: grid;
   place-items: center;

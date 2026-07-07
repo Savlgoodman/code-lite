@@ -577,6 +577,7 @@ export type AgentEvent =
       toolCallId: string;
       name: string;
       arguments?: unknown;
+      metadata?: Record<string, unknown>;
       plan?: PlanSnapshot;
       risk?: ToolCallItem["risk"];
     }
@@ -588,6 +589,7 @@ export type AgentEvent =
       name: string;
       status?: string;
       progress?: unknown;
+      metadata?: Record<string, unknown>;
     }
   | {
       type: "agent.tool.completed";

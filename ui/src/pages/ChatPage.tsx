@@ -1116,6 +1116,7 @@ export function ChatPage() {
             anchorOffset: message.content.length,
             argumentsText: formatJson(event.arguments),
             id: event.toolCallId || createId("tool"),
+            metadata: event.metadata ?? null,
             name: event.name,
             risk: event.risk,
             status: "running"
@@ -1132,6 +1133,7 @@ export function ChatPage() {
           ...message,
           toolCalls: upsertToolCall(message.toolCalls, {
             id: event.toolCallId,
+            metadata: event.metadata ?? null,
             name: event.name,
             status: "running",
             resultText: event.progress != null ? formatJson(event.progress) : undefined,
@@ -1149,6 +1151,7 @@ export function ChatPage() {
           plan: mergeMessagePlan(message, current[targetSessionId], event.plan),
           toolCalls: upsertToolCall(message.toolCalls, {
             id: event.toolCallId || createId("tool"),
+            metadata: event.metadata ?? null,
             name: event.name,
             resultText: formatJson(event.result ?? event.metadata),
             status: "complete"
@@ -1166,6 +1169,7 @@ export function ChatPage() {
           toolCalls: upsertToolCall(message.toolCalls, {
             error: event.error ?? "工具调用失败",
             id: event.toolCallId || createId("tool"),
+            metadata: event.metadata ?? null,
             name: event.name,
             status: "error"
           })
