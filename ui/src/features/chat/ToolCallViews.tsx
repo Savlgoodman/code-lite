@@ -81,7 +81,7 @@ function FileDiffPreview({
     return () => {
       cancelled = true;
     };
-  }, [conversationId, diff.diffId, diff.legacyContent, loadState, loadedDiff, open]);
+  }, [conversationId, diff.diffId, diff.legacyContent, loadedDiff, open]);
 
   return (
     <details
