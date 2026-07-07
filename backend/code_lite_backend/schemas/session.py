@@ -58,6 +58,7 @@ class SessionCapabilities:
     models: list[SessionModel]
     config_options: list[SessionConfigOption]
     commands: list[SlashCommand] = field(default_factory=list)
+    input_capabilities: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +77,7 @@ class SessionCapabilities:
                 for opt in self.config_options
             ],
             "commands": [asdict(c) for c in self.commands],
+            "inputCapabilities": self.input_capabilities,
         }
 
 
@@ -358,6 +360,20 @@ def build_session_capabilities(
         models=models,
         config_options=config_options,
         commands=_build_commands(raw, runtime),
+        input_capabilities={
+            "text": True,
+            "image": {
+                "supported": True,
+                "acceptedMimeTypes": ["image/png", "image/jpeg", "image/webp"],
+                "maxImagesPerTurn": 20,
+                "maxImageBytesPerImage": 10 * 1000 * 1000,
+                "maxImageBytesPerTurn": 200 * 1000 * 1000,
+                "maxWidth": 2000,
+                "maxHeight": 2000,
+                "autoResize": True,
+                "source": "descriptor",
+            },
+        },
     )
 
 
@@ -399,4 +415,19 @@ def build_nanobot_session_capabilities(
         models=models,
         config_options=[],
         commands=[],
+        input_capabilities={
+            "text": True,
+            "image": {
+                "supported": False,
+                "acceptedMimeTypes": [],
+                "maxImagesPerTurn": 0,
+                "maxImageBytesPerImage": 0,
+                "maxImageBytesPerTurn": 0,
+                "maxWidth": 0,
+                "maxHeight": 0,
+                "autoResize": False,
+                "source": "descriptor",
+                "caveats": ["nanobot legacy adapter 暂不支持图片输入。"],
+            },
+        },
     )

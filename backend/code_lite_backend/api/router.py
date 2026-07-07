@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from code_lite_backend.api.routes import approvals, billing, conversations, health, inputs, logs, sessions, settings, system, turns
+from code_lite_backend.api.routes import attachments, approvals, billing, conversations, health, inputs, logs, sessions, settings, system, turns
 
 
 api_router = APIRouter(prefix="/api")
@@ -15,4 +15,5 @@ api_router.include_router(system.router)
 api_router.include_router(approvals.router)
 api_router.include_router(inputs.router)
 api_router.include_router(conversations.router)
+api_router.include_router(attachments.router)
 api_router.include_router(turns.router)

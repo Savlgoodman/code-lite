@@ -71,6 +71,59 @@ export interface SessionCapabilities {
   models: SessionModel[];
   configOptions: SessionConfigOption[];
   commands: SlashCommand[];
+  inputCapabilities?: SessionInputCapabilities;
+}
+
+export interface SessionInputCapabilities {
+  text: boolean;
+  image?: {
+    supported: boolean;
+    acceptedMimeTypes: string[];
+    maxImagesPerTurn: number;
+    maxImageBytesPerImage: number;
+    maxImageBytesPerTurn: number;
+    maxWidth: number;
+    maxHeight: number;
+    autoResize: boolean;
+    source?: string;
+    caveats?: string[];
+  };
+}
+
+export interface MessageAttachment {
+  id: string;
+  kind: "image";
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number;
+  height?: number;
+  sha256: string;
+  previewUrl?: string;
+  wasCompressed?: boolean;
+  createdAt?: string;
+}
+
+export type UserContentBlock = TextInputBlock | ImageInputBlock;
+
+export interface TextInputBlock {
+  type: "text";
+  text: string;
+}
+
+export interface ImageInputBlock {
+  type: "image";
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  source: {
+    kind: "attachment";
+    attachmentId: string;
+  };
+  name?: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  sha256?: string;
+  wasCompressed?: boolean;
 }
 
 export interface ChatMessage {
@@ -88,6 +141,7 @@ export interface ChatMessage {
   usage?: UsageStats;
   plan?: PlanSnapshot | null;
   runtimeEvents?: RuntimeEventRecord[];
+  attachments?: MessageAttachment[];
 }
 
 export type PlanEntryStatus = "pending" | "in_progress" | "completed";

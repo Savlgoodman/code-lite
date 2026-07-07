@@ -19,6 +19,7 @@ from code_lite_backend.services.conversation_recorder import ConversationRecorde
 from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
 from code_lite_backend.services.runtime import AppServices
+from code_lite_backend.storage.attachments import AttachmentStore
 from code_lite_backend.storage.conversations import ConversationStore
 from code_lite_backend.storage.event_store import ConversationEventStore
 from code_lite_backend.version import BACKEND_VERSION
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     approvals = ApprovalBroker()
     inputs = InputBroker()
+    attachment_store = AttachmentStore(runtime_config.attachments_dir)
     conversation_store = ConversationStore(runtime_config.record_dir)
     event_store = ConversationEventStore(runtime_config.record_dir)
     billing_price_store = BillingPriceStore(runtime_config.cache_dir)
@@ -41,6 +43,7 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
         workspace=workspace,
         approvals=approvals,
         inputs=inputs,
+        attachment_store=attachment_store,
         conversation_store=conversation_store,
         conversation_recorder=ConversationRecorder(conversation_store),
         billing_price_store=billing_price_store,
@@ -51,6 +54,7 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
             runtime_config=runtime_config,
             approvals=approvals,
             inputs=inputs,
+            attachment_store=attachment_store,
             agent_runtime_config_store=agent_runtime_config_store,
             runtime_manager=runtime_manager,
         ),

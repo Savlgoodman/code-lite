@@ -1,8 +1,9 @@
 import { ArrowDown, ChevronRight, Minimize2 } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageRenderer } from "../../components/MessageRenderer";
 import { formatConversationBoundaryTime } from "../../lib/formatters";
+import { attachmentImageUrl } from "../../services/agentClient";
 import type { ChatMessage } from "../../types";
 import { buildAssistantInlineEntries } from "./messageTools";
 import { ToolCallGroup } from "./ToolCallViews";
@@ -85,6 +86,58 @@ function AssistantMessageContent({ isCompactTurn, message }: { isCompactTurn: bo
   );
 }
 
+function UserMessageAttachments({ message, sessionId }: { message: ChatMessage; sessionId: string }) {
+  const attachments = useMemo(
+    () => (message.attachments ?? []).filter((attachment) => attachment.kind === "image"),
+    [message.attachments],
+  );
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUrls() {
+      const entries = await Promise.all(
+        attachments.map(async (attachment) => [
+          attachment.id,
+          attachment.previewUrl ?? await attachmentImageUrl(sessionId, attachment.id),
+        ] as const),
+      );
+      if (!cancelled) {
+        setUrls(Object.fromEntries(entries));
+      }
+    }
+    if (attachments.length > 0) {
+      void loadUrls();
+    } else {
+      setUrls({});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [attachments, sessionId]);
+
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="user-attachment-strip">
+      {attachments.map((attachment) => (
+        <a
+          className="user-attachment-thumb"
+          href={urls[attachment.id]}
+          key={attachment.id}
+          rel="noreferrer"
+          target="_blank"
+          title={attachment.name}
+        >
+          {urls[attachment.id] ? <img alt={attachment.name} src={urls[attachment.id]} /> : null}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function shouldShowTurnEndTime(message: ChatMessage, index: number, messages: ChatMessage[], isRunning: boolean) {
   if (message.role !== "assistant" || message.streaming) {
     return false;
@@ -96,11 +149,13 @@ function shouldShowTurnEndTime(message: ChatMessage, index: number, messages: Ch
 const MessageItem = memo(function MessageItem({
   isCompactTurn,
   message,
+  sessionId,
   showTurnEndTime,
   turnEndTime
 }: {
   isCompactTurn: boolean;
   message: ChatMessage;
+  sessionId: string;
   showTurnEndTime: boolean;
   turnEndTime: number;
 }) {
@@ -115,7 +170,10 @@ const MessageItem = memo(function MessageItem({
         {message.role === "assistant" ? (
           <AssistantMessageContent isCompactTurn={isCompactTurn} message={message} />
         ) : (
-          <p className="user-message-text">{message.content}</p>
+          <div className="user-message-stack">
+            <UserMessageAttachments message={message} sessionId={sessionId} />
+            {message.content ? <p className="user-message-text">{message.content}</p> : null}
+          </div>
         )}
 
         {isThinking ? (
@@ -312,6 +370,7 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
               isCompactTurn={message.role === "assistant" && isCompactPrompt(messages[index - 1]?.content)}
               key={`${sessionId}-${message.id}`}
               message={message}
+              sessionId={sessionId}
               showTurnEndTime={shouldShowTurnEndTime(message, index, messages, isRunning)}
               turnEndTime={message.updatedAt ?? (index === messages.length - 1 ? updatedAt : message.createdAt)}
             />

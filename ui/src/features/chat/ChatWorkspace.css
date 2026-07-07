@@ -1,6 +1,7 @@
 .chat-workspace {
   --chat-composer-bottom: 16px;
   --chat-composer-min-height: 98px;
+  --chat-composer-current-height: var(--chat-composer-min-height);
   --chat-composer-stack-gap: 8px;
   --chat-plan-collapsed-height: 60px;
   --chat-plan-expanded-height: 136px;

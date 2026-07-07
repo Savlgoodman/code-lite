@@ -9,6 +9,34 @@ AgentEvent = dict[str, Any]
 
 
 @dataclass(frozen=True)
+class TextInputBlock:
+    type: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ImageAttachmentSource:
+    kind: str
+    attachment_id: str
+
+
+@dataclass(frozen=True)
+class ImageInputBlock:
+    type: str
+    mime_type: str
+    source: ImageAttachmentSource
+    name: str | None = None
+    size_bytes: int | None = None
+    width: int | None = None
+    height: int | None = None
+    sha256: str | None = None
+    was_compressed: bool | None = None
+
+
+UserInputBlock = TextInputBlock | ImageInputBlock
+
+
+@dataclass(frozen=True)
 class AgentRunRequest:
     conversation_id: str
     turn_id: str
@@ -22,6 +50,7 @@ class AgentRunRequest:
     runtime_model: str | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
     reasoning_effort: str | None = None
+    input_blocks: list[UserInputBlock] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

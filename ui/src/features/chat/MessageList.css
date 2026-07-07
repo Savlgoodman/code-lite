@@ -2,7 +2,7 @@
   flex: 1;
   min-height: 0;
   overflow: overlay;
-  padding: 28px 24px calc(var(--chat-composer-bottom) + var(--chat-composer-min-height) + 58px);
+  padding: 28px 24px calc(var(--chat-composer-bottom) + var(--chat-composer-current-height) + 58px);
   scrollbar-gutter: auto;
   scrollbar-width: none;
   transition: padding-bottom 0.24s cubic-bezier(0.2, 0, 0, 1);
@@ -98,6 +98,43 @@
   background: #f0f0ef;
   color: #20242b;
   white-space: pre-wrap;
+}
+
+.user-message-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.user-attachment-strip {
+  max-width: min(520px, 78vw);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.user-attachment-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.user-attachment-thumb {
+  width: 88px;
+  height: 72px;
+  flex: 0 0 88px;
+  overflow: hidden;
+  border: 1px solid rgba(32, 36, 43, 0.14);
+  border-radius: 8px;
+  background: #11151c;
+}
+
+.user-attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .assistant-flow {
@@ -286,7 +323,7 @@
 
 .scroll-bottom-button {
   position: absolute;
-  bottom: calc(var(--chat-composer-bottom) + var(--chat-composer-min-height) + 40px);
+  bottom: calc(var(--chat-composer-bottom) + var(--chat-composer-current-height) + 40px);
   left: 50%;
   z-index: 5;
   width: 34px;
@@ -312,14 +349,14 @@
 
 .chat-workspace:has(.plan-progress-panel) .chat-scroll {
   padding-bottom: calc(
-    var(--chat-composer-bottom) + var(--chat-composer-min-height) + var(--chat-composer-stack-gap)
+    var(--chat-composer-bottom) + var(--chat-composer-current-height) + var(--chat-composer-stack-gap)
     + var(--chat-plan-panel-height) + var(--chat-scroll-plan-padding-extra)
   );
 }
 
 .chat-workspace:has(.plan-progress-panel) .scroll-bottom-button {
   bottom: calc(
-    var(--chat-composer-bottom) + var(--chat-composer-min-height) + var(--chat-composer-stack-gap)
+    var(--chat-composer-bottom) + var(--chat-composer-current-height) + var(--chat-composer-stack-gap)
     + var(--chat-plan-panel-height) + var(--chat-scroll-button-plan-gap)
   );
 }

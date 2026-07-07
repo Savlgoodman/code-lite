@@ -13,6 +13,7 @@ import { ChatComposer } from "./ChatComposer";
 import { ConversationHeader } from "./ConversationHeader";
 import { MessageList } from "./MessageList";
 import type { ChatConfigValue } from "./chatTypes";
+import type { DraftImage } from "./draftImages";
 import { latestMergedPlanFromMessages } from "./planSnapshots";
 import "./ChatWorkspace.css";
 
@@ -25,6 +26,9 @@ interface ChatWorkspaceProps {
   contextUsage: UsageStats | null;
   configLoading: boolean;
   draft: string;
+  draftImageError: string | null;
+  draftImages: DraftImage[];
+  imagesProcessing: boolean;
   sendDisabled: boolean;
   isRunning: boolean;
   messages: ChatMessage[];
@@ -33,6 +37,8 @@ interface ChatWorkspaceProps {
   onAccessModeChange: (value: string) => void;
   onConfigChange: (optionId: string, value: ChatConfigValue) => void;
   onDraftChange: (value: string) => void;
+  onDraftImagesAdd: (files: File[]) => void;
+  onDraftImageRemove: (id: string) => void;
   onModelFamilyChange: (value: string) => void;
   onReasoningEffortChange: (value: string) => void;
   onResolveApproval: (decision: "allow" | "deny") => void;
@@ -58,6 +64,9 @@ export function ChatWorkspace({
   contextUsage,
   configLoading,
   draft,
+  draftImageError,
+  draftImages,
+  imagesProcessing,
   sendDisabled,
   isRunning,
   messages,
@@ -66,6 +75,8 @@ export function ChatWorkspace({
   onAccessModeChange,
   onConfigChange,
   onDraftChange,
+  onDraftImagesAdd,
+  onDraftImageRemove,
   onModelFamilyChange,
   onReasoningEffortChange,
   onResolveApproval,
@@ -101,6 +112,9 @@ export function ChatWorkspace({
         configLoading={configLoading}
         contextUsage={contextUsage}
         draft={draft}
+        draftImageError={draftImageError}
+        draftImages={draftImages}
+        imagesProcessing={imagesProcessing}
         sendDisabled={sendDisabled}
         messages={messages}
         modes={modes}
@@ -108,6 +122,8 @@ export function ChatWorkspace({
         onAccessModeChange={onAccessModeChange}
         onConfigChange={onConfigChange}
         onDraftChange={onDraftChange}
+        onDraftImagesAdd={onDraftImagesAdd}
+        onDraftImageRemove={onDraftImageRemove}
         onModelFamilyChange={onModelFamilyChange}
         onReasoningEffortChange={onReasoningEffortChange}
         onResolveApproval={onResolveApproval}

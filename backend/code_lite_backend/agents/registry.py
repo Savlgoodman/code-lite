@@ -10,6 +10,7 @@ from code_lite_backend.schemas.agent import AgentAdapter
 from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigStore
 from code_lite_backend.services.approvals import ApprovalBroker
 from code_lite_backend.services.inputs import InputBroker
+from code_lite_backend.storage.attachments import AttachmentStore
 
 
 def create_agent_adapter(
@@ -17,6 +18,7 @@ def create_agent_adapter(
     runtime_config: RuntimeConfig,
     approvals: ApprovalBroker,
     inputs: InputBroker,
+    attachment_store: AttachmentStore,
     agent_runtime_config_store: AgentRuntimeConfigStore,
     runtime_manager: AcpRuntimeManager | None = None,
 ) -> AgentAdapter:
@@ -26,6 +28,7 @@ def create_agent_adapter(
             runtime_config=runtime_config,
             approvals=approvals,
             inputs=inputs,
+            attachment_store=attachment_store,
             agent_runtime_config_store=agent_runtime_config_store,
             runtime_manager=runtime_manager,
         )
@@ -40,6 +43,7 @@ def create_agent_adapter(
             runtime_config=runtime_config,
             approvals=approvals,
             inputs=inputs,
+            attachment_store=attachment_store,
             agent_runtime_config_store=agent_runtime_config_store,
             runtime_manager=runtime_manager,
         )

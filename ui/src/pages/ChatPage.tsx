@@ -16,7 +16,7 @@ import { formatJson } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
-import { cancelTurn, createConversation, initializeSession, sendApprovalDecision, sendInputResponse, streamAgentTurn } from "../services/agentClient";
+import { cancelTurn, createConversation, initializeSession, sendApprovalDecision, sendInputResponse, streamAgentTurn, uploadTurnAttachments } from "../services/agentClient";
 import {
   deleteConversation,
   listConversations,
@@ -25,6 +25,13 @@ import {
   updateConversationArchiveState
 } from "../services/conversationStore";
 import { loadAgentRuntimeModels, loadAgentRuntimeSettings } from "../services/settingsStore";
+import {
+  createDraftImage,
+  MAX_DRAFT_IMAGES,
+  MAX_TOTAL_IMAGE_BYTES,
+  revokeDraftImage,
+  type DraftImage,
+} from "../features/chat/draftImages";
 import type {
   AgentEvent,
   AgentRuntimeModel,
@@ -40,6 +47,7 @@ import type {
   PlanSnapshot,
   RuntimeEventRecord,
   SlashCommand,
+  UserContentBlock,
   UsageStats
 } from "../types";
 
@@ -228,6 +236,9 @@ export function ChatPage() {
   const [archivedSessionIds, setArchivedSessionIds] = useState<Set<string>>(() => new Set());
   const [searchText, setSearchText] = useState("");
   const [draft, setDraft] = useState("");
+  const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
+  const [draftImageError, setDraftImageError] = useState<string | null>(null);
+  const [imagesProcessing, setImagesProcessing] = useState(false);
   const [activeTurnIdBySession, setActiveTurnIdBySession] = useState<Record<string, string>>({});
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
@@ -254,6 +265,10 @@ export function ChatPage() {
     configBySessionRef.current = configBySession;
   }, [configBySession]);
 
+  useEffect(() => {
+    draftImagesRef.current = draftImages;
+  }, [draftImages]);
+
   // ─── 向后兼容：draft session 时仍用全局 activeAgent ───
   // draft session 的 capabilities 通过 __probe__ 获取，存储到 draft id 下
   // 一旦 draft → real id，会把 draft 的 caps/config 迁移到 real id
@@ -267,6 +282,7 @@ export function ChatPage() {
   const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
   // 使用 ref 存储最新的 config，确保 sendMessage 读取到最新值（避免闭包捕获旧值）
   const configBySessionRef = useRef<Record<string, SessionConfig>>({});
+  const draftImagesRef = useRef<DraftImage[]>([]);
 
   const activeSession = sessions.find((item) => item.id === activeSessionId) ?? sessions[0];
   const activeMessages = messages[activeSession.id] ?? [];
@@ -514,6 +530,9 @@ export function ChatPage() {
       for (const timer of Object.values(configSaveTimerRef.current)) {
         window.clearTimeout(timer);
       }
+      for (const image of draftImagesRef.current) {
+        revokeDraftImage(image);
+      }
     };
   }, []);
 
@@ -562,6 +581,110 @@ export function ChatPage() {
     }
     runningSessionIdsRef.current = next;
     setRunningSessionIds(next);
+  }
+
+  function clearDraftImages() {
+    setDraftImages((current) => {
+      for (const image of current) {
+        revokeDraftImage(image);
+      }
+      return [];
+    });
+    setDraftImageError(null);
+  }
+
+  function removeDraftImage(imageId: string) {
+    setDraftImages((current) => {
+      const target = current.find((image) => image.id === imageId);
+      if (target) {
+        revokeDraftImage(target);
+      }
+      return current.filter((image) => image.id !== imageId);
+    });
+    setDraftImageError(null);
+  }
+
+  async function addDraftImages(files: File[]) {
+    if (files.length === 0) {
+      return;
+    }
+    setImagesProcessing(true);
+    setDraftImageError(null);
+    try {
+      const slots = Math.max(0, MAX_DRAFT_IMAGES - draftImagesRef.current.length);
+      if (slots <= 0) {
+        setDraftImageError("单轮最多支持 20 张图片。");
+        return;
+      }
+      const accepted = files.slice(0, slots);
+      if (accepted.length < files.length) {
+        setDraftImageError("单轮最多支持 20 张图片，已忽略多余图片。");
+      }
+
+      const created: DraftImage[] = [];
+      for (const file of accepted) {
+        try {
+          created.push(await createDraftImage(file));
+        } catch (error) {
+          setDraftImageError(error instanceof Error ? error.message : String(error));
+        }
+      }
+      if (created.length === 0) {
+        return;
+      }
+
+      setDraftImages((current) => {
+        const next = [...current, ...created];
+        const totalBytes = next.reduce((sum, image) => sum + (image.normalized?.normalizedBytes ?? image.rawBytes), 0);
+        if (totalBytes > MAX_TOTAL_IMAGE_BYTES) {
+          for (const image of created) {
+            revokeDraftImage(image);
+          }
+          setDraftImageError("单轮图片总大小不能超过 200 MB。");
+          return current;
+        }
+        return next;
+      });
+    } finally {
+      setImagesProcessing(false);
+    }
+  }
+
+  async function ensureRealConversationForSend(sessionId: string, text: string): Promise<string> {
+    if (!isDraftSessionId(sessionId)) {
+      return sessionId;
+    }
+
+    const result = await createConversation({
+      agentId: sessionAgent?.id ?? activeAgent?.id ?? currentCapabilities?.agent.id ?? "codex",
+      preview: text,
+      title: text.slice(0, 24) || (draftImagesRef.current.length ? "图片输入" : undefined),
+      ...(newSessionWorkspace ? { workspace: newSessionWorkspace } : {}),
+    });
+    const session = result.session;
+    const draftCaps = capabilitiesBySession[sessionId];
+    const draftCfg = configBySessionRef.current[sessionId];
+
+    if (draftCaps) {
+      setCapabilitiesBySession((prev) => ({ ...prev, [session.id]: prev[session.id] ?? draftCaps }));
+    }
+    if (draftCfg) {
+      setConfigBySession((prev) => {
+        const next = { ...prev, [session.id]: prev[session.id] ?? draftCfg };
+        configBySessionRef.current = next;
+        return next;
+      });
+    }
+    setSessions((current) => [
+      session,
+      ...current.filter((item) => !isDraftSessionId(item.id) && item.id !== session.id),
+    ]);
+    setMessages((current) => ({
+      ...current,
+      [session.id]: result.messages as ChatMessage[],
+    }));
+    setActiveSessionId(session.id);
+    return session.id;
   }
 
   function createSession(workspace = "") {
@@ -868,6 +991,13 @@ export function ChatPage() {
     const assistantMessageId = activeAssistantMessageIdBySessionRef.current[targetSessionId]
       ?? activeAssistantMessageIdBySessionRef.current[sessionId];
     if (!assistantMessageId) {
+      if (event.type === "agent.run.failed") {
+        setSessionRunning(targetSessionId, false);
+        if (draftImagesRef.current.length > 0) {
+          setDraftImageError(event.error ?? "Agent 运行失败");
+        }
+        updateSession(targetSessionId, (session) => ({ ...session, status: "error", updatedAt: Date.now() }));
+      }
       return;
     }
 
@@ -1144,7 +1274,8 @@ export function ChatPage() {
 
   async function sendMessage() {
     const text = draft.trim();
-    if (!text || activeTurnId || isCurrentConfigLoading || !isCurrentConfigReady) {
+    const images = draftImagesRef.current;
+    if ((!text && images.length === 0) || activeTurnId || imagesProcessing || isCurrentConfigLoading || !isCurrentConfigReady) {
       return;
     }
     if (!currentCapabilities) {
@@ -1152,9 +1283,9 @@ export function ChatPage() {
     }
 
     const sessionId = activeSession.id;
-    const conversationId = isDraftSessionId(sessionId) ? undefined : sessionId;
+    let streamSessionId = sessionId;
+    let turnStarted = false;
     const turnId = createId("turn");
-    setDraft("");
     setActiveTurnIdBySession((prev) => ({ ...prev, [sessionId]: turnId }));
     setSessionRunning(sessionId, true);
     delete activeAssistantMessageIdBySessionRef.current[sessionId];
@@ -1166,6 +1297,17 @@ export function ChatPage() {
     abortControllerRef.current = abortController;
 
     try {
+      const conversationId = images.length > 0
+        ? await ensureRealConversationForSend(sessionId, text)
+        : isDraftSessionId(sessionId) ? undefined : sessionId;
+      if (conversationId) {
+        streamSessionId = conversationId;
+        if (conversationId !== sessionId) {
+          setActiveTurnIdBySession((prev) => ({ ...prev, [conversationId]: turnId }));
+          setSessionRunning(conversationId, true);
+        }
+      }
+
       // 从 ref 读取最新的 config（避免闭包捕获旧值）
       const cfg = mergeConfigDefaults(configBySessionRef.current[sessionId] ?? currentConfig ?? undefined, currentCapabilities);
       const models = currentCapabilities.models;
@@ -1187,13 +1329,50 @@ export function ChatPage() {
         fullModelId = exact?.id ?? cfg.modelFamily;
         modelLabel = exact?.label;
       }
+      let contentBlocks: UserContentBlock[] | undefined;
+      if (images.length > 0 && conversationId) {
+        const uploaded = await uploadTurnAttachments({
+          conversationId,
+          images: images.map((image) => ({
+            blob: image.normalized?.blob ?? image.file,
+            fileName: image.name,
+            height: image.normalized?.height ?? image.height,
+            mimeType: image.normalized?.mimeType ?? image.mimeType,
+            wasCompressed: image.normalized?.wasCompressed,
+            width: image.normalized?.width ?? image.width,
+          })),
+          turnId,
+        });
+        contentBlocks = [
+          ...(text ? [{ type: "text" as const, text }] : []),
+          ...uploaded.map((attachment) => ({
+            type: "image" as const,
+            mimeType: attachment.mimeType as "image/png" | "image/jpeg" | "image/webp",
+            source: { kind: "attachment" as const, attachmentId: attachment.id },
+            name: attachment.name,
+            sizeBytes: attachment.sizeBytes,
+            width: attachment.width,
+            height: attachment.height,
+            sha256: attachment.sha256,
+            wasCompressed: attachment.wasCompressed,
+          })),
+        ];
+      }
       await streamAgentTurn({
         accessMode: cfg?.accessMode,
         conversationId,
+        contentBlocks,
         input: text,
         modelId: fullModelId,
         modelLabel,
-        onEvent: (event) => handleAgentEvent(sessionId, event),
+        onEvent: (event) => {
+          if (event.type === "conversation.turn.started") {
+            turnStarted = true;
+            setDraft("");
+            clearDraftImages();
+          }
+          handleAgentEvent(sessionId, event);
+        },
         signal: abortController.signal,
         reasoningEffort: cfg?.reasoningEffort,
         selectedConfig: cfg?.selectedConfig,
@@ -1208,8 +1387,13 @@ export function ChatPage() {
           type: "agent.run.failed"
         });
       } else {
+        if (!turnStarted) {
+          setDraft(text);
+          setDraftImages(images);
+          setDraftImageError(error instanceof Error ? error.message : String(error));
+        }
         handleAgentEvent(sessionId, {
-          conversationId: sessionId,
+          conversationId: streamSessionId,
           error: error instanceof Error ? error.message : String(error),
           turnId,
           type: "agent.run.failed"
@@ -1219,10 +1403,17 @@ export function ChatPage() {
       setActiveTurnIdBySession((prev) => {
         const next = { ...prev };
         delete next[sessionId];
+        if (streamSessionId !== sessionId) {
+          delete next[streamSessionId];
+        }
         return next;
       });
       delete activeAssistantMessageIdBySessionRef.current[sessionId];
       delete activeStreamSessionIdByTurnRef.current[sessionId];
+      if (streamSessionId !== sessionId) {
+        delete activeAssistantMessageIdBySessionRef.current[streamSessionId];
+        delete activeStreamSessionIdByTurnRef.current[streamSessionId];
+      }
       abortControllerRef.current = null;
     }
   }
@@ -1339,6 +1530,9 @@ export function ChatPage() {
               configOptions={currentCapabilities?.configOptions ?? []}
               contextUsage={contextUsage}
               draft={draft}
+              draftImageError={draftImageError}
+              draftImages={draftImages}
+              imagesProcessing={imagesProcessing}
               isRunning={isActiveSessionRunning}
               messages={activeMessages}
               modes={currentCapabilities?.modes ?? []}
@@ -1349,6 +1543,8 @@ export function ChatPage() {
                 updateSessionConfig({ selectedConfig: next });
               }}
               onDraftChange={setDraft}
+              onDraftImagesAdd={(files) => void addDraftImages(files)}
+              onDraftImageRemove={removeDraftImage}
               onModelFamilyChange={(value) => updateSessionConfig({ modelFamily: value })}
               onReasoningEffortChange={(value) => updateSessionConfig({ reasoningEffort: value })}
               onResolveApproval={(decision) => void resolveApproval(decision)}
@@ -1358,7 +1554,7 @@ export function ChatPage() {
               pendingApproval={activePendingApproval}
               pendingInput={activePendingInput}
               reasoningEffort={currentConfig?.reasoningEffort ?? ""}
-              sendDisabled={isCurrentConfigLoading || !isCurrentConfigReady}
+              sendDisabled={imagesProcessing || isCurrentConfigLoading || !isCurrentConfigReady}
               selectedConfig={currentConfig?.selectedConfig ?? {}}
               selectedModelFamily={currentConfig?.modelFamily ?? ""}
               sessionId={activeSession.id}

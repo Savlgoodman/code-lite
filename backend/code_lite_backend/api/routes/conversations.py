@@ -180,4 +180,5 @@ async def delete_conversation(
 
     if not deleted:
         return JSONResponse({"error": "conversation not found"}, status_code=404)
+    services.attachment_store.delete_conversation(conversation_id)
     return JSONResponse({"deleted": True})

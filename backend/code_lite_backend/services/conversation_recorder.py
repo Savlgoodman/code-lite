@@ -120,10 +120,12 @@ class ConversationRecorder:
         *,
         conversation_id: str,
         prompt: str,
+        attachments: list[dict[str, Any]] | None = None,
         agent_metadata: dict[str, Any] | None = None,
         model_metadata: dict[str, Any] | None = None,
     ) -> TurnRecord:
         timestamp = now_ms()
+        attachments = attachments or []
         agent_metadata = agent_metadata or {}
         model_metadata = model_metadata or {}
         persisted = self._store.get_conversation(conversation_id)
@@ -133,7 +135,7 @@ class ConversationRecorder:
             "agent": previous_session.get("agent") or agent_metadata or None,
             "id": conversation_id,
             "createdAt": previous_session.get("createdAt") or timestamp,
-            "preview": prompt or DEFAULT_PREVIEW,
+            "preview": prompt or (f"{len(attachments)} 张图片" if attachments else DEFAULT_PREVIEW),
             "status": "running",
             "title": self._title_for_turn(conversation_id, prompt),
             "updatedAt": timestamp,
@@ -146,6 +148,7 @@ class ConversationRecorder:
             "updatedAt": timestamp,
             "agent": session.get("agent"),
             "model": model_metadata or None,
+            "attachments": attachments,
             "toolCalls": [],
         }
         assistant_message = {

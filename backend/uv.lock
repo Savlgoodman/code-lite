@@ -540,6 +540,7 @@ dependencies = [
     { name = "agent-client-protocol" },
     { name = "fastapi" },
     { name = "nanobot-ai" },
+    { name = "python-multipart" },
     { name = "uvicorn" },
 ]
 
@@ -548,6 +549,7 @@ requires-dist = [
     { name = "agent-client-protocol", specifier = ">=0.10.1" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "nanobot-ai", specifier = ">=0.2.2" },
+    { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "uvicorn", specifier = ">=0.32.0" },
 ]
 

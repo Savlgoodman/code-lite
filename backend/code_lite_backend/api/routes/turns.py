@@ -10,9 +10,20 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from code_lite_backend.api.dependencies import get_services
 from code_lite_backend.core.json_utils import encode_ndjson_event
-from code_lite_backend.schemas.agent import AgentRunRequest
+from code_lite_backend.schemas.agent import (
+    AgentRunRequest,
+    ImageAttachmentSource,
+    ImageInputBlock,
+    TextInputBlock,
+    UserInputBlock,
+)
 from code_lite_backend.services.model_config import ModelConfigError
 from code_lite_backend.services.runtime import AppServices
+from code_lite_backend.storage.attachments import (
+    ALLOWED_IMAGE_MIME_TYPES,
+    MAX_IMAGE_BYTES_PER_TURN,
+    MAX_IMAGES_PER_TURN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +74,104 @@ def _claude_model_label(
                 name = str(option.get("name") or "").strip()
                 return name or fallback
     return fallback
+
+
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _attachment_message_metadata(metadata: dict[str, object]) -> dict[str, object]:
+    keys = (
+        "id",
+        "kind",
+        "name",
+        "mimeType",
+        "sizeBytes",
+        "width",
+        "height",
+        "sha256",
+        "wasCompressed",
+        "createdAt",
+    )
+    return {key: metadata[key] for key in keys if key in metadata}
+
+
+def _parse_content_blocks(
+    *,
+    body: dict[str, object],
+    prompt: str,
+    conversation_id: str,
+    turn_id: str,
+    services: AppServices,
+) -> tuple[list[UserInputBlock], list[dict[str, object]], str | None]:
+    raw_blocks = body.get("contentBlocks")
+    blocks_payload = raw_blocks if isinstance(raw_blocks, list) else None
+    input_blocks: list[UserInputBlock] = []
+    attachments: list[dict[str, object]] = []
+    has_text_block = False
+
+    if blocks_payload is None:
+        if prompt:
+            input_blocks.append(TextInputBlock(type="text", text=prompt))
+        return input_blocks, attachments, None
+
+    for item in blocks_payload:
+        if not isinstance(item, dict):
+            return [], [], "contentBlocks 只能包含对象。"
+        block_type = str(item.get("type") or "").strip().lower()
+        if block_type == "text":
+            text = str(item.get("text") or "").strip()
+            if text:
+                input_blocks.append(TextInputBlock(type="text", text=text))
+                has_text_block = True
+            continue
+        if block_type != "image":
+            return [], [], f"不支持的 content block 类型：{block_type or 'unknown'}"
+
+        source = item.get("source")
+        if not isinstance(source, dict) or source.get("kind") != "attachment":
+            return [], [], "图片输入只支持 attachmentId 引用。"
+        attachment_id = str(source.get("attachmentId") or "").strip()
+        if not attachment_id:
+            return [], [], "图片输入缺少 attachmentId。"
+        stored = services.attachment_store.load_metadata(conversation_id, attachment_id)
+        if stored is None:
+            return [], [], f"图片附件不存在：{attachment_id}"
+        if str(stored.get("conversationId") or "") != conversation_id or str(stored.get("turnId") or "") != turn_id:
+            return [], [], f"图片附件不属于当前 turn：{attachment_id}"
+        mime_type = str(stored.get("mimeType") or "").strip().lower()
+        if mime_type not in ALLOWED_IMAGE_MIME_TYPES:
+            return [], [], f"不支持的图片类型：{mime_type or 'unknown'}"
+
+        attachments.append(_attachment_message_metadata(stored))
+        input_blocks.append(
+            ImageInputBlock(
+                type="image",
+                mime_type=mime_type,
+                source=ImageAttachmentSource(kind="attachment", attachment_id=attachment_id),
+                name=str(stored.get("name") or "") or None,
+                size_bytes=_int_or_none(stored.get("sizeBytes")),
+                width=_int_or_none(stored.get("width")),
+                height=_int_or_none(stored.get("height")),
+                sha256=str(stored.get("sha256") or "") or None,
+                was_compressed=bool(stored.get("wasCompressed")) if "wasCompressed" in stored else None,
+            )
+        )
+
+    if prompt and not has_text_block:
+        input_blocks.insert(0, TextInputBlock(type="text", text=prompt))
+
+    if len(attachments) > MAX_IMAGES_PER_TURN:
+        return [], [], "单轮最多支持 20 张图片。"
+    total_bytes = sum(int(item.get("sizeBytes") or 0) for item in attachments)
+    if total_bytes > MAX_IMAGE_BYTES_PER_TURN:
+        return [], [], "单轮图片总大小不能超过 200 MB。"
+    return input_blocks, attachments, None
 
 
 @router.post("/turns/{turn_id}/cancel")
@@ -177,6 +286,40 @@ async def stream_turn(
             if resolved_model is not None
             else {}
         )
+    input_blocks, user_attachments, content_error = _parse_content_blocks(
+        body=body,
+        prompt=prompt,
+        conversation_id=conversation_id,
+        turn_id=turn_id,
+        services=services,
+    )
+    if content_error is not None:
+        services.attachment_store.delete_turn(conversation_id, turn_id)
+        async def error_stream():
+            yield encode_ndjson_event(
+                {
+                    "type": "agent.run.failed",
+                    "conversationId": conversation_id,
+                    "turnId": turn_id,
+                    "error": content_error,
+                }
+            )
+
+        return StreamingResponse(error_stream(), media_type="application/x-ndjson; charset=utf-8")
+    if user_attachments and agent_id not in _ACP_RUNTIME_IDS:
+        services.attachment_store.delete_turn(conversation_id, turn_id)
+        async def image_unsupported_stream():
+            yield encode_ndjson_event(
+                {
+                    "type": "agent.run.failed",
+                    "conversationId": conversation_id,
+                    "turnId": turn_id,
+                    "error": "当前 Agent Runtime 暂不支持图片输入。",
+                }
+            )
+
+        return StreamingResponse(image_unsupported_stream(), media_type="application/x-ndjson; charset=utf-8")
+
     run_request = AgentRunRequest(
         conversation_id=conversation_id,
         turn_id=turn_id,
@@ -190,6 +333,7 @@ async def stream_turn(
         access_mode=requested_access_mode,
         model_metadata=model_metadata,
         reasoning_effort=requested_reasoning_effort,
+        input_blocks=input_blocks,
     )
 
     # 详细日志：记录完整请求参数，帮助排查模型选择问题
@@ -211,14 +355,16 @@ async def stream_turn(
         runtime_id = agent_id  # runtime identifier for events
         native_session_id: str | None = None
 
-        if not prompt:
+        has_user_input = bool(prompt or user_attachments)
+        if not has_user_input:
             logger.warning("event_stream: empty prompt, nothing to do")
 
-        if prompt:
+        if has_user_input:
             logger.info("event_stream: start_turn for conversation=%s", conversation_id)
             turn_record = services.conversation_recorder.start_turn(
                 conversation_id=conversation_id,
                 prompt=prompt,
+                attachments=user_attachments,
                 agent_metadata=agent_metadata,
                 model_metadata=model_metadata,
             )

@@ -16,6 +16,7 @@ from code_lite_backend.agents.acp.capabilities import (
 from code_lite_backend.agents.acp.client_capabilities import build_client_capabilities
 from code_lite_backend.agents.acp.client import AcpClientHandler
 from code_lite_backend.agents.acp.mapper import extract_prompt_response_usage, to_jsonable
+from code_lite_backend.agents.acp.prompt_blocks import build_acp_prompt_blocks
 from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
 from code_lite_backend.agents.runtimes import RuntimeDescriptor, get_runtime_profile
 from code_lite_backend.core.config import RuntimeConfig
@@ -28,6 +29,7 @@ from code_lite_backend.schemas.agent import (
 from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigStore
 from code_lite_backend.services.approvals import ApprovalBroker
 from code_lite_backend.services.inputs import InputBroker
+from code_lite_backend.storage.attachments import AttachmentStore
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ class AcpAgentAdapter:
         runtime_config: RuntimeConfig,
         approvals: ApprovalBroker,
         inputs: InputBroker,
+        attachment_store: AttachmentStore,
         agent_runtime_config_store: AgentRuntimeConfigStore,
         runtime_manager: AcpRuntimeManager | None = None,
     ) -> None:
@@ -57,6 +60,7 @@ class AcpAgentAdapter:
         self._runtime_config = runtime_config
         self._approvals = approvals
         self._inputs = inputs
+        self._attachment_store = attachment_store
         self._agent_runtime_config_store = agent_runtime_config_store
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
         self._runtime_manager = runtime_manager or AcpRuntimeManager()
@@ -76,7 +80,8 @@ class AcpAgentAdapter:
 
     async def stream_turn(self, request: AgentRunRequest) -> AsyncIterator[AgentEvent]:
         prompt = request.prompt.strip()
-        if not prompt:
+        has_blocks = bool(request.input_blocks)
+        if not prompt and not has_blocks:
             yield {
                 "type": "agent.run.failed",
                 "conversationId": request.conversation_id,
@@ -314,9 +319,10 @@ class AcpAgentAdapter:
 
                 # 发送 prompt
                 logger.info("Sending prompt to session %s", binding.native_session_id[:12])
+                prompt_blocks = build_acp_prompt_blocks(request, self._attachment_store)
                 prompt_result = await connection_sdk.prompt(
                     session_id=binding.native_session_id,
-                    prompt=[acp.text_block(request.prompt)],
+                    prompt=prompt_blocks,
                     message_id=str(uuid.uuid4()),
                 )
                 logger.info("Prompt completed for %s (stop=%s)", request.turn_id, getattr(prompt_result, "stop_reason", None))

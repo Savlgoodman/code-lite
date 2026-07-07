@@ -5,14 +5,17 @@ import {
   Check,
   ChevronDown,
   FastForward,
+  Image,
   FileText,
   Hand,
+  Loader2,
   Plus,
   Send,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
-  Square
+  Square,
+  X
 } from "lucide-react";
 
 import type {
@@ -36,6 +39,7 @@ import { InputRequestCard } from "./InputRequestCard";
 import { PlanProgressPanel } from "./PlanProgressPanel";
 import { TokenUsageModal } from "./TokenUsageModal";
 import type { ChatConfigValue } from "./chatTypes";
+import { IMAGE_ACCEPT, type DraftImage } from "./draftImages";
 import "./ChatComposer.css";
 
 /** 从模型 ID 提取模型族和推理强度 */
@@ -74,12 +78,17 @@ interface ChatComposerProps {
   configLoading: boolean;
   contextUsage: UsageStats | null;
   draft: string;
+  draftImageError: string | null;
+  draftImages: DraftImage[];
+  imagesProcessing: boolean;
   messages: ChatMessage[];
   models: SessionModel[];
   modes: SessionMode[];
   onAccessModeChange: (value: string) => void;
   onConfigChange: (optionId: string, value: ChatConfigValue) => void;
   onDraftChange: (value: string) => void;
+  onDraftImagesAdd: (files: File[]) => void;
+  onDraftImageRemove: (id: string) => void;
   onModelFamilyChange: (familyId: string) => void;
   onReasoningEffortChange: (value: string) => void;
   onResolveApproval: (decision: "allow" | "deny") => void;
@@ -104,12 +113,17 @@ export function ChatComposer({
   configLoading,
   contextUsage,
   draft,
+  draftImageError,
+  draftImages,
+  imagesProcessing,
   messages,
   models,
   modes,
   onAccessModeChange,
   onConfigChange,
   onDraftChange,
+  onDraftImagesAdd,
+  onDraftImageRemove,
   onModelFamilyChange,
   onReasoningEffortChange,
   onResolveApproval,
@@ -129,10 +143,14 @@ export function ChatComposer({
   const [isModelListOpen, setIsModelListOpen] = useState(false);
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const [composerLayoutVersion, setComposerLayoutVersion] = useState(0);
   const [billingPrices, setBillingPrices] = useState<BillingPricesResult | null>(null);
   const accessMenuRef = useRef<HTMLDivElement | null>(null);
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
   const statusMenuRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // 从 models 中提取模型族
   const modelFamilies = useMemo(() => {
@@ -201,6 +219,49 @@ export function ChatComposer({
     window.addEventListener("mousedown", closeOnOutside);
     return () => window.removeEventListener("mousedown", closeOnOutside);
   }, [isAccessMenuOpen, isStatusMenuOpen, isCommandMenuOpen]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    const composer = composerRef.current;
+    if (!textarea || !composer) {
+      return;
+    }
+
+    const workspace = composer.closest(".chat-workspace") as HTMLElement | null;
+    const workspaceHeight = workspace?.clientHeight ?? window.innerHeight;
+    const maxComposerHeight = Math.max(156, Math.floor(workspaceHeight / 2));
+    composer.style.maxHeight = `${maxComposerHeight}px`;
+    textarea.style.height = "auto";
+    const fixedHeight = composer.scrollHeight - textarea.scrollHeight;
+    const maxTextareaHeight = Math.max(48, maxComposerHeight - fixedHeight);
+    const nextHeight = Math.min(textarea.scrollHeight, maxTextareaHeight);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : "hidden";
+    workspace?.style.setProperty("--chat-composer-current-height", `${composer.offsetHeight}px`);
+  }, [composerLayoutVersion, draft, draftImages.length, draftImageError, imagesProcessing, pendingApproval, pendingInput, plan]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        textarea.style.height = "auto";
+      }
+      setComposerLayoutVersion((value) => value + 1);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  function filesFromList(fileList: FileList | null) {
+    return Array.from(fileList ?? []).filter((file) => file.type.startsWith("image/"));
+  }
+
+  function addFiles(fileList: FileList | null) {
+    const files = filesFromList(fileList);
+    if (files.length > 0) {
+      onDraftImagesAdd(files);
+    }
+  }
 
   function accessModeLabel(mode: SessionMode | undefined) {
     const labels: Record<string, string> = {
@@ -374,8 +435,39 @@ export function ChatComposer({
           />
         ) : null}
 
-        <div className="composer">
+        <div
+          className="composer"
+          onDragOver={(event) => {
+            if (activeTurnId) return;
+            event.preventDefault();
+          }}
+          onDrop={(event) => {
+            if (activeTurnId) return;
+            event.preventDefault();
+            addFiles(event.dataTransfer.files);
+          }}
+          ref={composerRef}
+        >
+          {draftImages.length > 0 ? (
+            <div className="composer-image-strip" aria-label="待发送图片">
+              {draftImages.map((image) => (
+                <div className="composer-image-thumb" key={image.id}>
+                  <img alt={image.name} src={image.objectUrl} />
+                  <button
+                    aria-label={`移除图片 ${image.name}`}
+                    className="composer-image-remove"
+                    onClick={() => onDraftImageRemove(image.id)}
+                    type="button"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {draftImageError ? <div className="composer-image-error">{draftImageError}</div> : null}
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
@@ -386,11 +478,39 @@ export function ChatComposer({
                 }
               }
             }}
+            onPaste={(event) => {
+              const files = filesFromList(event.clipboardData.files);
+              if (files.length > 0) {
+                event.preventDefault();
+                onDraftImagesAdd(files);
+              }
+            }}
             placeholder="描述电脑问题，或要求继续变更"
             rows={2}
           />
           <div className="composer-actions">
             <div className="composer-left">
+              <input
+                accept={IMAGE_ACCEPT}
+                hidden
+                multiple
+                onChange={(event) => {
+                  addFiles(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }}
+                ref={fileInputRef}
+                type="file"
+              />
+              <button
+                className="icon-button"
+                aria-label="添加图片"
+                disabled={Boolean(activeTurnId) || imagesProcessing}
+                onClick={() => fileInputRef.current?.click()}
+                title="添加图片"
+                type="button"
+              >
+                {imagesProcessing ? <Loader2 className="composer-spin" size={17} /> : <Image size={17} />}
+              </button>
               {/* 快捷指令 */}
               <div className="command-picker" ref={commandMenuRef}>
                 <button
