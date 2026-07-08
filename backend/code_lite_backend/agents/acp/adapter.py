@@ -281,7 +281,7 @@ class AcpAgentAdapter:
 
             # 获取 conversation lock（串行化同一会话的 prompt）
             lock = self._runtime_manager.get_turn_lock(request.conversation_id)
-            async with lock:
+            async with lock, connection.prompt_lock:
                 connection_sdk = connection.sdk_connection
                 original_handler = connection._client_handler
 
@@ -296,12 +296,20 @@ class AcpAgentAdapter:
                 # 直接更新 handler 状态（不需要多路复用——每个 connection 只有一个 handler，
                 # 只服务于一个 conversation）
                 if original_handler is not None:
+                    baselines = self._runtime_manager.load_text_baselines(request.conversation_id)
                     original_handler.conversation_id = request.conversation_id
                     original_handler.turn_id = request.turn_id
                     original_handler.output_queue = output_queue  # type: ignore[assignment]
                     original_handler.native_session_id = binding.native_session_id
-                    baselines = self._runtime_manager.load_text_baselines(request.conversation_id)
                     original_handler.mapper.start_turn(
+                        text_baseline=baselines["content"],
+                        reasoning_baseline=baselines["reasoning"],
+                    )
+                    original_handler.register_route(
+                        session_id=binding.native_session_id,
+                        conversation_id=request.conversation_id,
+                        turn_id=request.turn_id,
+                        output_queue=output_queue,
                         text_baseline=baselines["content"],
                         reasoning_baseline=baselines["reasoning"],
                     )
@@ -338,7 +346,10 @@ class AcpAgentAdapter:
                 if prompt_usage is not None:
                     usage_snapshot = extract_prompt_response_usage(prompt_usage)
                     # 合并 usage_update 的 context window 数据
-                    handler_usage = original_handler.latest_usage if original_handler else None
+                    handler_usage = (
+                        original_handler.get_latest_usage(binding.native_session_id)
+                        if original_handler else None
+                    )
                     if handler_usage:
                         usage_snapshot.context_used_tokens = handler_usage.context_used_tokens
                         usage_snapshot.context_window_tokens = handler_usage.context_window_tokens
@@ -347,7 +358,10 @@ class AcpAgentAdapter:
                         usage_snapshot.context_window_tokens = client.latest_usage.context_window_tokens
                     usage_dict = usage_snapshot.to_dict()
                 else:
-                    handler_usage = original_handler.latest_usage if original_handler else None
+                    handler_usage = (
+                        original_handler.get_latest_usage(binding.native_session_id)
+                        if original_handler else None
+                    )
                     usage_dict = (
                         handler_usage.to_dict() if handler_usage else
                         client.latest_usage.to_dict() if client.latest_usage else
@@ -365,6 +379,8 @@ class AcpAgentAdapter:
                         "agentInfo": to_jsonable(getattr(connection.initialize_result, "agent_info", None)),
                     },
                 })
+                if original_handler is not None:
+                    original_handler.detach_route(binding.native_session_id)
 
         except asyncio.CancelledError:
             logger.info("Turn %s cancelled", request.turn_id)

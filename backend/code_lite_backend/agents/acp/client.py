@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections import deque
+from dataclasses import dataclass, field
 from typing import Any
 
 from acp.exceptions import RequestError
@@ -74,6 +75,31 @@ def _first_string(*values: Any) -> str:
     return ""
 
 
+@dataclass
+class AcpSessionRoute:
+    """Routes one native ACP session back to one code-lite conversation."""
+
+    runtime: str
+    conversation_id: str
+    turn_id: str
+    native_session_id: str
+    output_queue: asyncio.Queue[AgentEvent | None] | None
+    mapper: AcpEventMapper
+    latest_usage: UsageSnapshot | None = None
+    suppress_output: bool = False
+    active_prompt: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def context(self) -> EventContext:
+        return EventContext(
+            conversation_id=self.conversation_id,
+            turn_id=self.turn_id,
+            runtime=self.runtime,
+            native_session_id=self.native_session_id,
+        )
+
+
 class AcpClientHandler:
     """Per-conversation ACP client handler。
 
@@ -102,6 +128,7 @@ class AcpClientHandler:
         self.latest_usage: UsageSnapshot | None = None
         self.stderr_tail: deque[str] = deque(maxlen=50)
         self.suppress_output = False
+        self._routes: dict[str, AcpSessionRoute] = {}
 
     @property
     def context(self) -> EventContext:
@@ -111,6 +138,58 @@ class AcpClientHandler:
             runtime=self.runtime,
             native_session_id=self.native_session_id,
         )
+
+    def register_route(
+        self,
+        *,
+        session_id: str,
+        conversation_id: str,
+        turn_id: str,
+        output_queue: asyncio.Queue[AgentEvent | None],
+        text_baseline: str = "",
+        reasoning_baseline: str = "",
+        suppress_output: bool = False,
+    ) -> AcpSessionRoute:
+        mapper = AcpEventMapper(runtime=self.runtime)
+        mapper.start_turn(
+            text_baseline=text_baseline,
+            reasoning_baseline=reasoning_baseline,
+        )
+        route = AcpSessionRoute(
+            runtime=self.runtime,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            native_session_id=session_id,
+            output_queue=output_queue,
+            mapper=mapper,
+            suppress_output=suppress_output,
+            active_prompt=True,
+        )
+        self._routes[session_id] = route
+        self.native_session_id = session_id
+        return route
+
+    def detach_route(self, session_id: str) -> None:
+        route = self._routes.get(session_id)
+        if route is None:
+            return
+        route.output_queue = None
+        route.active_prompt = False
+
+    def remove_route(self, session_id: str) -> None:
+        self._routes.pop(session_id, None)
+
+    def get_latest_usage(self, session_id: str | None) -> UsageSnapshot | None:
+        if session_id:
+            route = self._routes.get(session_id)
+            if route is not None:
+                return route.latest_usage
+        return self.latest_usage
+
+    def _route_for_session(self, session_id: str | None) -> AcpSessionRoute | None:
+        if not session_id:
+            return None
+        return self._routes.get(session_id)
 
     def observe_stream(self, event: Any) -> None:
         """Raw JSON-RPC observer，追踪 native session ID。"""
@@ -149,12 +228,16 @@ class AcpClientHandler:
 
     async def session_update(self, session_id: str, update: Any, **_: Any) -> None:
         self.native_session_id = session_id
+        route = self._route_for_session(session_id)
         kind = str(getattr(update, "session_update", "unknown"))
 
         if kind == "usage_update":
-            self.latest_usage = extract_usage(update)
+            usage = extract_usage(update)
+            self.latest_usage = usage
+            if route is not None:
+                route.latest_usage = usage
             # 推送 agent.context.updated 事件（供前端 ContextRing 实时更新）
-            usage_dict = self.latest_usage.to_dict()
+            usage_dict = usage.to_dict()
             if usage_dict:
                 await self._put({
                     "type": "agent.context.updated",
@@ -164,10 +247,12 @@ class AcpClientHandler:
                         "nativeSessionId": self.native_session_id,
                         "rawUpdate": sanitize_log_value(to_jsonable(update)),
                     },
-                })
+                }, route=route)
             return
 
-        event = self.mapper.map_update(update, self.context)
+        mapper = route.mapper if route is not None else self.mapper
+        context = route.context if route is not None else self.context
+        event = mapper.map_update(update, context)
         if event is not None:
             if event.get("type") == "agent.raw.update":
                 logger.info(
@@ -176,14 +261,14 @@ class AcpClientHandler:
                     extra={
                         "category": "acp",
                         "runtime": self.runtime,
-                        "conversationId": self.conversation_id,
-                        "turnId": self.turn_id,
+                        "conversationId": context.conversation_id,
+                        "turnId": context.turn_id,
                         "nativeSessionId": self.native_session_id,
                         "stage": "session.update.raw",
                         "fields": {"updateKind": event.get("updateKind")},
                     },
                 )
-            await self._put(event)
+            await self._put(event, route=route)
 
     async def request_permission(
         self,
@@ -193,19 +278,21 @@ class AcpClientHandler:
         **_: Any,
     ) -> Any:
         self.native_session_id = session_id
+        route = self._route_for_session(session_id)
+        context = route.context if route is not None else self.context
         approval_id = f"approval-{uuid.uuid4().hex}"
         future = await self.approvals.create(
             approval_id=approval_id,
-            conversation_id=self.conversation_id,
-            turn_id=self.turn_id,
+            conversation_id=context.conversation_id,
+            turn_id=context.turn_id,
         )
         event = self.mapper.map_permission_request(
             tool_call=tool_call,
             options=options,
-            ctx=self.context,
+            ctx=context,
             approval_id=approval_id,
         )
-        await self._put(event)
+        await self._put(event, route=route)
 
         allowed = await future
         selected = choose_permission_option(options, allowed=allowed)
@@ -238,6 +325,8 @@ class AcpClientHandler:
         )
         if session_id:
             self.native_session_id = session_id
+        route = self._route_for_session(session_id)
+        context = route.context if route is not None else self.context
         requested_schema = _first_dict(
             raw.get("requestedSchema"),
             raw.get("requested_schema"),
@@ -255,8 +344,8 @@ class AcpClientHandler:
         input_id = f"input-{uuid.uuid4().hex}"
         future = await self.inputs.create(
             input_id=input_id,
-            conversation_id=self.conversation_id,
-            turn_id=self.turn_id,
+            conversation_id=context.conversation_id,
+            turn_id=context.turn_id,
         )
         await self._put({
             "type": "agent.input.required",
@@ -271,7 +360,7 @@ class AcpClientHandler:
                 "source": "acp.elicitation.create",
                 "rawInput": sanitize_log_value(raw),
             },
-        })
+        }, route=route)
 
         response = await future
         return _input_response_to_acp(response)
@@ -308,7 +397,16 @@ class AcpClientHandler:
     async def kill_terminal(self, session_id: str, terminal_id: str, **_: Any) -> None:
         return None
 
-    async def _put(self, event: dict[str, Any]) -> None:
+    async def _put(self, event: dict[str, Any], *, route: AcpSessionRoute | None = None) -> None:
+        if route is not None:
+            if route.suppress_output or route.output_queue is None:
+                return
+            await route.output_queue.put({
+                "conversationId": route.conversation_id,
+                "turnId": route.turn_id,
+                **event,
+            })
+            return
         if self.suppress_output:
             return
         await self.output_queue.put({
@@ -334,10 +432,22 @@ class AcpClientHandler:
         }
         if update_kind:
             payload["updateKind"] = update_kind
-        event = self.mapper.map_raw_rpc_event(payload, self.context)
+        session_id = None
+        params = message.get("params")
+        if isinstance(params, dict):
+            raw_session_id = params.get("sessionId") or params.get("session_id")
+            if raw_session_id:
+                session_id = str(raw_session_id)
+        route = self._route_for_session(session_id)
+        context = route.context if route is not None else self.context
+        mapper = route.mapper if route is not None else self.mapper
+        event = mapper.map_raw_rpc_event(payload, context)
         if update_kind:
             event["updateKind"] = update_kind
-        if self.suppress_output:
+        if route is not None:
+            if route.suppress_output or route.output_queue is None:
+                return
+        elif self.suppress_output:
             return
         logger.info(
             "ACP raw JSON-RPC forwarded: %s",
@@ -345,9 +455,9 @@ class AcpClientHandler:
             extra={
                 "category": "acp",
                 "runtime": self.runtime,
-                "conversationId": self.conversation_id,
-                "turnId": self.turn_id,
-                "nativeSessionId": self.native_session_id,
+                "conversationId": context.conversation_id,
+                "turnId": context.turn_id,
+                "nativeSessionId": context.native_session_id,
                 "stage": "jsonrpc.raw",
                 "fields": {
                     "direction": direction,
@@ -357,8 +467,9 @@ class AcpClientHandler:
                 },
             },
         )
-        self.output_queue.put_nowait({
-            "conversationId": self.conversation_id,
-            "turnId": self.turn_id,
+        output_queue = route.output_queue if route is not None else self.output_queue
+        output_queue.put_nowait({
+            "conversationId": context.conversation_id,
+            "turnId": context.turn_id,
             **event,
         })
