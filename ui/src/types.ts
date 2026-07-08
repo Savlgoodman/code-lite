@@ -600,6 +600,8 @@ export interface AcpRuntimeConnectionStatus {
   latestActivityAt?: number | null;
   pid?: number | null;
   ready: boolean;
+  rootPid?: number | null;
+  spawnedAt?: string | null;
   runtime: string;
   sessions: AcpRuntimeSessionStatus[];
   workspace: string;
@@ -608,6 +610,31 @@ export interface AcpRuntimeConnectionStatus {
 export interface AcpRuntimeStatus {
   connectionMode: string;
   connections: AcpRuntimeConnectionStatus[];
+}
+
+export interface AcpRuntimeDisconnectSummary {
+  attemptedConnections: number;
+  closedConnections: number;
+  failedConnections: number;
+}
+
+export interface AcpRuntimeDisconnectResult {
+  closed: boolean;
+  connections: Array<{
+    closed: boolean;
+    pid?: number | null;
+    reason: string;
+    runtime: string;
+    sessions: string[];
+  }>;
+  failed?: Array<{
+    closed: boolean;
+    pid?: number | null;
+    runtime: string;
+  }>;
+  reason: string;
+  runtime?: string;
+  summary: AcpRuntimeDisconnectSummary;
 }
 
 export interface LogFileInfo {

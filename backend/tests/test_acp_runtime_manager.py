@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -22,12 +23,14 @@ class FakeStore:
     def __init__(self, binding: dict[str, Any] | None) -> None:
         self.binding = binding
         self.saved: dict[str, Any] | None = None
+        self.saved_by_conversation: dict[str, dict[str, Any]] = {}
 
     def load_native_session(self, conversation_id: str) -> dict[str, Any] | None:
         return self.binding
 
     def save_native_session(self, conversation_id: str, binding: dict[str, Any]) -> dict[str, Any]:
         self.saved = binding
+        self.saved_by_conversation[conversation_id] = binding
         return binding
 
 
@@ -35,6 +38,9 @@ class FakeSdk:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.next_session_id = "native-created"
+
+    async def close(self) -> None:
+        self.calls.append("close")
 
     async def resume_session(self, **_: Any) -> Any:
         self.calls.append("resume")
@@ -85,6 +91,29 @@ class FakeHandler:
         self.removed_routes.append(session_id)
 
 
+class FakeProcess:
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self.returncode: int | None = None
+        self.kill_calls = 0
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self.returncode = -9
+
+    async def wait(self) -> int:
+        return self.returncode if self.returncode is not None else 0
+
+
+class StubbornFakeProcess(FakeProcess):
+    def kill(self) -> None:
+        self.kill_calls += 1
+
+    async def wait(self) -> int:
+        await asyncio.sleep(10)
+        return 0
+
+
 class LoadObservingSdk(FailingResumeSdk):
     def __init__(self, handler: FakeHandler) -> None:
         super().__init__()
@@ -128,6 +157,9 @@ def make_connection(
     handler: Any,
     resume: bool,
     load: bool,
+    runtime_id: str = "codex",
+    acp_server_kind: str = "codex-acp",
+    pid: int = 1234,
     workspace: str = "H:/code-lite",
     key_workspace: str = "",
     key_conversation_id: str = "",
@@ -139,18 +171,18 @@ def make_connection(
     )
     return AcpRuntimeConnection(
         key=ConnectionKey(
-            runtime_id="codex",
-            acp_server_kind="codex-acp",
+            runtime_id=runtime_id,
+            acp_server_kind=acp_server_kind,
             workspace=key_workspace,
             config_mode="managed",
             conversation_id=key_conversation_id,
             command_fingerprint="cmd",
             env_fingerprint="env",
         ),
-        descriptor=SimpleNamespace(id="codex", acp_server_kind="codex-acp"),
-        command=["codex-acp"],
+        descriptor=SimpleNamespace(id=runtime_id, acp_server_kind=acp_server_kind),
+        command=[f"{runtime_id}-acp"],
         env={},
-        process=SimpleNamespace(returncode=None),
+        process=FakeProcess(pid),
         sdk_connection=sdk,
         initialize_result=SimpleNamespace(agent_capabilities=agent_caps),
         _ready=True,
@@ -341,6 +373,190 @@ class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotEqual(first, second)
         self.assertNotEqual(first.env_fingerprint, second.env_fingerprint)
+
+    async def test_disconnect_runtime_closes_only_matching_connections(self) -> None:
+        store = FakeStore(None)
+        manager = AcpRuntimeManager(
+            conversation_store=store,
+            runtime_config=make_runtime_config(),
+        )
+        codex_handler = FakeHandler()
+        claude_handler = FakeHandler()
+        codex_connection = make_connection(
+            sdk=FakeSdk(),
+            handler=codex_handler,
+            resume=True,
+            load=True,
+            runtime_id="codex",
+            acp_server_kind="codex-acp",
+            pid=1111,
+        )
+        claude_connection = make_connection(
+            sdk=FakeSdk(),
+            handler=claude_handler,
+            resume=True,
+            load=True,
+            runtime_id="claude_code",
+            acp_server_kind="claude-agent-acp",
+            pid=2222,
+        )
+        codex_connection.sessions["conv-codex"] = "native-codex"
+        claude_connection.sessions["conv-claude"] = "native-claude"
+        manager._connections[codex_connection.key] = codex_connection
+        manager._connections[claude_connection.key] = claude_connection
+        manager._session_bindings["conv-codex"] = AcpSessionBinding(
+            conversation_id="conv-codex",
+            agent_id="codex",
+            runtime_id="codex",
+            acp_server_kind="codex-acp",
+            native_session_id="native-codex",
+            workspace="H:/code-lite",
+            config_mode="managed",
+            created_at="2026-07-07T00:00:00Z",
+            updated_at="2026-07-07T00:00:00Z",
+        )
+        manager._session_bindings["conv-claude"] = AcpSessionBinding(
+            conversation_id="conv-claude",
+            agent_id="claude_code",
+            runtime_id="claude_code",
+            acp_server_kind="claude-agent-acp",
+            native_session_id="native-claude",
+            workspace="H:/code-lite",
+            config_mode="managed",
+            created_at="2026-07-07T00:00:00Z",
+            updated_at="2026-07-07T00:00:00Z",
+        )
+
+        async def fake_terminate(pid: int | None, *, timeout: float = 8.0) -> Any:
+            return SimpleNamespace(
+                ok=True,
+                to_dict=lambda: {
+                    "pid": pid,
+                    "attempted": True,
+                    "method": "fake",
+                    "returncode": 0,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": None,
+                },
+            )
+
+        with patch(
+            "code_lite_backend.agents.acp.runtime_manager.terminate_process_tree",
+            side_effect=fake_terminate,
+        ) as terminate:
+            result = await manager.disconnect_runtime("codex", reason="test_disconnect")
+
+        self.assertTrue(result["closed"])
+        self.assertEqual(result["summary"]["closedConnections"], 1)
+        terminate.assert_called_once()
+        self.assertNotIn(codex_connection.key, manager._connections)
+        self.assertIn(claude_connection.key, manager._connections)
+        self.assertNotIn("conv-codex", manager._session_bindings)
+        self.assertIn("conv-claude", manager._session_bindings)
+        self.assertEqual(codex_handler.detached_routes, ["native-codex"])
+        self.assertEqual(codex_handler.removed_routes, ["native-codex"])
+
+    async def test_disconnect_all_reports_failed_process_tree(self) -> None:
+        manager = AcpRuntimeManager(
+            conversation_store=FakeStore(None),
+            runtime_config=make_runtime_config(),
+        )
+        connection = make_connection(
+            sdk=FakeSdk(),
+            handler=FakeHandler(),
+            resume=True,
+            load=True,
+            pid=3333,
+        )
+        connection.process = StubbornFakeProcess(3333)  # type: ignore[assignment]
+        manager._connections[connection.key] = connection
+
+        async def fake_terminate(pid: int | None, *, timeout: float = 8.0) -> Any:
+            return SimpleNamespace(
+                ok=False,
+                to_dict=lambda: {
+                    "pid": pid,
+                    "attempted": True,
+                    "method": "fake",
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "failed",
+                    "error": None,
+                },
+            )
+
+        with patch(
+            "code_lite_backend.agents.acp.runtime_manager.terminate_process_tree",
+            side_effect=fake_terminate,
+        ):
+            result = await manager.disconnect_all(reason="test_failure")
+
+        self.assertFalse(result["closed"])
+        self.assertEqual(result["summary"]["failedConnections"], 1)
+        self.assertEqual(result["failed"][0]["pid"], 3333)
+        self.assertIn(connection.key, manager._connections)
+
+    async def test_ensure_connection_blocks_restart_when_stale_process_survives(self) -> None:
+        manager = AcpRuntimeManager(
+            conversation_store=FakeStore(None),
+            runtime_config=make_runtime_config(),
+        )
+        descriptor = SimpleNamespace(
+            id="codex",
+            acp_server_kind="codex-acp",
+            config_mode="managed",
+        )
+        key = manager._build_key(
+            descriptor,
+            ["codex-acp"],
+            {},
+            Path("H:/workspace"),
+            "conv-1",
+        )
+        connection = make_connection(
+            sdk=FakeSdk(),
+            handler=FakeHandler(),
+            resume=True,
+            load=True,
+            pid=4444,
+        )
+        connection.key = key  # type: ignore[misc]
+        connection._ready = False
+        connection.process = StubbornFakeProcess(4444)  # type: ignore[assignment]
+        manager._connections[key] = connection
+
+        async def fake_terminate(pid: int | None, *, timeout: float = 8.0) -> Any:
+            return SimpleNamespace(
+                ok=False,
+                to_dict=lambda: {
+                    "pid": pid,
+                    "attempted": True,
+                    "method": "fake",
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "failed",
+                    "error": None,
+                },
+            )
+
+        with patch(
+            "code_lite_backend.agents.acp.runtime_manager.terminate_process_tree",
+            side_effect=fake_terminate,
+        ), patch.object(manager, "_spawn_and_initialize") as spawn:
+            with self.assertRaisesRegex(RuntimeError, "旧 ACP Runtime 进程仍未关闭"):
+                await manager.ensure_connection(
+                    descriptor=descriptor,
+                    command=["codex-acp"],
+                    env={},
+                    workspace=Path("H:/workspace"),
+                    conversation_id="conv-1",
+                    approvals=SimpleNamespace(),
+                    inputs=SimpleNamespace(),
+                )
+
+        spawn.assert_not_called()
+        self.assertIn(key, manager._connections)
 
 
 if __name__ == "__main__":

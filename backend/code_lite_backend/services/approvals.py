@@ -45,3 +45,15 @@ class ApprovalBroker:
         for future in futures:
             if not future.done():
                 future.set_result(False)
+
+    async def reject_for_conversations(self, conversation_ids: set[str]) -> None:
+        async with self._lock:
+            matched = [
+                approval_id
+                for approval_id, pending in self._pending.items()
+                if pending.conversation_id in conversation_ids
+            ]
+            futures = [self._pending.pop(approval_id).future for approval_id in matched]
+        for future in futures:
+            if not future.done():
+                future.set_result(False)

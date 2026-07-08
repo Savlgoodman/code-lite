@@ -25,5 +25,20 @@ async def acp_runtime_cleanup(
 ) -> JSONResponse:
     if services.runtime_manager is None:
         return JSONResponse({"closed": False})
-    await services.runtime_manager.close_all()
-    return JSONResponse({"closed": True})
+    result = await services.runtime_manager.disconnect_all(reason="manual_cleanup")
+    return JSONResponse(result)
+
+
+@router.post("/runtimes/acp/{runtime_id}/disconnect")
+async def acp_runtime_disconnect(
+    runtime_id: str,
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    if services.runtime_manager is None:
+        return JSONResponse({"closed": False, "runtime": runtime_id})
+    result = await services.runtime_manager.disconnect_runtime(
+        runtime_id,
+        reason="manual_runtime_disconnect",
+    )
+    status_code = 200 if result.get("closed") else 502
+    return JSONResponse(result, status_code=status_code)

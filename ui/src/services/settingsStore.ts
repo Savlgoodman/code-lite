@@ -1,6 +1,7 @@
 import { ensureBackend } from "./agentClient";
 import type {
   AcpPackageSettingsState,
+  AcpRuntimeDisconnectResult,
   AcpRuntimeStatus,
   AppAboutInfo,
   AgentRuntimeModelsResult,
@@ -141,8 +142,8 @@ export async function loadAcpRuntimeStatus(): Promise<AcpRuntimeStatus> {
   return requestJson<AcpRuntimeStatus>("/api/runtimes/acp/status");
 }
 
-export async function cleanupAcpRuntimes(): Promise<{ closed: boolean }> {
-  return requestJson<{ closed: boolean }>("/api/runtimes/acp/cleanup", {
+export async function cleanupAcpRuntimes(): Promise<AcpRuntimeDisconnectResult> {
+  return requestJson<AcpRuntimeDisconnectResult>("/api/runtimes/acp/cleanup", {
     method: "POST"
   });
 }

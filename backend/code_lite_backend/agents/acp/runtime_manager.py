@@ -23,6 +23,8 @@ from code_lite_backend.agents.acp.client_capabilities import build_client_capabi
 from code_lite_backend.agents.acp.connection import CodeLiteClientSideConnection
 from code_lite_backend.agents.runtimes import RuntimeDescriptor
 from code_lite_backend.core.config import ACP_CONNECTION_MODE_MULTI_SESSION, RuntimeConfig
+from code_lite_backend.core.process_tree import terminate_process_tree
+from code_lite_backend.core.process_utils import hidden_subprocess_kwargs
 from code_lite_backend.services.approvals import ApprovalBroker
 from code_lite_backend.services.inputs import InputBroker
 
@@ -78,6 +80,10 @@ class AcpRuntimeConnection:
     sdk_connection: CodeLiteClientSideConnection
     initialize_result: Any
     stderr_ring_buffer: deque[str] = field(default_factory=lambda: deque(maxlen=20))
+    spawned_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    closed_at: str | None = None
+    close_reason: str | None = None
+    close_result: dict[str, Any] | None = None
     latest_activity_at: float = field(default_factory=time.time)
     sessions: dict[str, str] = field(default_factory=dict)  # conversation_id -> native_session_id
     prompt_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -93,6 +99,38 @@ class AcpRuntimeConnection:
 
     def touch(self) -> None:
         self.latest_activity_at = time.time()
+
+
+@dataclass
+class AcpConnectionCloseResult:
+    """单个 ACP connection 的关闭结果。"""
+
+    runtime: str
+    acp_server_kind: str
+    pid: int | None
+    command: list[str]
+    sessions: list[str]
+    reason: str
+    closed: bool
+    process_tree: dict[str, Any] | None = None
+    sdk_close_error: str | None = None
+    direct_process_error: str | None = None
+    returncode: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "runtime": self.runtime,
+            "acpServerKind": self.acp_server_kind,
+            "pid": self.pid,
+            "command": self.command,
+            "sessions": self.sessions,
+            "reason": self.reason,
+            "closed": self.closed,
+            "processTree": self.process_tree,
+            "sdkCloseError": self.sdk_close_error,
+            "directProcessError": self.direct_process_error,
+            "returncode": self.returncode,
+        }
 
 
 class AcpRuntimeManager:
@@ -115,6 +153,8 @@ class AcpRuntimeManager:
             if runtime_config is not None
             else "per_conversation"
         )
+        self._approvals: ApprovalBroker | None = None
+        self._inputs: InputBroker | None = None
 
     def get_turn_lock(self, conversation_id: str) -> asyncio.Lock:
         """获取指定 conversation 的 turn lock（串行化同一会话的 prompt）。"""
@@ -164,6 +204,8 @@ class AcpRuntimeManager:
         复用同一个 ACP 连接；workspace 只用于 native session cwd。
         """
         key = self._build_key(descriptor, command, env, workspace, conversation_id)
+        self._approvals = approvals
+        self._inputs = inputs
 
         # 已有 ready connection 则复用
         existing = self._connections.get(key)
@@ -174,7 +216,11 @@ class AcpRuntimeManager:
 
         # 清理旧连接（如果存在但不 ready）
         if existing is not None:
-            await self._close_connection(existing)
+            result = await self._close_connection(existing, reason="stale_connection_replaced")
+            if not result.closed:
+                raise RuntimeError(
+                    f"旧 ACP Runtime 进程仍未关闭，已阻止重新启动。runtime={descriptor.id} pid={result.pid}"
+                )
             self._connections.pop(key, None)
 
         # spawn ACP process and create persistent connection
@@ -459,12 +505,6 @@ class AcpRuntimeManager:
                 connection._client_handler.detach_route(native_session_id)
                 connection._client_handler.remove_route(native_session_id)
 
-    async def close_connection(self, key: ConnectionKey) -> None:
-        """关闭指定连接。"""
-        connection = self._connections.pop(key, None)
-        if connection is not None:
-            await self._close_connection(connection)
-
     async def close_session_for_conversation(
         self,
         conversation_id: str,
@@ -512,16 +552,77 @@ class AcpRuntimeManager:
             self._persist_binding(binding)
 
         if close_empty_connection and connection is not None and not connection.sessions:
-            await self.close_connection(connection.key)
+            await self.close_connection(connection.key, reason="empty_session_connection")
 
         return True
 
-    async def close_all(self) -> None:
-        """关闭所有连接。"""
+    async def close_connection(
+        self,
+        key: ConnectionKey,
+        *,
+        reason: str = "close_connection",
+    ) -> dict[str, Any] | None:
+        """关闭指定连接。"""
+        connection = self._connections.get(key)
+        if connection is None:
+            return None
+        result = await self._close_connection(connection, reason=reason)
+        result_dict = result.to_dict()
+        if result.closed:
+            self._connections.pop(key, None)
+        return result_dict
+
+    async def disconnect_runtime(
+        self,
+        runtime_id: str,
+        *,
+        reason: str,
+        clear_bindings: bool = True,
+    ) -> dict[str, Any]:
+        """彻底断开指定 runtime 的所有 ACP connection 和进程树。"""
+        matching_keys = [
+            key for key, connection in self._connections.items()
+            if connection.key.runtime_id == runtime_id
+        ]
+        results: list[dict[str, Any]] = []
+        for key in matching_keys:
+            result = await self.close_connection(key, reason=reason)
+            if result is not None:
+                results.append(result)
+        summary = self._disconnect_summary(results)
+        if clear_bindings and summary["failedConnections"] == 0:
+            self._clear_bindings_for_runtime(runtime_id)
+        return {
+            "closed": summary["failedConnections"] == 0,
+            "reason": reason,
+            "runtime": runtime_id,
+            "summary": summary,
+            "connections": results,
+            "failed": [item for item in results if not item.get("closed")],
+        }
+
+    async def disconnect_all(self, *, reason: str) -> dict[str, Any]:
+        """彻底断开所有 ACP connection 和进程树。"""
+        results: list[dict[str, Any]] = []
         for key in list(self._connections.keys()):
-            await self.close_connection(key)
-        self._session_bindings.clear()
-        self._turn_locks.clear()
+            result = await self.close_connection(key, reason=reason)
+            if result is not None:
+                results.append(result)
+        summary = self._disconnect_summary(results)
+        if summary["failedConnections"] == 0:
+            self._session_bindings.clear()
+            self._turn_locks.clear()
+        return {
+            "closed": summary["failedConnections"] == 0,
+            "reason": reason,
+            "summary": summary,
+            "connections": results,
+            "failed": [item for item in results if not item.get("closed")],
+        }
+
+    async def close_all(self) -> dict[str, Any]:
+        """关闭所有连接。保留旧调用名，内部使用强断开。"""
+        return await self.disconnect_all(reason="backend_shutdown")
 
     def remove_session_binding(self, conversation_id: str) -> None:
         """移除会话绑定（不清理 native session，只移除产品层映射）。"""
@@ -562,6 +663,8 @@ class AcpRuntimeManager:
                 "configMode": connection.key.config_mode,
                 "conversationKey": connection.key.conversation_id,
                 "pid": connection.process.pid,
+                "rootPid": connection.process.pid,
+                "spawnedAt": connection.spawned_at,
                 "ready": connection.is_ready,
                 "activeSessions": len(connection.sessions),
                 "latestActivityAt": connection.latest_activity_at,
@@ -664,6 +767,9 @@ class AcpRuntimeManager:
         logger.info("[spawn] runtime=%s command=%s cwd=%s", descriptor.id, command, workspace)
 
         # spawn 子进程
+        subprocess_kwargs = hidden_subprocess_kwargs()
+        if os.name != "nt":
+            subprocess_kwargs["start_new_session"] = True
         try:
             process = await asyncio.create_subprocess_exec(
                 command[0],
@@ -674,6 +780,7 @@ class AcpRuntimeManager:
                 env=merged_env,
                 cwd=str(workspace),
                 limit=DEFAULT_STDIO_BUFFER_LIMIT_BYTES,
+                **subprocess_kwargs,
             )
         except FileNotFoundError:
             logger.error(
@@ -697,8 +804,10 @@ class AcpRuntimeManager:
         )
 
         if process.stdout is None or process.stdin is None:
-            process.kill()
-            await process.wait()
+            await terminate_process_tree(process.pid)
+            with contextlib.suppress(Exception):
+                process.kill()
+                await process.wait()
             raise RuntimeError("ACP process requires stdout/stdin pipes")
 
         # 创建 client handler（用于回调）
@@ -755,13 +864,7 @@ class AcpRuntimeManager:
                 process.returncode, stderr_dump or "(empty)",
                 extra={"category": "acp", "runtime": descriptor.id, "stage": "initialize"},
             )
-            with contextlib.suppress(Exception):
-                process.kill()
-            with contextlib.suppress(Exception):
-                await process.wait()
-            stderr_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await stderr_task
+            await self._cleanup_failed_spawn(process, stderr_task)
             raise
         except Exception as exc:
             stderr_dump = "\n".join(client_handler.stderr_tail)
@@ -770,13 +873,7 @@ class AcpRuntimeManager:
                 type(exc).__name__, exc, process.returncode, stderr_dump or "(empty)",
                 extra={"category": "acp", "runtime": descriptor.id, "stage": "initialize"},
             )
-            with contextlib.suppress(Exception):
-                process.kill()
-            with contextlib.suppress(Exception):
-                await process.wait()
-            stderr_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await stderr_task
+            await self._cleanup_failed_spawn(process, stderr_task)
             raise
 
         connection = AcpRuntimeConnection(
@@ -823,33 +920,148 @@ class AcpRuntimeManager:
         except (asyncio.CancelledError, Exception):
             pass
 
-    async def _close_connection(self, connection: AcpRuntimeConnection) -> None:
-        connection._ready = False
+    async def _cleanup_failed_spawn(
+        self,
+        process: aio_subprocess.Process,
+        stderr_task: asyncio.Task[None],
+    ) -> None:
+        await terminate_process_tree(process.pid)
+        if getattr(process, "returncode", None) is None:
+            with contextlib.suppress(Exception):
+                process.kill()
+                await asyncio.wait_for(process.wait(), timeout=3)
+        stderr_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stderr_task
 
-        # 取消 stderr 任务
+    async def _close_connection(
+        self,
+        connection: AcpRuntimeConnection,
+        *,
+        reason: str,
+    ) -> AcpConnectionCloseResult:
+        pid = int(connection.process.pid) if getattr(connection.process, "pid", None) else None
+        sessions = list(connection.sessions.keys())
+        connection._ready = False
+        connection.close_reason = reason
+
+        if sessions and self._approvals is not None:
+            with contextlib.suppress(Exception):
+                await self._approvals.reject_for_conversations(set(sessions))
+        if sessions and self._inputs is not None:
+            with contextlib.suppress(Exception):
+                await self._inputs.cancel_for_conversations(set(sessions))
+
+        handler = connection._client_handler
+        if handler is not None:
+            for native_session_id in list(connection.sessions.values()):
+                handler.detach_route(native_session_id)
+                handler.remove_route(native_session_id)
+
+        process_tree_result = await terminate_process_tree(pid, timeout=8)
+
         if connection._stderr_task is not None:
             connection._stderr_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await connection._stderr_task
 
-        # 关闭 SDK connection
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(connection.sdk_connection.close(), timeout=5)
+        sdk_close_error: str | None = None
+        try:
+            await asyncio.wait_for(connection.sdk_connection.close(), timeout=2)
+        except Exception as exc:
+            sdk_close_error = f"{type(exc).__name__}: {exc}"
 
-        # 关闭进程
-        if connection.process.returncode is None:
-            try:
-                connection.process.terminate()
-            except ProcessLookupError:
-                pass
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(connection.process.wait(), timeout=5)
-            if connection.process.returncode is None:
-                with contextlib.suppress(Exception):
-                    connection.process.kill()
-                    await asyncio.wait_for(connection.process.wait(), timeout=3)
+        direct_process_error = await self._finalize_direct_process(connection)
+        closed = self._connection_closed(connection, process_tree_result)
+        result = AcpConnectionCloseResult(
+            runtime=connection.descriptor.id,
+            acp_server_kind=connection.descriptor.acp_server_kind,
+            pid=pid,
+            command=list(connection.command),
+            sessions=sessions,
+            reason=reason,
+            closed=closed,
+            process_tree=process_tree_result.to_dict(),
+            sdk_close_error=sdk_close_error,
+            direct_process_error=direct_process_error,
+            returncode=getattr(connection.process, "returncode", None),
+        )
+        result_dict = result.to_dict()
+        if closed:
+            connection.sessions.clear()
+        connection.closed_at = _now_iso()
+        connection.close_result = result_dict
+        logger.info(
+            "Closed ACP connection for %s pid=%s closed=%s reason=%s",
+            connection.descriptor.id,
+            pid,
+            closed,
+            reason,
+            extra={
+                "category": "acp",
+                "runtime": connection.descriptor.id,
+                "stage": "disconnect.connection",
+                "fields": {
+                    "pid": pid,
+                    "reason": reason,
+                    "closed": closed,
+                    "processTree": result_dict.get("processTree"),
+                    "sdkCloseError": sdk_close_error,
+                    "directProcessError": direct_process_error,
+                    "sessions": sessions,
+                },
+            },
+        )
+        return result
 
-        logger.info("Closed ACP connection for %s", connection.descriptor.id)
+    async def _finalize_direct_process(self, connection: AcpRuntimeConnection) -> str | None:
+        process = connection.process
+        if getattr(process, "returncode", None) is None:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=1)
+        if getattr(process, "returncode", None) is not None:
+            return None
+
+        try:
+            process.kill()
+        except ProcessLookupError:
+            return None
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+        try:
+            await asyncio.wait_for(process.wait(), timeout=3)
+        except asyncio.TimeoutError:
+            return "timeout waiting for direct process after kill"
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+        return None
+
+    @staticmethod
+    def _connection_closed(connection: AcpRuntimeConnection, process_tree_result: Any) -> bool:
+        if getattr(connection.process, "returncode", None) is not None:
+            return True
+        return bool(getattr(process_tree_result, "ok", False))
+
+    def _clear_bindings_for_runtime(self, runtime_id: str) -> None:
+        for conversation_id, binding in list(self._session_bindings.items()):
+            if binding.runtime_id != runtime_id:
+                continue
+            binding.state = "runtime_disconnected"
+            binding.updated_at = _now_iso()
+            self._persist_binding(binding)
+            self._session_bindings.pop(conversation_id, None)
+            self._turn_locks.pop(conversation_id, None)
+
+    @staticmethod
+    def _disconnect_summary(results: list[dict[str, Any]]) -> dict[str, int]:
+        closed = sum(1 for item in results if item.get("closed"))
+        failed = len(results) - closed
+        return {
+            "closedConnections": closed,
+            "failedConnections": failed,
+            "attemptedConnections": len(results),
+        }
 
     def _build_key(
         self,

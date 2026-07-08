@@ -722,6 +722,7 @@ function AcpConnectionSettings() {
   const [isLoading, setIsLoading] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
 
   async function refreshStatus() {
     setIsLoading(true);
@@ -738,8 +739,13 @@ function AcpConnectionSettings() {
   async function cleanupConnections() {
     setIsCleaning(true);
     setError(null);
+    setCleanupMessage(null);
     try {
-      await cleanupAcpRuntimes();
+      const result = await cleanupAcpRuntimes();
+      const summary = result.summary;
+      setCleanupMessage(
+        `已断开 ${summary.closedConnections} 个 ACP 连接，失败 ${summary.failedConnections} 个。`
+      );
       await refreshStatus();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -779,12 +785,13 @@ function AcpConnectionSettings() {
             type="button"
           >
             <X size={14} />
-            <span>{isCleaning ? "释放中" : "释放全部连接"}</span>
+            <span>{isCleaning ? "断开中" : "彻底断开全部连接"}</span>
           </button>
         </div>
       </div>
 
       {error ? <div className="settings-inline-error">ACP 连接状态获取失败：{error}</div> : null}
+      {cleanupMessage ? <div className="settings-inline-success">{cleanupMessage}</div> : null}
 
       <div className="acp-status-summary">
         <div>

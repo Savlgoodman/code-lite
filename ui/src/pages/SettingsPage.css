@@ -539,6 +539,16 @@
   line-height: 1.5;
 }
 
+.settings-inline-success {
+  margin-top: 12px;
+  border: 1px solid #b8d7c0;
+  border-radius: 8px;
+  background: #f4fbf5;
+  padding: 9px 11px;
+  color: #276738;
+  line-height: 1.5;
+}
+
 .settings-empty {
   padding: 24px;
   color: #7d8289;

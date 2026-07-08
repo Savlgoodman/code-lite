@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from code_lite_backend.api.dependencies import get_services
 from code_lite_backend.core.process_utils import run_hidden
 from code_lite_backend.core.paths import REPO_ROOT
-from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigError
+from code_lite_backend.services.agent_runtime_config import ACP_RUNTIME_IDS, AgentRuntimeConfigError
 from code_lite_backend.services.model_config import ModelConfigError
 from code_lite_backend.services.runtime import AppServices
 from code_lite_backend.version import APP_VERSION, BACKEND_VERSION
@@ -254,6 +254,56 @@ def _probe_models(base_url: str, api_key: str) -> dict[str, Any]:
     raise RuntimeError(last_error)
 
 
+async def _disconnect_acp_runtime_before_settings_change(
+    services: AppServices,
+    runtime_id: str,
+    *,
+    reason: str,
+) -> JSONResponse | None:
+    if runtime_id not in ACP_RUNTIME_IDS or services.runtime_manager is None:
+        return None
+    result = await services.runtime_manager.disconnect_runtime(runtime_id, reason=reason)
+    if result.get("closed"):
+        return None
+    return JSONResponse(
+        {
+            "error": "ACP Runtime 仍在运行，无法安全修改设置或安装包。请手动结束残留进程后重试。",
+            "disconnect": result,
+        },
+        status_code=409,
+    )
+
+
+async def _disconnect_acp_runtimes_before_settings_change(
+    services: AppServices,
+    runtime_ids: list[str],
+    *,
+    reason: str,
+) -> JSONResponse | None:
+    failures: list[dict[str, Any]] = []
+    for runtime_id in runtime_ids:
+        error_response = await _disconnect_acp_runtime_before_settings_change(
+            services,
+            runtime_id,
+            reason=reason,
+        )
+        if error_response is not None:
+            try:
+                payload = json.loads(error_response.body.decode("utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                payload = {"runtime": runtime_id}
+            failures.append(payload)
+    if not failures:
+        return None
+    return JSONResponse(
+        {
+            "error": "部分 ACP Runtime 未能彻底断开，已阻止本次设置修改或安装。",
+            "failures": failures,
+        },
+        status_code=409,
+    )
+
+
 @router.get("/settings/about")
 async def settings_about(services: AppServices = Depends(get_services)) -> dict[str, Any]:
     return await asyncio.to_thread(_collect_about_info, services)
@@ -304,12 +354,26 @@ async def update_acp_package_settings(
     try:
         runtime_id = str(payload.get("runtimeId") or "").strip()
         if runtime_id:
+            disconnect_error = await _disconnect_acp_runtime_before_settings_change(
+                services,
+                runtime_id,
+                reason="acp_package_dir_update",
+            )
+            if disconnect_error is not None:
+                return disconnect_error
             settings = await asyncio.to_thread(
                 services.agent_runtime_config_store.update_acp_package_dir,
                 runtime_id,
                 str(payload.get("packageDir") or payload.get("packageRoot") or ""),
             )
         else:
+            disconnect_error = await _disconnect_acp_runtimes_before_settings_change(
+                services,
+                ["codex", "claude_code"],
+                reason="acp_package_root_update",
+            )
+            if disconnect_error is not None:
+                return disconnect_error
             settings = await asyncio.to_thread(
                 services.agent_runtime_config_store.update_acp_package_root,
                 str(payload.get("packageRoot") or ""),
@@ -324,11 +388,19 @@ async def install_acp_packages(
     payload: dict[str, Any] | None = None,
     services: AppServices = Depends(get_services),
 ) -> JSONResponse:
+    requested_runtime_id = str((payload or {}).get("runtimeId") or "").strip() or None
+    disconnect_error = await _disconnect_acp_runtimes_before_settings_change(
+        services,
+        [requested_runtime_id] if requested_runtime_id else ["codex", "claude_code"],
+        reason="acp_package_install",
+    )
+    if disconnect_error is not None:
+        return disconnect_error
     try:
         settings = await asyncio.to_thread(
             services.agent_runtime_config_store.install_acp_packages,
             update=bool((payload or {}).get("update")),
-            runtime_id=str((payload or {}).get("runtimeId") or "").strip() or None,
+            runtime_id=requested_runtime_id,
         )
     except AgentRuntimeConfigError as error:
         return JSONResponse({"error": str(error)}, status_code=400)
@@ -382,6 +454,17 @@ async def update_agent_runtime(
     payload: dict[str, Any],
     services: AppServices = Depends(get_services),
 ) -> JSONResponse:
+    if any(
+        key in payload
+        for key in ("runtimeExecutable", "codexPath", "command", "configMode", "mode", "enabled")
+    ):
+        disconnect_error = await _disconnect_acp_runtime_before_settings_change(
+            services,
+            runtime_id,
+            reason="runtime_config_update",
+        )
+        if disconnect_error is not None:
+            return disconnect_error
     try:
         runtime = await asyncio.to_thread(
             services.agent_runtime_config_store.update_runtime,
@@ -398,6 +481,13 @@ async def install_agent_runtime(
     runtime_id: str,
     services: AppServices = Depends(get_services),
 ) -> JSONResponse:
+    disconnect_error = await _disconnect_acp_runtime_before_settings_change(
+        services,
+        runtime_id,
+        reason="runtime_install",
+    )
+    if disconnect_error is not None:
+        return disconnect_error
     try:
         runtime = await asyncio.to_thread(
             services.agent_runtime_config_store.install_runtime,
