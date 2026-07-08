@@ -151,10 +151,10 @@ def resolve_runtime_config(
     ).strip().lower()
     acp_connection_mode = os.environ.get(
         ACP_CONNECTION_MODE_ENV_NAME,
-        ACP_CONNECTION_MODE_PER_CONVERSATION,
+        ACP_CONNECTION_MODE_MULTI_SESSION,
     ).strip().lower()
     if acp_connection_mode not in ACP_CONNECTION_MODES:
-        acp_connection_mode = ACP_CONNECTION_MODE_PER_CONVERSATION
+        acp_connection_mode = ACP_CONNECTION_MODE_MULTI_SESSION
 
     return RuntimeConfig(
         env=env,

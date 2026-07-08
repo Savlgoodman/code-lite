@@ -103,13 +103,14 @@ def make_connection(*, sdk: Any, handler: Any, resume: bool, load: bool) -> AcpR
     return AcpRuntimeConnection(
         key=ConnectionKey(
             runtime_id="codex",
+            acp_server_kind="codex-acp",
             workspace="H:/codex-lite",
             config_mode="managed",
             conversation_id="conv-1",
             command_fingerprint="cmd",
             env_fingerprint="env",
         ),
-        descriptor=SimpleNamespace(id="codex"),
+        descriptor=SimpleNamespace(id="codex", acp_server_kind="codex-acp"),
         command=["codex-acp"],
         env={},
         process=SimpleNamespace(returncode=None),

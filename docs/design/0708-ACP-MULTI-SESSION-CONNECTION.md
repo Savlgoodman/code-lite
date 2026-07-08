@@ -697,7 +697,7 @@ conversation_pool
 2. 增加 `CODE_LITE_ACP_CONNECTION_MODE`：
    - `per_conversation`
    - `multi_session`
-3. 默认仍为 `per_conversation`，方便回滚。
+3. 默认使用 `multi_session`；`per_conversation` 仅作为回滚开关保留。
 
 验证：
 
@@ -831,7 +831,7 @@ demo/acp-demo/multi_session_probe.py
 ## 16. 回滚策略
 
 1. 保留 `per_conversation` 模式至少一个版本。
-2. `multi_session` 初期只在开发设置或实验开关中启用。
+2. 默认路径为 `multi_session`；只有 runtime smoke 不稳定或用户显式配置时才回到 `per_conversation`。
 3. runtime profile 可单独声明：
 
 ```python
