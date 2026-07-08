@@ -7,9 +7,10 @@
 本文中的“连接管理”不是传统意义上的多连接 pool。一期目标是：
 
 ```text
-每个 runtime/workspace/config/command/env key 最多 1 条 ACP connection
+每个 runtime/acpServerKind/config/command/env key 最多 1 条 ACP connection
 每条 ACP connection 承载多个 native session
 每个 native session 绑定一个 code-lite conversation
+workspace 只作为 native session 的 cwd，不再参与默认 connection key
 ```
 
 未来如果某个 runtime 需要多条并行连接，才在这个 manager 之上扩展真正的 pool。
@@ -70,7 +71,7 @@ ACP 协议层支持一个连接承载多个 session，这不是 code-lite 自己
 
 ## 3. 目标
 
-1. 同一 runtime、workspace、config mode、command/env fingerprint 下，优先复用一个 ACP connection。
+1. 同一 runtime、acpServerKind、config mode、command/env fingerprint 下，优先复用一个 ACP connection。
 2. 每个 code-lite conversation 仍绑定独立 native ACP session。
 3. 通过 `sessionId -> route` 路由 ACP 回调事件，避免事件串流。
 4. 空闲 session 可 `session/close` 后释放 runtime 资源，保留 `native-session.json` 用于后续 `session/resume` 或 `session/load`。
@@ -107,19 +108,22 @@ code-lite 不能把所有 ACP runtime 看成同一种连接。Codex、Claude Cod
 
 ```text
 Codex family
-  key: runtimeId=codex, acpServerKind=codex-acp, workspace, configMode, command/env
+  key: runtimeId=codex, acpServerKind=codex-acp, configMode, command/env
   connection: codex-acp process
   sessions: Codex native sessions only
+  each session: cwd = conversation.workspace
 
 Claude Code family
-  key: runtimeId=claude_code, acpServerKind=claude-agent-acp, workspace, configMode, command/env
+  key: runtimeId=claude_code, acpServerKind=claude-agent-acp, configMode, command/env
   connection: claude-agent-acp process
   sessions: Claude Code native sessions only
+  each session: cwd = conversation.workspace
 
 opencode family
-  key: runtimeId=opencode, acpServerKind=opencode-acp, workspace, configMode, command/env
+  key: runtimeId=opencode, acpServerKind=opencode-acp, configMode, command/env
   connection: opencode acp process
   sessions: opencode native sessions only
+  each session: cwd = conversation.workspace
 ```
 
 禁止行为：
@@ -127,7 +131,7 @@ opencode family
 1. Codex conversation 不能 resume 到 Claude Code connection。
 2. 不同 `acpServerKind` 的 native session id 不能互相解释。
 3. command/env/config 变化后不能复用旧 connection。
-4. 不同 workspace 默认不共用 connection。
+4. 不同 workspace 默认共用同一 runtime connection，但必须在每个 native session 的 `cwd` 和 binding 中保持隔离。
 
 ### 5.3 绑定数据必须带类型
 
@@ -149,8 +153,9 @@ opencode family
 
 1. 当前 conversation 绑定的 agent 与 `native-session.json.agentId` 一致。
 2. 当前 descriptor 的 `runtimeId`、`acpServerKind` 与绑定一致。
-3. 当前 workspace/config mode 可接受。
-4. 不一致时不要 resume/load，创建新 native session，并记录 warning。
+3. 当前 config mode 与绑定一致。
+4. 当前 conversation workspace 与绑定 workspace 一致；不一致时创建新的 native session。
+5. 不一致时不要 resume/load，创建新 native session，并记录 warning。
 
 ## 6. 当前实现问题
 
@@ -161,7 +166,6 @@ opencode family
 ```python
 ConnectionKey(
     runtime_id,
-    workspace,
     config_mode,
     conversation_id,
     command_fingerprint,
@@ -169,19 +173,18 @@ ConnectionKey(
 )
 ```
 
-这会让同一 runtime/workspace 下的每个会话都有独立 ACP process。目标连接键应移除 `conversation_id`：
+这会让同一 runtime 下的每个会话都有独立 ACP process。目标连接键应移除 `conversation_id`，且默认不再包含 `workspace`：
 
 ```python
 ConnectionKey(
     runtime_id,
-    workspace,
     config_mode,
     command_fingerprint,
     env_fingerprint,
 )
 ```
 
-conversation 隔离应由 `AcpSessionBinding` 和 `session route` 保证，而不是靠进程隔离。
+conversation 与 workspace 隔离应由 `AcpSessionBinding`、每个 native session 的 `cwd` 和 `session route` 保证，而不是靠进程隔离。
 
 ### 6.2 Handler 是 per-conversation 假设
 
@@ -234,7 +237,7 @@ AcpRuntimeManager
   -> 保留类名，语义改成 runtime connection manager
 
 ConnectionKey
-  -> 按 runtime/workspace/config/command/env 唯一定位 connection
+  -> 按 runtime/acpServerKind/config/command/env 唯一定位 connection
 
 AcpSessionRoute
   -> native session 到 UI route 的映射
@@ -268,7 +271,7 @@ Python Backend
   -> AcpAgentAdapter
   -> AcpRuntimeConnectionManager
        connections:
-         ConnectionKey(runtime, acpServerKind, workspace, config, command/env)
+         ConnectionKey(runtime, acpServerKind, config, command/env)
            -> AcpRuntimeConnection
                 process
                 sdk_connection
@@ -290,7 +293,6 @@ Python Backend
 class ConnectionKey:
     runtime_id: str
     acp_server_kind: str
-    workspace: str
     config_mode: str
     command_fingerprint: str
     env_fingerprint: str
@@ -393,7 +395,7 @@ Codex / Claude Code / opencode 分别 smoke 后启用
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `max_connections_per_key` | 1 | 同一 runtime/workspace/config 先保留 1 个 ACP connection |
+| `max_connections_per_key` | 1 | 同一 runtime/acpServerKind/config/command/env 先保留 1 个 ACP connection |
 | `max_active_sessions_per_connection` | 4 | 协议无硬上限，产品层先保守限制 |
 | `max_concurrent_prompts_per_connection` | 1 | 第一阶段全局串行 |
 | `idle_session_ttl_seconds` | 600 | session 空闲 10 分钟后 close |
@@ -595,7 +597,7 @@ POST /api/conversations/{conversation_id}/runtime/close
 
 1. 当前 ACP 连接数。
 2. 当前 active native session 数。
-3. 每个 connection 的 runtime、workspace、pid、idle 时长。
+3. 每个 connection 的 runtime、pid、idle 时长，以及 connection 下各 session 的 workspace/cwd。
 4. 手动“释放空闲连接”按钮。
 5. 会话详情中可选显示 native session 状态：active、idle closed、restored。
 
@@ -711,13 +713,13 @@ uv run --project backend python -m py_compile backend/code_lite_backend/agents/a
 
 1. `ConnectionKey` 移除 `conversation_id`。
 2. `ConnectionKey` 增加或明确 `runtime_id`、`acp_server_kind`。
-3. `ensure_connection()` 按 runtime/acpServerKind/workspace/config/command/env 复用连接。
+3. `ensure_connection()` 按 runtime/acpServerKind/config/command/env 复用连接。
 4. 保持 connection-level prompt lock，所有 prompt 先串行。
 5. 保留旧模式分支。
 
 验收：
 
-1. 打开两个会话时只启动一个同 runtime/workspace 的 ACP process。
+1. 打开两个同 runtime 的不同 workspace 会话时，只启动一个同 runtime 的 ACP process。
 2. 每个会话仍创建独立 native session。
 3. 不发生事件串流。
 
@@ -781,7 +783,7 @@ uv run --project backend python -m py_compile backend/code_lite_backend/agents/a
 
 ### 12.1 单元测试
 
-1. `ConnectionKey` 不含 conversation 后的复用行为。
+1. `ConnectionKey` 不含 conversation/workspace 后的 runtime 级复用行为。
 2. `AcpSessionRoute` 根据 `sessionId` 路由事件。
 3. 缺失 `sessionId` 的 callback 产生 diagnostic。
 4. idle session LRU 选择。
@@ -825,7 +827,7 @@ demo/acp-demo/multi_session_probe.py
 | `session/load` replay 污染当前 UI | 旧消息重复显示 | load 阶段强制 suppress output，并维护 text baseline |
 | 多 session 共用 MCP server 配置导致状态共享 | 工具状态混淆 | session/new/resume/load 每次传完整 mcpServers/cwd/additionalDirectories |
 | idle cleanup 误关正在等待审批的 session | 用户审批丢失 | pending approval/input 算 active；cleanup 跳过 |
-| connection manager bug 影响同 runtime/workspace 的会话 | blast radius 变大 | feature flag 回滚；runtime status 可见；日志带 connection key 和 sessionId |
+| connection manager bug 影响同 runtime 的会话 | blast radius 变大 | feature flag 回滚；runtime status 可见；日志带 connection key 和 sessionId |
 | runtime 类型混淆 | Codex session 被拿去 Claude connection 恢复 | binding 持久化 agentId/runtimeId/acpServerKind，恢复前强校验 |
 
 ## 16. 回滚策略
@@ -843,7 +845,7 @@ supports_multi_session_connection: bool = False
 
 ## 17. 验收标准
 
-1. 同一 runtime/acpServerKind/workspace 下打开 3 个会话，只保留 1 个 ACP process。
+1. 同一 runtime/acpServerKind 下打开 3 个不同 workspace 会话，只保留 1 个 ACP process。
 2. 3 个会话各自拥有不同 native sessionId。
 3. 任意 session 的 text/tool/approval/input 事件都不会出现在其他 conversation。
 4. 空闲 session 超过 TTL 后会被 close 或随 idle connection 关闭释放。
@@ -855,11 +857,11 @@ supports_multi_session_connection: bool = False
 
 ## 18. 最终决策
 
-code-lite 后续应向“runtime/workspace 级 ACP connection manager + conversation 级 native session”迁移。
+code-lite 后续应向“runtime 级 ACP connection manager + conversation 级 native session”迁移。
 
 稳定边界如下：
 
-1. ACP connection 是可复用的进程/通信通道，但按 runtime/acpServerKind/workspace/config 隔离。
+1. ACP connection 是可复用的进程/通信通道，按 runtime/acpServerKind/config/command/env 隔离；workspace 只作为 native session 的 cwd 和 binding 字段。
 2. Codex、Claude Code、opencode 分别连接自己的 ACP server wrapper，不能混用 session。
 3. native ACP session 是 conversation 上下文边界，不能跨会话复用。
 4. UI event 路由必须以 `sessionId` 为第一键，以 `conversationId` 为产品层投影键。
