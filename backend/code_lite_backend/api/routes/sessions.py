@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from pathlib import Path
 from typing import Any
 
 import acp
@@ -43,8 +44,7 @@ def _log_session_diagnostic(
     stderr_tail = list(connection.stderr_ring_buffer) if connection is not None else []
     native_session_id = None
     if connection is not None:
-        binding = connection.sessions.get(conversation_id)
-        native_session_id = binding.native_session_id if binding is not None else None
+        native_session_id = connection.sessions.get(conversation_id)
     diagnostic = DiagnosticError(
         code=code,
         message=message,
@@ -80,12 +80,17 @@ async def initialize_session(
 
     # 优先从会话绑定的 agent 解析，其次 fallback 到全局 activeAdapter
     persisted_agent = None
+    persisted_workspace: Path | None = None
     if conversation_id and not conversation_id.startswith("__"):
         persisted = services.conversation_store.get_conversation(conversation_id)
         if persisted and isinstance(persisted.get("session"), dict):
-            raw_agent = persisted["session"].get("agent")
+            session = persisted["session"]
+            raw_agent = session.get("agent")
             if isinstance(raw_agent, dict):
                 persisted_agent = str(raw_agent.get("id") or "").strip() or None
+            raw_workspace = session.get("workspace")
+            if isinstance(raw_workspace, str) and raw_workspace.strip():
+                persisted_workspace = Path(raw_workspace.strip())
         logger.info("  persisted_agent from session: %s", persisted_agent)
     else:
         logger.info("  conversation_id starts with __, skipping persisted agent lookup")
@@ -120,6 +125,7 @@ async def initialize_session(
             descriptor=descriptor,
             services=services,
             conversation_id=conversation_id,
+            workspace=persisted_workspace or services.workspace,
         )
         logger.info("  SUCCESS — modes=%d models=%d configOptions=%d",
                     len(caps.modes), len(caps.models), len(caps.config_options))
@@ -166,6 +172,7 @@ async def _initialize_acp_session(
     descriptor: Any,
     services: AppServices,
     conversation_id: str,
+    workspace: Path,
 ) -> SessionCapabilities:
     """通过 RuntimeManager 复用连接和 session 来构建 SessionCapabilities。"""
     profile = get_runtime_profile(agent_id)
@@ -178,6 +185,7 @@ async def _initialize_acp_session(
 
     logger.info("  command: %s", command)
     logger.info("  default_mode: %s", default_mode)
+    logger.info("  workspace: %s", workspace)
 
     runtime_manager = services.runtime_manager
     if runtime_manager is None:
@@ -198,7 +206,7 @@ async def _initialize_acp_session(
         descriptor=descriptor,
         command=command,
         env=env,
-        workspace=services.workspace,
+        workspace=workspace,
         conversation_id=conversation_id,
         approvals=services.approvals,
         inputs=services.inputs,
@@ -210,7 +218,7 @@ async def _initialize_acp_session(
     binding = await runtime_manager.ensure_session(
         connection=connection,
         conversation_id=conversation_id,
-        workspace=services.workspace,
+        workspace=workspace,
     )
     logger.info("  Session bound: native_id=%s", binding.native_session_id[:16] if binding.native_session_id else "?")
 
@@ -219,16 +227,23 @@ async def _initialize_acp_session(
     logger.info("  capabilities from binding: %s",
                 "present" if caps_data else "MISSING — will produce empty modes/models")
 
-    result = build_session_capabilities(
-        agent_id=agent_id,
-        agent_label=agent_label,
-        adapter_kind="acp",
-        status=descriptor.status,
-        session_result=_SessionDataWrapper(caps_data),
-        default_mode=default_mode,
-        runtime=descriptor.id,
-    )
-    return result
+    try:
+        return build_session_capabilities(
+            agent_id=agent_id,
+            agent_label=agent_label,
+            adapter_kind="acp",
+            status=descriptor.status,
+            session_result=_SessionDataWrapper(caps_data),
+            default_mode=default_mode,
+            runtime=descriptor.id,
+        )
+    finally:
+        if conversation_id.startswith("__"):
+            await runtime_manager.close_session_for_conversation(
+                conversation_id,
+                delete_binding=True,
+                close_empty_connection=True,
+            )
 
 
 class _SessionDataWrapper:

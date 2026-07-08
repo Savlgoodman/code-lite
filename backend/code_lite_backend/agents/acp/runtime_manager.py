@@ -5,6 +5,7 @@ import asyncio.subprocess as aio_subprocess
 import contextlib
 import hashlib
 import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -131,8 +132,8 @@ class AcpRuntimeManager:
             return None
         for conn in self._connections.values():
             if (
-                conn.key.runtime_id == binding.runtime_id
-                and conn.key.acp_server_kind == binding.acp_server_kind
+                conn.sessions.get(conversation_id) == binding.native_session_id
+                and self._binding_matches_connection(binding, conn)
                 and conn.is_ready
             ):
                 return conn
@@ -212,15 +213,23 @@ class AcpRuntimeManager:
         # 1. 内存中已有绑定则复用
         existing = self._session_bindings.get(conversation_id)
         if existing is not None:
-            if self._binding_matches_connection(existing, connection) and existing.native_session_id in connection.sessions.values():
+            if (
+                self._binding_matches_connection(existing, connection)
+                and connection.sessions.get(conversation_id) == existing.native_session_id
+            ):
                 existing.updated_at = _now_iso()
                 existing.state = "active"
+                self._detach_conversation_from_other_connections(conversation_id, connection)
                 connection.touch()
                 return existing
 
         # 2. 尝试从磁盘恢复
         saved_binding = self.load_binding_from_disk(conversation_id)
-        if saved_binding is not None and saved_binding.native_session_id:
+        if (
+            saved_binding is not None
+            and saved_binding.native_session_id
+            and self._binding_matches_connection(saved_binding, connection)
+        ):
             restored = await self._try_restore_saved_session(
                 connection=connection,
                 binding=saved_binding,
@@ -228,6 +237,11 @@ class AcpRuntimeManager:
             )
             if restored is not None:
                 return restored
+        elif saved_binding is not None and saved_binding.native_session_id:
+            logger.info(
+                "Ignoring native session binding for %s because runtime/workspace no longer matches",
+                conversation_id[:12],
+            )
 
         # 3/4. session/new
         logger.info("[session] calling new_session for %s...", conversation_id[:12])
@@ -270,6 +284,7 @@ class AcpRuntimeManager:
             state="active",
             capabilities=session_data,
         )
+        self._detach_conversation_from_other_connections(conversation_id, connection)
         connection.sessions[conversation_id] = native_session_id
         self._session_bindings[conversation_id] = binding
 
@@ -402,6 +417,7 @@ class AcpRuntimeManager:
         if session_data:
             binding.capabilities = session_data
         binding.updated_at = _now_iso()
+        self._detach_conversation_from_other_connections(binding.conversation_id, connection)
         connection.sessions[binding.conversation_id] = binding.native_session_id
         self._session_bindings[binding.conversation_id] = binding
         self._persist_binding(binding)
@@ -420,7 +436,22 @@ class AcpRuntimeManager:
             binding.runtime_id == connection.descriptor.id
             and binding.acp_server_kind == connection.descriptor.acp_server_kind
             and binding.config_mode == connection.key.config_mode
+            and _workspace_key(binding.workspace) == _workspace_key(connection.key.workspace)
         )
+
+    def _detach_conversation_from_other_connections(
+        self,
+        conversation_id: str,
+        keep_connection: AcpRuntimeConnection | None,
+    ) -> None:
+        """清理同一 conversation 在其他 connection 上的陈旧映射。"""
+        for connection in self._connections.values():
+            if keep_connection is not None and connection.key == keep_connection.key:
+                continue
+            native_session_id = connection.sessions.pop(conversation_id, None)
+            if native_session_id and connection._client_handler is not None:
+                connection._client_handler.detach_route(native_session_id)
+                connection._client_handler.remove_route(native_session_id)
 
     async def close_connection(self, key: ConnectionKey) -> None:
         """关闭指定连接。"""
@@ -842,3 +873,10 @@ class AcpRuntimeManager:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _workspace_key(value: str) -> str:
+    if not value:
+        return ""
+    normalized = os.path.normpath(value).replace("\\", "/")
+    return normalized.rstrip("/").casefold()

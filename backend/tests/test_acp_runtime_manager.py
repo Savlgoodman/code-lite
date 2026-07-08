@@ -33,6 +33,7 @@ class FakeStore:
 class FakeSdk:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.next_session_id = "native-created"
 
     async def resume_session(self, **_: Any) -> Any:
         self.calls.append("resume")
@@ -50,6 +51,15 @@ class FakeSdk:
             modes=None,
         )
 
+    async def new_session(self, **_: Any) -> Any:
+        self.calls.append("new")
+        return SimpleNamespace(
+            config_options=[],
+            models=None,
+            modes=None,
+            session_id=self.next_session_id,
+        )
+
 
 class FailingResumeSdk(FakeSdk):
     async def resume_session(self, **_: Any) -> Any:
@@ -61,9 +71,17 @@ class FakeHandler:
     def __init__(self) -> None:
         self.suppress_output = False
         self.suppression_states: list[bool] = []
+        self.detached_routes: list[str] = []
+        self.removed_routes: list[str] = []
 
     async def record_suppression_state(self) -> None:
         self.suppression_states.append(self.suppress_output)
+
+    def detach_route(self, session_id: str) -> None:
+        self.detached_routes.append(session_id)
+
+    def remove_route(self, session_id: str) -> None:
+        self.removed_routes.append(session_id)
 
 
 class LoadObservingSdk(FailingResumeSdk):
@@ -84,7 +102,9 @@ class LoadObservingSdk(FailingResumeSdk):
 def make_binding() -> dict[str, Any]:
     return {
         "conversationId": "conv-1",
+        "agentId": "codex",
         "runtimeId": "codex",
+        "acpServerKind": "codex-acp",
         "nativeSessionId": "native-1",
         "workspace": "H:/codex-lite",
         "configMode": "managed",
@@ -94,7 +114,14 @@ def make_binding() -> dict[str, Any]:
     }
 
 
-def make_connection(*, sdk: Any, handler: Any, resume: bool, load: bool) -> AcpRuntimeConnection:
+def make_connection(
+    *,
+    sdk: Any,
+    handler: Any,
+    resume: bool,
+    load: bool,
+    workspace: str = "H:/codex-lite",
+) -> AcpRuntimeConnection:
     session_caps = SimpleNamespace(resume=SimpleNamespace() if resume else None)
     agent_caps = SimpleNamespace(
         load_session=load,
@@ -104,7 +131,7 @@ def make_connection(*, sdk: Any, handler: Any, resume: bool, load: bool) -> AcpR
         key=ConnectionKey(
             runtime_id="codex",
             acp_server_kind="codex-acp",
-            workspace="H:/codex-lite",
+            workspace=workspace,
             config_mode="managed",
             conversation_id="conv-1",
             command_fingerprint="cmd",
@@ -162,6 +189,75 @@ class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sdk.calls, ["resume", "load"])
         self.assertEqual(handler.suppression_states, [True])
         self.assertFalse(handler.suppress_output)
+
+    async def test_rebinding_conversation_detaches_stale_connection_mapping(self) -> None:
+        old_handler = FakeHandler()
+        new_handler = FakeHandler()
+        manager = AcpRuntimeManager(conversation_store=FakeStore(None))
+        old_connection = make_connection(
+            sdk=FakeSdk(),
+            handler=old_handler,
+            resume=True,
+            load=True,
+            workspace="H:/old",
+        )
+        new_connection = make_connection(
+            sdk=FakeSdk(),
+            handler=new_handler,
+            resume=True,
+            load=True,
+            workspace="H:/new",
+        )
+        manager._connections[old_connection.key] = old_connection
+        manager._connections[new_connection.key] = new_connection
+        old_connection.sessions["conv-1"] = "native-old"
+
+        manager._session_bindings["conv-1"] = AcpSessionBinding(
+            conversation_id="conv-1",
+            agent_id="codex",
+            runtime_id="codex",
+            acp_server_kind="codex-acp",
+            native_session_id="native-new",
+            workspace="H:/new",
+            config_mode="managed",
+            created_at="2026-07-07T00:00:00Z",
+            updated_at="2026-07-07T00:00:00Z",
+        )
+        new_connection.sessions["conv-1"] = "native-new"
+
+        binding = await manager.ensure_session(
+            connection=new_connection,
+            conversation_id="conv-1",
+            workspace=Path("H:/new"),
+        )
+
+        self.assertEqual(binding.native_session_id, "native-new")
+        self.assertNotIn("conv-1", old_connection.sessions)
+        self.assertEqual(old_handler.detached_routes, ["native-old"])
+        self.assertEqual(old_handler.removed_routes, ["native-old"])
+        self.assertEqual(new_connection.sessions["conv-1"], "native-new")
+
+    async def test_saved_binding_with_different_workspace_is_not_restored(self) -> None:
+        sdk = FakeSdk()
+        sdk.next_session_id = "native-fresh"
+        manager = AcpRuntimeManager(conversation_store=FakeStore(make_binding()))
+        connection = make_connection(
+            sdk=sdk,
+            handler=FakeHandler(),
+            resume=True,
+            load=True,
+            workspace="H:/other",
+        )
+
+        binding = await manager.ensure_session(
+            connection=connection,
+            conversation_id="conv-1",
+            workspace=Path("H:/other"),
+        )
+
+        self.assertEqual(binding.native_session_id, "native-fresh")
+        self.assertEqual(sdk.calls, ["new"])
+        self.assertEqual(connection.sessions["conv-1"], "native-fresh")
 
 
 if __name__ == "__main__":
