@@ -146,7 +146,7 @@ VibeX 还把 runtime event 和 product conversation event 分层：
 class ConnectionKey:
     """连接复用键"""
     runtime_id: str           # e.g. "codex-acp"
-    workspace: str            # e.g. "H:/codex-lite"
+    workspace: str            # e.g. "H:/code-lite"
     config_mode: str          # e.g. "user-native"
     command_fingerprint: str  # 命令路径 hash
     env_fingerprint: str      # 环境变量 key 名 + 脱敏 hash（不含 secret 原文）
@@ -406,7 +406,7 @@ record/<conversationId>/
   "conversationId": "conv_...",
   "runtimeId": "codex-acp",
   "nativeSessionId": "019f...",
-  "workspace": "H:/codex-lite",
+  "workspace": "H:/code-lite",
   "configMode": "user-native",
   "createdAt": "2026-07-04T15:00:00Z",
   "updatedAt": "2026-07-04T15:05:00Z"
@@ -1599,7 +1599,7 @@ ensure_connection(conversation_id)
 ```python
 # 之前（共享）
 connections: {
-  ConnectionKey(runtime="codex", workspace="H:/codex-lite"): AcpRuntimeConnection
+  ConnectionKey(runtime="codex", workspace="H:/code-lite"): AcpRuntimeConnection
 }
 # 一个连接服务所有会话，handler 需要路由表
 

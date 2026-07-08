@@ -64,7 +64,7 @@ Windows 示例：
 
 ```text
 CODE_LITE_ENV=DEV
-H:\codex-lite\data
+H:\code-lite\data
 ```
 
 普通环境示例：
@@ -529,8 +529,8 @@ ToolCallGroup.anchorOffset = firstTool.anchorOffset
 {
   "ok": true,
   "env": "DEV",
-  "dataDir": "H:\\codex-lite\\data",
-  "configPath": "H:\\codex-lite\\data\\config\\agent_runtimes.json",
+  "dataDir": "H:\\code-lite\\data",
+  "configPath": "H:\\code-lite\\data\\config\\agent_runtimes.json",
   "configExists": true,
   "apiKeyPresent": false
 }

@@ -249,7 +249,7 @@ Runtime 原生权限由 adapter 单独映射，例如 Codex sandbox、Claude Cod
   "title": "运行测试命令",
   "summary": "即将执行 npm run ui:build",
   "riskLevel": "medium",
-  "workspace": "H:\\codex-lite",
+  "workspace": "H:\\code-lite",
   "details": {
     "command": "npm run ui:build"
   }

@@ -1,7 +1,7 @@
 # ACP 协议能力调研：Token 统计、上下文压缩、Subagent、多模态
 
 > 调研日期：2026-07-05
-> 调研范围：codex-lite 项目中 Codex ACP 和 Claude Code ACP 的协议能力
+> 调研范围：code-lite 项目中 Codex ACP 和 Claude Code ACP 的协议能力
 > 分支：`research/acp-investigation`
 > ACP SDK 版本：v0.12.2
 
@@ -22,7 +22,7 @@
 
 ### 1.1 结论：可以获取，`PromptResponse.usage` 包含全部分项数据
 
-**`PromptResponse.usage` 字段存在且包含完整的 token 分项数据**，但目前 codex-lite 完全没有读取。
+**`PromptResponse.usage` 字段存在且包含完整的 token 分项数据**，但目前 code-lite 完全没有读取。
 
 ACP 协议定义了两个完全不同的 Usage 结构：
 
@@ -80,7 +80,7 @@ class Usage(BaseModel):
                                 │ total_tokens: 27000   │
                                 └──────────────────────┘
                  │                         │
-          codex-lite 已读取 ✅       codex-lite 未读取 ❌
+          code-lite 已读取 ✅       code-lite 未读取 ❌
           (context ring 展示)       (完整分项数据被忽略)
 ```
 
@@ -304,7 +304,7 @@ export function isContextCompactPrompt(prompt: string | null | undefined): boole
 
 **注意**：VibeX 的 Codex Native Provider（不走 ACP，直接走 Codex app-server JSON-RPC）使用私有协议 `thread/compact/start` + `thread/compacted` 事件。但这是 Codex 私有协议，不是 ACP 标准。
 
-### 2.5 codex-lite 实现建议
+### 2.5 code-lite 实现建议
 
 需要修改的文件：
 
@@ -359,7 +359,7 @@ class ForkSessionResponse(BaseModel):
 
 但 ACP **没有**定义 `task_started`、`agent_spawned`、`delegation_started` 等 subagent 事件类型。
 
-### 3.3 codex-lite 当前状态
+### 3.3 code-lite 当前状态
 
 **完全不存在** subagent / delegation 相关的类型、事件或 UI 组件。
 
@@ -417,7 +417,7 @@ export type ConversationDelegationView = {
 - 耗时（duration_ms）
 - "打开子会话" 按钮（跳转到 child conversation）
 
-### 3.5 codex-lite 实现 subagent 展示的可行方案
+### 3.5 code-lite 实现 subagent 展示的可行方案
 
 由于 ACP 协议没有原生 subagent 事件，有两种方案：
 
@@ -440,7 +440,7 @@ ACP 的 `tool_call` + `tool_call_update` 事件已经在流式传输。当 agent
 
 ## 4. 多模态功能：图片传入
 
-### 4.1 结论：ACP 协议支持，SDK 已提供 `image_block()` 工厂函数，但 codex-lite 全链路未实现
+### 4.1 结论：ACP 协议支持，SDK 已提供 `image_block()` 工厂函数，但 code-lite 全链路未实现
 
 ### 4.2 ACP SDK 已提供图片支持
 
@@ -610,7 +610,7 @@ update_tool_call(...)                     # 更新工具调用
 
 ### 6.1 能力矩阵
 
-| 能力 | ACP 协议支持 | SDK 工具 | codex-lite 现状 | 改进难度 |
+| 能力 | ACP 协议支持 | SDK 工具 | code-lite 现状 | 改进难度 |
 |------|:---:|:---:|:---:|:---:|
 | Token 分项统计 | ✅ `PromptResponse.usage` | ✅ Usage 类 | ❌ 未读取 | 🟢 低 |
 | Context window 使用率 | ✅ `usage_update` | ✅ UsageUpdate 类 | ✅ 已实现 | — |

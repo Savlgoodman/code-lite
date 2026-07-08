@@ -10,7 +10,7 @@ code-lite 当前不是直接调用 Codex 或 Claude Code CLI，而是作为 ACP 
 在 Windows 上，Codex 的托管入口通常是：
 
 ```text
-H:\codex-lite\data\runtimes\acp\codex-acp\1.1.0\node_modules\.bin\codex-acp.cmd
+H:\code-lite\data\runtimes\acp\codex-acp\1.1.0\node_modules\.bin\codex-acp.cmd
 ```
 
 这个 `.cmd` 不是业务逻辑本身，而是 npm 在 Windows 下生成的 launcher shim。它负责找到包内真正的 Node 入口，例如 `@agentclientprotocol/codex-acp/dist/index.js`，再把 stdio 暴露给 code-lite 的 ACP client。

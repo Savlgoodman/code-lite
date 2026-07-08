@@ -107,7 +107,7 @@ def make_binding() -> dict[str, Any]:
         "runtimeId": "codex",
         "acpServerKind": "codex-acp",
         "nativeSessionId": "native-1",
-        "workspace": "H:/codex-lite",
+        "workspace": "H:/code-lite",
         "configMode": "managed",
         "createdAt": "2026-07-07T00:00:00Z",
         "updatedAt": "2026-07-07T00:00:00Z",
@@ -128,7 +128,7 @@ def make_connection(
     handler: Any,
     resume: bool,
     load: bool,
-    workspace: str = "H:/codex-lite",
+    workspace: str = "H:/code-lite",
     key_workspace: str = "",
     key_conversation_id: str = "",
 ) -> AcpRuntimeConnection:
@@ -175,7 +175,7 @@ class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
         binding = await manager.ensure_session(
             connection=connection,
             conversation_id="conv-1",
-            workspace=Path("H:/codex-lite"),
+            workspace=Path("H:/code-lite"),
         )
 
         self.assertEqual(binding.native_session_id, "native-1")
@@ -198,7 +198,7 @@ class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
         binding = await manager.ensure_session(
             connection=connection,
             conversation_id="conv-1",
-            workspace=Path("H:/codex-lite"),
+            workspace=Path("H:/code-lite"),
         )
 
         self.assertEqual(binding.native_session_id, "native-1")

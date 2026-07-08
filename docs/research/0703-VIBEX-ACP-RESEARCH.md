@@ -345,7 +345,7 @@ record/<conversationId>/
   "conversationId": "...",
   "runtimeId": "codex-acp",
   "nativeSessionId": "...",
-  "workspace": "H:/codex-lite",
+  "workspace": "H:/code-lite",
   "configMode": "user-native",
   "createdAt": "...",
   "updatedAt": "..."

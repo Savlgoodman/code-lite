@@ -893,7 +893,7 @@ conversations/{conversation_id}/
   "conversationId": "conv-abc123",
   "runtimeId": "codex",
   "nativeSessionId": "native-xyz",
-  "workspace": "H:/codex-lite",
+  "workspace": "H:/code-lite",
   "createdAt": "2026-07-05T12:00:00Z",
   "capabilities": {...}
 }
