@@ -21,17 +21,19 @@ class AgentRuntimeConfigStoreTest(unittest.TestCase):
         )
         return AgentRuntimeConfigStore(config)
 
-    def test_acp_package_root_can_be_overridden(self) -> None:
+    def test_acp_package_dir_can_be_overridden_per_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = self.make_store(root)
-            package_root = root / "custom-acp"
+            package_dir = root / "custom-codex-acp"
 
-            settings = store.update_acp_package_root(str(package_root))
+            settings = store.update_acp_package_dir("codex", str(package_dir))
 
-            self.assertEqual(settings["packageRoot"], str(package_root.resolve()))
-            self.assertEqual(store.runtime_root(), package_root.resolve())
-            self.assertTrue(store.managed_package_dir("codex").is_relative_to(package_root.resolve()))
+            codex_package = next(item for item in settings["packages"] if item["runtimeId"] == "codex")
+            claude_package = next(item for item in settings["packages"] if item["runtimeId"] == "claude_code")
+            self.assertEqual(codex_package["packageDir"], str(package_dir.resolve()))
+            self.assertNotEqual(claude_package["packageDir"], str(package_dir.resolve()))
+            self.assertEqual(store.managed_package_dir("codex"), package_dir.resolve())
 
     def test_acp_package_settings_reports_empty_root_and_versions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(

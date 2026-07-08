@@ -31,13 +31,12 @@ import {
   deleteModelProvider,
   installAcpPackages,
   loadAcpPackageSettings,
-  loadAgentRuntimeSettings,
   loadAppAbout,
   loadLogFiles,
   loadLogTail,
   loadModelSettings,
   refreshModelProviderModels,
-  updateAcpPackageRoot,
+  updateAcpPackageDir,
   updateConfiguredModel,
   updateDefaultModel,
   updateModelProvider
@@ -45,8 +44,6 @@ import {
 import type {
   AcpPackageSettingsState,
   AppAboutInfo,
-  AgentRuntimeConfig,
-  AgentRuntimeSettingsState,
   ConfiguredModel,
   ConfiguredModelProvider,
   ModelCapabilities,
@@ -58,7 +55,7 @@ import type {
 } from "../types";
 import "./SettingsPage.css";
 
-type SettingsSection = "agents" | "acp" | "providers" | "logs" | "archive" | "about";
+type SettingsSection = "agents" | "providers" | "logs" | "archive" | "about";
 
 interface SettingsPageProps {
   archivedSessions: Session[];
@@ -69,7 +66,6 @@ interface SettingsPageProps {
 
 const settingsMenu = [
   { id: "agents", icon: Package, label: "Agent Runtime" },
-  { id: "acp", icon: Database, label: "ACP 包" },
   { id: "providers", icon: Bot, label: "模型提供商配置" },
   { id: "logs", icon: FileText, label: "日志" },
   { id: "archive", icon: ArchiveRestore, label: "归档会话" },
@@ -212,164 +208,6 @@ function modelEditDraft(model: ConfiguredModel): ModelEditDraft {
   };
 }
 
-function runtimeStatusLabel(runtime: AgentRuntimeConfig) {
-  if (runtime.detected.ok) {
-    return "可用";
-  }
-  if (runtime.status === "planned") {
-    return "待接入";
-  }
-  return "需配置";
-}
-
-function commandText(runtime: AgentRuntimeConfig) {
-  return runtime.command.length > 0 ? runtime.command.join(" ") : "默认使用托管包或 npx";
-}
-
-function runtimeChecks(
-  runtime: AgentRuntimeConfig,
-  settings: AgentRuntimeSettingsState | null,
-): Array<{ detail: string; label: string; ok: boolean; value: string }> {
-  const nodeOk = Boolean(settings?.nodeDetected.ok);
-  const npmOk = Boolean(settings?.npmDetected.ok);
-  const packageVersion = runtime.managedPackage?.installedVersion;
-  return [
-    {
-      detail: runtime.detected.detail ?? commandText(runtime),
-      label: "运行状态",
-      ok: runtime.detected.ok,
-      value: runtime.detected.ok ? "可用" : "需配置"
-    },
-    {
-      detail: runtime.id === "opencode" ? "opencode 使用 system command。" : "ACP npm 包需要 Node/npm。",
-      label: "Node/npm",
-      ok: runtime.id === "opencode" || runtime.id === "nanobot" || (nodeOk && npmOk),
-      value: runtime.id === "opencode" || runtime.id === "nanobot" || (nodeOk && npmOk) ? "pass" : "fail"
-    },
-    {
-      detail: runtime.detected.command?.length ? runtime.detected.command.join(" ") : commandText(runtime),
-      label: "Runtime launcher",
-      ok: runtime.detected.ok,
-      value: runtime.detected.source ?? runtime.distribution
-    },
-    {
-      detail: runtime.managedPackage
-        ? `${runtime.managedPackage.name}${packageVersion ? `@${packageVersion}` : ""}`
-        : "无需托管 ACP 包。",
-      label: "托管包",
-      ok: !runtime.managedPackage || Boolean(packageVersion) || runtime.detected.ok,
-      value: packageVersion ?? (runtime.managedPackage ? "未安装" : "pass")
-    },
-    {
-      detail: runtime.configMode === "isolated" ? "使用 code-lite 隔离配置目录。" : "使用 runtime 本机配置和登录态。",
-      label: "Authentication",
-      ok: true,
-      value: runtime.configMode
-    }
-  ];
-}
-
-function AgentRuntimeSettings() {
-  const [settings, setSettings] = useState<AgentRuntimeSettingsState | null>(null);
-  const [selectedRuntimeId, setSelectedRuntimeId] = useState("codex");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-
-  async function refreshSettings() {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const next = await loadAgentRuntimeSettings();
-      setSettings(next);
-      const selected = next.runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? next.runtimes[0];
-      if (selected) {
-        setSelectedRuntimeId(selected.id);
-      }
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void refreshSettings();
-  }, []);
-
-  const runtimes = settings?.runtimes ?? [];
-  const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0] ?? null;
-  const checks = selectedRuntime ? runtimeChecks(selectedRuntime, settings) : [];
-
-  return (
-    <section className="settings-content-column">
-      <div className="settings-runtime-switcher">
-        {runtimes.map((runtime) => (
-          <button
-            className={`runtime-tab ${runtime.id === selectedRuntime?.id ? "active" : ""}`}
-            key={runtime.id}
-            onClick={() => setSelectedRuntimeId(runtime.id)}
-            title={runtime.label}
-            type="button"
-          >
-            <AgentIcon label={runtime.label} runtimeId={runtime.id} size="sm" />
-            <i className={runtime.detected.ok ? "ok" : ""} />
-          </button>
-        ))}
-        <button className="runtime-refresh" disabled={isLoading} onClick={() => void refreshSettings()} title="刷新" type="button">
-          <RefreshCw className={isLoading ? "spin-icon" : ""} size={16} />
-        </button>
-      </div>
-
-      {selectedRuntime ? (
-        <div className="settings-runtime-title-row">
-          <AgentIcon
-            className="runtime-large-icon"
-            label={selectedRuntime.label}
-            runtimeId={selectedRuntime.id}
-            size="lg"
-          />
-          <div>
-            <div className="settings-runtime-title">
-              <h1>{selectedRuntime.label}</h1>
-            </div>
-            <p>
-              {selectedRuntime.managedPackage?.name ?? selectedRuntime.distribution}
-              {selectedRuntime.managedPackage?.requestedVersion ? ` @ ${selectedRuntime.managedPackage.requestedVersion}` : ""}
-            </p>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="settings-card runtime-check-card">
-        <div className="settings-runtime-section-head">
-          <div>
-            <span>预检查</span>
-            <strong>{selectedRuntime?.detected.detail ?? "等待检测"}</strong>
-          </div>
-          <button className="settings-secondary-button" disabled={isLoading} onClick={() => void refreshSettings()} type="button">
-            <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />
-            <span>立即检查</span>
-          </button>
-        </div>
-        <div className="runtime-check-list">
-          {checks.map((item) => (
-            <div className="runtime-check-row" key={item.label}>
-              <span className={item.ok ? "pass" : "fail"}>{item.ok ? <Check size={14} /> : <X size={14} />}</span>
-              <div>
-                <strong>{item.label}</strong>
-                <p>{item.detail}</p>
-              </div>
-              <i className={item.ok ? "pass" : "fail"}>{item.value}</i>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {error ? <div className="settings-inline-error">{error}</div> : null}
-    </section>
-  );
-}
-
 function acpPackageStateLabel(installed: boolean, needsUpdate: boolean) {
   if (needsUpdate) {
     return "可更新";
@@ -377,9 +215,9 @@ function acpPackageStateLabel(installed: boolean, needsUpdate: boolean) {
   return installed ? "已安装" : "未安装";
 }
 
-function AcpPackageSettings() {
+function AgentRuntimeSettings() {
   const [settings, setSettings] = useState<AcpPackageSettingsState | null>(null);
-  const [packageRootDraft, setPackageRootDraft] = useState("");
+  const [packageDirDrafts, setPackageDirDrafts] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -390,7 +228,7 @@ function AcpPackageSettings() {
     try {
       const next = await loadAcpPackageSettings(options);
       setSettings(next);
-      setPackageRootDraft(next.packageRoot);
+      setPackageDirDrafts(Object.fromEntries(next.packages.map((item) => [item.runtimeId, item.packageDir])));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -398,18 +236,18 @@ function AcpPackageSettings() {
     }
   }
 
-  async function savePackageRoot(nextRoot: string) {
-    const trimmedRoot = nextRoot.trim();
-    if (!trimmedRoot) {
+  async function savePackageDir(runtimeId: string, nextDir: string) {
+    const trimmedDir = nextDir.trim();
+    if (!trimmedDir) {
       setError("ACP 包目录不能为空");
       return;
     }
-    setBusyId("package-root");
+    setBusyId(`${runtimeId}-package-dir`);
     setError(null);
     try {
-      const next = await updateAcpPackageRoot(trimmedRoot);
+      const next = await updateAcpPackageDir(runtimeId, trimmedDir);
       setSettings(next);
-      setPackageRootDraft(next.packageRoot);
+      setPackageDirDrafts(Object.fromEntries(next.packages.map((item) => [item.runtimeId, item.packageDir])));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -417,13 +255,13 @@ function AcpPackageSettings() {
     }
   }
 
-  async function browsePackageRoot() {
-    setBusyId("browse");
+  async function browsePackageDir(runtimeId: string) {
+    setBusyId(`${runtimeId}-browse`);
     setError(null);
     try {
       const selected = await invoke<string | null>("pick_acp_package_directory");
       if (selected) {
-        await savePackageRoot(selected);
+        await savePackageDir(runtimeId, selected);
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -432,15 +270,15 @@ function AcpPackageSettings() {
     }
   }
 
-  async function primaryPackageAction() {
-    const hasMissingPackage = Boolean(settings?.packages.some((item) => !item.installed));
-    if (settings?.packageRootIsEmpty || hasMissingPackage) {
-      setBusyId("install");
+  async function primaryPackageAction(runtimeId: string) {
+    const item = settings?.packages.find((packageItem) => packageItem.runtimeId === runtimeId);
+    if (!item?.installed || item.packageDirIsEmpty) {
+      setBusyId(`${runtimeId}-install`);
       setError(null);
       try {
-        const next = await installAcpPackages();
+        const next = await installAcpPackages({ runtimeId });
         setSettings(next);
-        setPackageRootDraft(next.packageRoot);
+        setPackageDirDrafts(Object.fromEntries(next.packages.map((packageItem) => [packageItem.runtimeId, packageItem.packageDir])));
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : String(requestError));
       } finally {
@@ -451,13 +289,13 @@ function AcpPackageSettings() {
     await refreshSettings({ check: true });
   }
 
-  async function updatePackages() {
-    setBusyId("update");
+  async function updatePackage(runtimeId: string) {
+    setBusyId(`${runtimeId}-update`);
     setError(null);
     try {
-      const next = await installAcpPackages({ update: true });
+      const next = await installAcpPackages({ runtimeId, update: true });
       setSettings(next);
-      setPackageRootDraft(next.packageRoot);
+      setPackageDirDrafts(Object.fromEntries(next.packages.map((item) => [item.runtimeId, item.packageDir])));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -469,60 +307,14 @@ function AcpPackageSettings() {
     void refreshSettings();
   }, []);
 
-  const hasUpdate = Boolean(settings?.packages.some((item) => item.needsUpdate));
-  const hasMissingPackage = Boolean(settings?.packages.some((item) => !item.installed));
-  const primaryIsInstall = Boolean(settings?.packageRootIsEmpty || hasMissingPackage);
-  const primaryLabel = primaryIsInstall ? "安装 ACP" : "检查更新";
-
   return (
     <section className="settings-content-column acp-page">
       <div className="settings-page-heading">
         <span className="eyebrow">ACP package</span>
-        <h1>ACP 包管理</h1>
+        <h1>Agent Runtime</h1>
       </div>
 
-      {error ? <div className="settings-inline-error">ACP 包设置失败：{error}</div> : null}
-
-      <div className="settings-card acp-package-card">
-        <div className="settings-runtime-section-head">
-          <div>
-            <span>ACP 包目录</span>
-            <strong>{settings?.packageRoot ?? "待检测"}</strong>
-          </div>
-        </div>
-
-        <div className="acp-package-root-row">
-          <input
-            autoComplete="off"
-            onBlur={() => {
-              if (packageRootDraft.trim() && packageRootDraft.trim() !== settings?.packageRoot) {
-                void savePackageRoot(packageRootDraft);
-              }
-            }}
-            onChange={(event) => setPackageRootDraft(event.target.value)}
-            value={packageRootDraft}
-          />
-          <button
-            className="settings-secondary-button"
-            disabled={busyId !== null || isLoading}
-            onClick={() => void browsePackageRoot()}
-            type="button"
-          >
-            <FolderOpen size={14} />
-            <span>手动浏览</span>
-          </button>
-          <button className="settings-primary-button" disabled={isLoading || busyId !== null} onClick={() => void primaryPackageAction()} type="button">
-            {primaryIsInstall ? <Package size={14} /> : <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />}
-            <span>{busyId === "install" ? "安装中" : isLoading && !primaryIsInstall ? "检查中" : primaryLabel}</span>
-          </button>
-          {hasUpdate ? (
-            <button className="settings-secondary-button" disabled={busyId !== null} onClick={() => void updatePackages()} type="button">
-              <RefreshCw className={busyId === "update" ? "spin-icon" : ""} size={14} />
-              <span>{busyId === "update" ? "更新中" : "更新 ACP"}</span>
-            </button>
-          ) : null}
-        </div>
-      </div>
+      {error ? <div className="settings-inline-error">Agent Runtime 设置失败：{error}</div> : null}
 
       <div className="acp-package-grid">
         {(settings?.packages ?? []).map((item) => (
@@ -535,6 +327,56 @@ function AcpPackageSettings() {
               </div>
               <i className={item.installed ? "pass" : "fail"}>{acpPackageStateLabel(item.installed, item.needsUpdate)}</i>
             </div>
+            <div className={`acp-package-root-row ${item.needsUpdate ? "has-update" : ""}`}>
+              <input
+                autoComplete="off"
+                onBlur={() => {
+                  const draft = packageDirDrafts[item.runtimeId]?.trim() ?? "";
+                  if (draft && draft !== item.packageDir) {
+                    void savePackageDir(item.runtimeId, draft);
+                  }
+                }}
+                onChange={(event) => setPackageDirDrafts((drafts) => ({ ...drafts, [item.runtimeId]: event.target.value }))}
+                value={packageDirDrafts[item.runtimeId] ?? item.packageDir}
+              />
+              <button
+                className="settings-primary-button"
+                disabled={isLoading || busyId !== null}
+                onClick={() => void primaryPackageAction(item.runtimeId)}
+                type="button"
+              >
+                {!item.installed || item.packageDirIsEmpty ? <Package size={14} /> : <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />}
+                <span>
+                  {busyId === `${item.runtimeId}-install`
+                    ? "安装中"
+                    : isLoading && item.installed && !item.packageDirIsEmpty
+                      ? "检查中"
+                      : !item.installed || item.packageDirIsEmpty
+                        ? "安装 ACP"
+                        : "检查更新"}
+                </span>
+              </button>
+              {item.needsUpdate ? (
+                <button
+                  className="settings-secondary-button"
+                  disabled={busyId !== null}
+                  onClick={() => void updatePackage(item.runtimeId)}
+                  type="button"
+                >
+                  <RefreshCw className={busyId === `${item.runtimeId}-update` ? "spin-icon" : ""} size={14} />
+                  <span>{busyId === `${item.runtimeId}-update` ? "更新中" : "更新 ACP"}</span>
+                </button>
+              ) : null}
+              <button
+                className="settings-secondary-button"
+                disabled={busyId !== null || isLoading}
+                onClick={() => void browsePackageDir(item.runtimeId)}
+                type="button"
+              >
+                <FolderOpen size={14} />
+                <span>手动浏览</span>
+              </button>
+            </div>
             <div className="settings-runtime-detail acp-package-detail">
               <div>
                 <span>ACP 版本</span>
@@ -545,7 +387,7 @@ function AcpPackageSettings() {
                 <strong>{item.latestVersion ?? "未检查"}</strong>
               </div>
               <div>
-                <span>安装目录</span>
+                <span>ACP 包目录</span>
                 <strong>{item.packageDir}</strong>
               </div>
             </div>
@@ -561,7 +403,7 @@ function AcpPackageSettings() {
           </div>
           <button className="settings-secondary-button" disabled={isLoading} onClick={() => void refreshSettings()} type="button">
             <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />
-            <span>刷新</span>
+            <span>刷新版本</span>
           </button>
         </div>
         <div className="runtime-check-list compact">
@@ -1768,7 +1610,6 @@ export function SettingsPage({
 
       <main className="settings-main">
         {activeSection === "agents" ? <AgentRuntimeSettings /> : null}
-        {activeSection === "acp" ? <AcpPackageSettings /> : null}
         {activeSection === "providers" ? <ModelProvidersSettings /> : null}
         {activeSection === "logs" ? <LogsSettings /> : null}
         {activeSection === "archive" ? (

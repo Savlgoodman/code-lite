@@ -526,6 +526,8 @@ export interface AcpPackageInfo {
   latestVersion?: string | null;
   needsUpdate: boolean;
   packageDir: string;
+  packageDirExists: boolean;
+  packageDirIsEmpty: boolean;
   packageName: string;
   requestedVersion?: string | null;
   runtimeId: string;

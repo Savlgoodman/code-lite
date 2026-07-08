@@ -73,16 +73,33 @@ export async function loadAcpPackageSettings(options: { check?: boolean } = {}):
   return requestJson<AcpPackageSettingsState>(`/api/settings/acp-packages${suffix}`);
 }
 
-export async function updateAcpPackageRoot(packageRoot: string): Promise<AcpPackageSettingsState> {
+export async function updateAcpPackageDir(runtimeId: string, packageDir: string): Promise<AcpPackageSettingsState> {
   return requestJson<AcpPackageSettingsState>("/api/settings/acp-packages", {
-    body: JSON.stringify({ packageRoot }),
+    body: JSON.stringify({
+      packageDir,
+      runtimeId
+    }),
     method: "PATCH"
   });
 }
 
-export async function installAcpPackages(options: { update?: boolean } = {}): Promise<AcpPackageSettingsState> {
+export async function updateAcpPackageRoot(
+  packageRoot: string,
+): Promise<AcpPackageSettingsState> {
+  return requestJson<AcpPackageSettingsState>("/api/settings/acp-packages", {
+    body: JSON.stringify({
+      packageRoot
+    }),
+    method: "PATCH"
+  });
+}
+
+export async function installAcpPackages(options: { runtimeId?: string; update?: boolean } = {}): Promise<AcpPackageSettingsState> {
   return requestJson<AcpPackageSettingsState>("/api/settings/acp-packages/install", {
-    body: JSON.stringify({ update: Boolean(options.update) }),
+    body: JSON.stringify({
+      runtimeId: options.runtimeId,
+      update: Boolean(options.update)
+    }),
     method: "POST"
   });
 }

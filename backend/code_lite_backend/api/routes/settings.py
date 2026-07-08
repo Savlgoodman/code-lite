@@ -302,10 +302,18 @@ async def update_acp_package_settings(
     services: AppServices = Depends(get_services),
 ) -> JSONResponse:
     try:
-        settings = await asyncio.to_thread(
-            services.agent_runtime_config_store.update_acp_package_root,
-            str(payload.get("packageRoot") or ""),
-        )
+        runtime_id = str(payload.get("runtimeId") or "").strip()
+        if runtime_id:
+            settings = await asyncio.to_thread(
+                services.agent_runtime_config_store.update_acp_package_dir,
+                runtime_id,
+                str(payload.get("packageDir") or payload.get("packageRoot") or ""),
+            )
+        else:
+            settings = await asyncio.to_thread(
+                services.agent_runtime_config_store.update_acp_package_root,
+                str(payload.get("packageRoot") or ""),
+            )
     except AgentRuntimeConfigError as error:
         return JSONResponse({"error": str(error)}, status_code=400)
     return JSONResponse(settings)
@@ -320,6 +328,7 @@ async def install_acp_packages(
         settings = await asyncio.to_thread(
             services.agent_runtime_config_store.install_acp_packages,
             update=bool((payload or {}).get("update")),
+            runtime_id=str((payload or {}).get("runtimeId") or "").strip() or None,
         )
     except AgentRuntimeConfigError as error:
         return JSONResponse({"error": str(error)}, status_code=400)
