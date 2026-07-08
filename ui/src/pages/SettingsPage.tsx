@@ -59,7 +59,7 @@ import type {
 } from "../types";
 import "./SettingsPage.css";
 
-type SettingsSection = "agents" | "providers" | "logs" | "archive" | "about";
+type SettingsSection = "agents" | "acp" | "providers" | "logs" | "archive" | "about";
 
 interface SettingsPageProps {
   archivedSessions: Session[];
@@ -70,6 +70,7 @@ interface SettingsPageProps {
 
 const settingsMenu = [
   { id: "agents", icon: Package, label: "Agent Runtime" },
+  { id: "acp", icon: Database, label: "ACP 连接" },
   { id: "providers", icon: Bot, label: "模型提供商配置" },
   { id: "logs", icon: FileText, label: "日志" },
   { id: "archive", icon: ArchiveRestore, label: "归档会话" },
@@ -328,7 +329,6 @@ function compactIdentifier(value: string) {
 
 function AgentRuntimeSettings() {
   const [settings, setSettings] = useState<AgentRuntimeSettingsState | null>(null);
-  const [acpStatus, setAcpStatus] = useState<AcpRuntimeStatus | null>(null);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState("codex");
   const [codexCommand, setCodexCommand] = useState("");
   const [codexPath, setCodexPath] = useState("");
@@ -336,9 +336,7 @@ function AgentRuntimeSettings() {
   const [codexConfigMode, setCodexConfigMode] = useState("user-native");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [acpError, setAcpError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isAcpLoading, setIsAcpLoading] = useState(false);
 
   async function refreshSettings() {
     setIsLoading(true);
@@ -364,21 +362,8 @@ function AgentRuntimeSettings() {
     }
   }
 
-  async function refreshAcpStatus() {
-    setIsAcpLoading(true);
-    setAcpError(null);
-    try {
-      setAcpStatus(await loadAcpRuntimeStatus());
-    } catch (requestError) {
-      setAcpError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setIsAcpLoading(false);
-    }
-  }
-
   useEffect(() => {
     void refreshSettings();
-    void refreshAcpStatus();
   }, []);
 
   async function saveCodexRuntime() {
@@ -412,26 +397,11 @@ function AgentRuntimeSettings() {
     }
   }
 
-  async function cleanupAcpConnections() {
-    setBusyId("acp-cleanup");
-    setAcpError(null);
-    try {
-      await cleanupAcpRuntimes();
-      await refreshAcpStatus();
-    } catch (requestError) {
-      setAcpError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   const runtimes = settings?.runtimes ?? [];
   const codex = runtimes.find((runtime) => runtime.id === "codex");
   const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0] ?? null;
   const checks = selectedRuntime ? runtimeChecks(selectedRuntime, settings) : [];
   const selectedIsCodex = selectedRuntime?.id === "codex";
-  const acpConnections = acpStatus?.connections ?? [];
-  const acpSessionTotal = acpConnections.reduce((sum, connection) => sum + connection.activeSessions, 0);
 
   return (
     <section className="settings-content-column">
@@ -511,92 +481,6 @@ function AgentRuntimeSettings() {
         </div>
       </div>
 
-      <div className="settings-card">
-        <div className="settings-runtime-section-head">
-          <div>
-            <span>ACP 连接状态</span>
-            <strong>{acpModeLabel(acpStatus?.connectionMode ?? "unavailable")}</strong>
-          </div>
-          <div className="runtime-title-actions">
-            <button className="settings-secondary-button" disabled={isAcpLoading} onClick={() => void refreshAcpStatus()} type="button">
-              <RefreshCw className={isAcpLoading ? "spin-icon" : ""} size={14} />
-              <span>刷新状态</span>
-            </button>
-            <button
-              className="settings-danger-button"
-              disabled={busyId === "acp-cleanup" || acpConnections.length === 0}
-              onClick={() => void cleanupAcpConnections()}
-              type="button"
-            >
-              <X size={14} />
-              <span>{busyId === "acp-cleanup" ? "释放中" : "释放全部连接"}</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="acp-status-summary">
-          <div>
-            <span>ACP 进程</span>
-            <strong>{acpConnections.length.toLocaleString()}</strong>
-          </div>
-          <div>
-            <span>绑定 session</span>
-            <strong>{acpSessionTotal.toLocaleString()}</strong>
-          </div>
-          <div>
-            <span>连接策略</span>
-            <strong>{acpModeLabel(acpStatus?.connectionMode ?? "unavailable")}</strong>
-          </div>
-        </div>
-
-        {acpError ? <div className="settings-inline-error">{acpError}</div> : null}
-
-        {acpConnections.length > 0 ? (
-          <div className="acp-connection-list">
-            {acpConnections.map((connection, index) => (
-              <div
-                className="acp-connection-row"
-                key={`${connection.runtime}:${connection.acpServerKind}:${connection.pid ?? index}:${connection.conversationKey}`}
-              >
-                <div className="acp-connection-head">
-                  <div>
-                    <strong>{connection.runtime}</strong>
-                    <span>{connection.acpServerKind}</span>
-                  </div>
-                  <div className="acp-connection-meta">
-                    <span className={connection.ready ? "ready" : "starting"}>{acpReadyLabel(connection)}</span>
-                    <span>PID {connection.pid ?? "-"}</span>
-                    <span>{connection.activeSessions.toLocaleString()} session</span>
-                    <span>{formatAcpActivity(connection.latestActivityAt)}</span>
-                  </div>
-                </div>
-                <div className="acp-connection-paths">
-                  <span title={connection.workspace}>{connection.workspace}</span>
-                  <span>config: {connection.configMode}</span>
-                  <span>conversation key: {connection.conversationKey || "shared"}</span>
-                </div>
-                {connection.sessions.length > 0 ? (
-                  <div className="acp-session-list">
-                    {connection.sessions.map((session) => (
-                      <div className="acp-session-row" key={`${session.conversationId}:${session.nativeSessionId}`}>
-                        <span title={session.conversationId}>conversation {compactIdentifier(session.conversationId)}</span>
-                        <span title={session.nativeSessionId}>native {compactIdentifier(session.nativeSessionId)}</span>
-                        <span>{session.state}</span>
-                        <span>{session.activePrompt ? "prompting" : "idle"}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="settings-empty compact">当前连接没有绑定 session</div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="settings-empty">当前没有运行中的 ACP 连接</div>
-        )}
-      </div>
-
       {selectedIsCodex && codex ? (
         <div className="settings-card">
           <div className="settings-runtime-section-head">
@@ -659,6 +543,168 @@ function AgentRuntimeSettings() {
       ) : null}
 
       {error ? <div className="settings-inline-error">{error}</div> : null}
+    </section>
+  );
+}
+
+function AcpConnectionsSettings() {
+  const [status, setStatus] = useState<AcpRuntimeStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refreshStatus() {
+    setIsLoading(true);
+    setError(null);
+    try {
+      setStatus(await loadAcpRuntimeStatus());
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function cleanupConnections() {
+    setBusyId("cleanup");
+    setError(null);
+    try {
+      await cleanupAcpRuntimes();
+      await refreshStatus();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  useEffect(() => {
+    void refreshStatus();
+  }, []);
+
+  const connections = status?.connections ?? [];
+  const sessionTotal = connections.reduce((sum, connection) => sum + connection.activeSessions, 0);
+  const readyTotal = connections.filter((connection) => connection.ready).length;
+  const activePromptTotal = connections.reduce(
+    (sum, connection) => sum + connection.sessions.filter((session) => session.activePrompt).length,
+    0,
+  );
+
+  return (
+    <section className="settings-content-column acp-page">
+      <div className="settings-page-heading with-action">
+        <div>
+          <span className="eyebrow">Runtime diagnostics</span>
+          <h1>ACP 连接</h1>
+        </div>
+        <div className="settings-heading-actions">
+          <button className="settings-secondary-button" disabled={isLoading} onClick={() => void refreshStatus()} type="button">
+            <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />
+            <span>刷新</span>
+          </button>
+          <button
+            className="settings-danger-button"
+            disabled={busyId === "cleanup" || connections.length === 0}
+            onClick={() => void cleanupConnections()}
+            type="button"
+          >
+            <X size={14} />
+            <span>{busyId === "cleanup" ? "释放中" : "释放全部连接"}</span>
+          </button>
+        </div>
+      </div>
+
+      {error ? <div className="settings-inline-error">ACP 状态读取失败：{error}</div> : null}
+
+      <div className="acp-status-overview">
+        <div className="acp-metric primary">
+          <span>连接策略</span>
+          <strong>{acpModeLabel(status?.connectionMode ?? "unavailable")}</strong>
+        </div>
+        <div className="acp-metric">
+          <span>ACP 进程</span>
+          <strong>{connections.length.toLocaleString()}</strong>
+        </div>
+        <div className="acp-metric">
+          <span>ready 进程</span>
+          <strong>{readyTotal.toLocaleString()}</strong>
+        </div>
+        <div className="acp-metric">
+          <span>绑定 session</span>
+          <strong>{sessionTotal.toLocaleString()}</strong>
+        </div>
+        <div className="acp-metric">
+          <span>运行中 prompt</span>
+          <strong>{activePromptTotal.toLocaleString()}</strong>
+        </div>
+      </div>
+
+      {connections.length > 0 ? (
+        <div className="acp-process-list">
+          {connections.map((connection, index) => (
+            <article
+              className="acp-process-card"
+              key={`${connection.runtime}:${connection.acpServerKind}:${connection.pid ?? index}:${connection.conversationKey}`}
+            >
+              <div className="acp-process-head">
+                <div className="acp-process-title">
+                  <AgentIcon label={connection.runtime} runtimeId={connection.runtime} size="sm" />
+                  <div>
+                    <strong>{connection.runtime}</strong>
+                    <span>{connection.acpServerKind}</span>
+                  </div>
+                </div>
+                <div className="acp-process-badges">
+                  <span className={connection.ready ? "ready" : "starting"}>{acpReadyLabel(connection)}</span>
+                  <span>PID {connection.pid ?? "-"}</span>
+                  <span>{connection.activeSessions.toLocaleString()} session</span>
+                  <span>{formatAcpActivity(connection.latestActivityAt)}</span>
+                </div>
+              </div>
+
+              <div className="acp-process-details">
+                <div>
+                  <span>workspace</span>
+                  <strong title={connection.workspace}>{connection.workspace}</strong>
+                </div>
+                <div>
+                  <span>config</span>
+                  <strong>{connection.configMode}</strong>
+                </div>
+                <div>
+                  <span>connection key</span>
+                  <strong>{connection.conversationKey || "shared"}</strong>
+                </div>
+              </div>
+
+              {connection.sessions.length > 0 ? (
+                <div className="acp-session-table">
+                  <div className="acp-session-table-head">
+                    <span>conversation</span>
+                    <span>native session</span>
+                    <span>state</span>
+                    <span>prompt</span>
+                  </div>
+                  {connection.sessions.map((session) => (
+                    <div className="acp-session-table-row" key={`${session.conversationId}:${session.nativeSessionId}`}>
+                      <span title={session.conversationId}>{compactIdentifier(session.conversationId)}</span>
+                      <span title={session.nativeSessionId}>{compactIdentifier(session.nativeSessionId)}</span>
+                      <span>{session.state}</span>
+                      <span>{session.activePrompt ? "running" : "idle"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="settings-empty compact">当前连接没有绑定 session</div>
+              )}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="settings-card">
+          <div className="settings-empty">当前没有运行中的 ACP 连接</div>
+        </div>
+      )}
     </section>
   );
 }
@@ -1850,6 +1896,7 @@ export function SettingsPage({
 
       <main className="settings-main">
         {activeSection === "agents" ? <AgentRuntimeSettings /> : null}
+        {activeSection === "acp" ? <AcpConnectionsSettings /> : null}
         {activeSection === "providers" ? <ModelProvidersSettings /> : null}
         {activeSection === "logs" ? <LogsSettings /> : null}
         {activeSection === "archive" ? (
