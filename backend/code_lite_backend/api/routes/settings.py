@@ -54,6 +54,16 @@ def _directory_size(path: Path) -> int:
     return total
 
 
+def _directory_usage_item(label: str, path: Path) -> dict[str, Any]:
+    size = _directory_size(path)
+    return {
+        "label": label,
+        "path": str(path),
+        "bytes": size,
+        "size": _format_bytes(size),
+    }
+
+
 def _read_json_version(path: Path) -> str:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -122,22 +132,29 @@ def _sanitize_remote(remote: str) -> str:
 
 def _collect_about_info(services: AppServices) -> dict[str, Any]:
     runtime_config = services.runtime_config
-    data_sections = [
-        ("配置", runtime_config.config_dir),
-        ("会话记录", runtime_config.record_dir),
-        ("日志", runtime_config.logs_dir),
-        ("缓存", runtime_config.cache_dir),
-    ]
+    known_labels = {
+        runtime_config.config_dir.resolve(): "配置",
+        runtime_config.record_dir.resolve(): "会话记录",
+        runtime_config.attachments_dir.resolve(): "附件",
+        runtime_config.billing_dir.resolve(): "用量计费",
+        runtime_config.logs_dir.resolve(): "日志",
+        runtime_config.cache_dir.resolve(): "缓存",
+    }
     section_usage = []
-    for label, path in data_sections:
-        size = _directory_size(path)
-        section_usage.append({
-            "label": label,
-            "path": str(path),
-            "bytes": size,
-            "size": _format_bytes(size),
-        })
-
+    seen_paths: set[Path] = set()
+    for path, label in known_labels.items():
+        section_usage.append(_directory_usage_item(label, path))
+        seen_paths.add(path)
+    if runtime_config.data_dir.exists():
+        for child in sorted(runtime_config.data_dir.iterdir(), key=lambda item: item.name.lower()):
+            if not child.is_dir():
+                continue
+            resolved = child.resolve()
+            if resolved in seen_paths:
+                continue
+            section_usage.append(_directory_usage_item(child.name, child))
+            seen_paths.add(resolved)
+    section_usage.sort(key=lambda item: item["bytes"], reverse=True)
     total_size = _directory_size(runtime_config.data_dir)
     workspace = services.workspace
     remote = _sanitize_remote(_run_git(["config", "--get", "remote.origin.url"], workspace))
@@ -266,6 +283,47 @@ async def list_model_providers(services: AppServices = Depends(get_services)) ->
 @router.get("/settings/agent-runtimes")
 async def list_agent_runtimes(services: AppServices = Depends(get_services)) -> dict[str, Any]:
     return await asyncio.to_thread(services.agent_runtime_config_store.list_settings)
+
+
+@router.get("/settings/acp-packages")
+async def get_acp_package_settings(
+    check: bool = False,
+    services: AppServices = Depends(get_services),
+) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        services.agent_runtime_config_store.acp_package_settings,
+        check_latest=check,
+    )
+
+
+@router.patch("/settings/acp-packages")
+async def update_acp_package_settings(
+    payload: dict[str, Any],
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    try:
+        settings = await asyncio.to_thread(
+            services.agent_runtime_config_store.update_acp_package_root,
+            str(payload.get("packageRoot") or ""),
+        )
+    except AgentRuntimeConfigError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    return JSONResponse(settings)
+
+
+@router.post("/settings/acp-packages/install")
+async def install_acp_packages(
+    payload: dict[str, Any] | None = None,
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    try:
+        settings = await asyncio.to_thread(
+            services.agent_runtime_config_store.install_acp_packages,
+            update=bool((payload or {}).get("update")),
+        )
+    except AgentRuntimeConfigError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    return JSONResponse(settings)
 
 
 @router.patch("/settings/agent-runtimes/active")

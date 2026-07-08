@@ -510,11 +510,44 @@ export interface AgentRuntimeConfig {
 
 export interface AgentRuntimeSettingsState {
   activeAdapter: string;
+  acpPackageRoot?: string;
   configPath: string;
   nodeDetected: AgentRuntimeDetected;
   npmDetected: AgentRuntimeDetected;
   runtimeRoot: string;
   runtimes: AgentRuntimeConfig[];
+}
+
+export interface AcpPackageInfo {
+  command: string[];
+  installed: boolean;
+  installedVersion?: string | null;
+  label: string;
+  latestVersion?: string | null;
+  needsUpdate: boolean;
+  packageDir: string;
+  packageName: string;
+  requestedVersion?: string | null;
+  runtimeId: string;
+}
+
+export interface AcpRuntimeVersionInfo {
+  command: string[];
+  detected: boolean;
+  label: string;
+  runtimeId: string;
+  version?: string | null;
+}
+
+export interface AcpPackageSettingsState {
+  checkedAt?: number | null;
+  nodeDetected: AgentRuntimeDetected;
+  npmDetected: AgentRuntimeDetected;
+  packageRoot: string;
+  packageRootExists: boolean;
+  packageRootIsEmpty: boolean;
+  packages: AcpPackageInfo[];
+  runtimeVersions: AcpRuntimeVersionInfo[];
 }
 
 export interface AcpRuntimeSessionStatus {

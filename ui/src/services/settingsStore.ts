@@ -1,5 +1,6 @@
 import { ensureBackend } from "./agentClient";
 import type {
+  AcpPackageSettingsState,
   AcpRuntimeStatus,
   AppAboutInfo,
   AgentRuntimeModelsResult,
@@ -65,6 +66,25 @@ export async function loadLogTail(options: {
 
 export async function loadAgentRuntimeSettings(): Promise<AgentRuntimeSettingsState> {
   return requestJson<AgentRuntimeSettingsState>("/api/settings/agent-runtimes");
+}
+
+export async function loadAcpPackageSettings(options: { check?: boolean } = {}): Promise<AcpPackageSettingsState> {
+  const suffix = options.check ? "?check=true" : "";
+  return requestJson<AcpPackageSettingsState>(`/api/settings/acp-packages${suffix}`);
+}
+
+export async function updateAcpPackageRoot(packageRoot: string): Promise<AcpPackageSettingsState> {
+  return requestJson<AcpPackageSettingsState>("/api/settings/acp-packages", {
+    body: JSON.stringify({ packageRoot }),
+    method: "PATCH"
+  });
+}
+
+export async function installAcpPackages(options: { update?: boolean } = {}): Promise<AcpPackageSettingsState> {
+  return requestJson<AcpPackageSettingsState>("/api/settings/acp-packages/install", {
+    body: JSON.stringify({ update: Boolean(options.update) }),
+    method: "POST"
+  });
 }
 
 export async function updateAgentRuntime(

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { invoke } from "@tauri-apps/api/core";
 import {
   ArchiveRestore,
   ArrowLeft,
@@ -9,6 +10,7 @@ import {
   ChevronRight,
   Database,
   FileText,
+  FolderOpen,
   Pencil,
   Info,
   Package,
@@ -24,27 +26,24 @@ import { AgentIcon } from "../components/AgentIcon";
 import { formatTimeLabel } from "../lib/formatters";
 import {
   addProviderModels,
-  cleanupAcpRuntimes,
   createModelProvider,
   deleteConfiguredModel,
   deleteModelProvider,
-  installAgentRuntime,
-  loadAcpRuntimeStatus,
+  installAcpPackages,
+  loadAcpPackageSettings,
   loadAgentRuntimeSettings,
   loadAppAbout,
   loadLogFiles,
   loadLogTail,
   loadModelSettings,
   refreshModelProviderModels,
-  updateActiveAgentRuntime,
-  updateAgentRuntime,
+  updateAcpPackageRoot,
   updateConfiguredModel,
   updateDefaultModel,
   updateModelProvider
 } from "../services/settingsStore";
 import type {
-  AcpRuntimeConnectionStatus,
-  AcpRuntimeStatus,
+  AcpPackageSettingsState,
   AppAboutInfo,
   AgentRuntimeConfig,
   AgentRuntimeSettingsState,
@@ -70,7 +69,7 @@ interface SettingsPageProps {
 
 const settingsMenu = [
   { id: "agents", icon: Package, label: "Agent Runtime" },
-  { id: "acp", icon: Database, label: "ACP 连接" },
+  { id: "acp", icon: Database, label: "ACP 包" },
   { id: "providers", icon: Bot, label: "模型提供商配置" },
   { id: "logs", icon: FileText, label: "日志" },
   { id: "archive", icon: ArchiveRestore, label: "归档会话" },
@@ -213,17 +212,6 @@ function modelEditDraft(model: ConfiguredModel): ModelEditDraft {
   };
 }
 
-const codexModeOptions = [
-  { label: "read-only", value: "read-only" },
-  { label: "agent", value: "agent" },
-  { label: "agent-full-access", value: "agent-full-access" }
-] satisfies Array<SettingsSelectOption<string>>;
-
-const codexConfigModeOptions = [
-  { label: "使用本机配置", value: "user-native" },
-  { label: "使用 code-lite 隔离配置", value: "isolated" }
-] satisfies Array<SettingsSelectOption<string>>;
-
 function runtimeStatusLabel(runtime: AgentRuntimeConfig) {
   if (runtime.detected.ok) {
     return "可用";
@@ -236,18 +224,6 @@ function runtimeStatusLabel(runtime: AgentRuntimeConfig) {
 
 function commandText(runtime: AgentRuntimeConfig) {
   return runtime.command.length > 0 ? runtime.command.join(" ") : "默认使用托管包或 npx";
-}
-
-function effectiveCommandText(runtime: AgentRuntimeConfig) {
-  return runtime.detected.command?.length ? runtime.detected.command.join(" ") : commandText(runtime);
-}
-
-function configuredCommandDetail(runtime: AgentRuntimeConfig) {
-  const missing = runtime.detected.missingCommand;
-  if (missing?.length) {
-    return `配置命令不可用，已回退：${missing.join(" ")}`;
-  }
-  return commandText(runtime);
 }
 
 function runtimeChecks(
@@ -266,12 +242,12 @@ function runtimeChecks(
     },
     {
       detail: runtime.id === "opencode" ? "opencode 使用 system command。" : "ACP npm 包需要 Node/npm。",
-      label: "Node/npm prerequisite",
+      label: "Node/npm",
       ok: runtime.id === "opencode" || runtime.id === "nanobot" || (nodeOk && npmOk),
       value: runtime.id === "opencode" || runtime.id === "nanobot" || (nodeOk && npmOk) ? "pass" : "fail"
     },
     {
-      detail: effectiveCommandText(runtime),
+      detail: runtime.detected.command?.length ? runtime.detected.command.join(" ") : commandText(runtime),
       label: "Runtime launcher",
       ok: runtime.detected.ok,
       value: runtime.detected.source ?? runtime.distribution
@@ -279,8 +255,8 @@ function runtimeChecks(
     {
       detail: runtime.managedPackage
         ? `${runtime.managedPackage.name}${packageVersion ? `@${packageVersion}` : ""}`
-        : "无需 ACP npm 包。",
-      label: "ACP adapter package",
+        : "无需托管 ACP 包。",
+      label: "托管包",
       ok: !runtime.managedPackage || Boolean(packageVersion) || runtime.detected.ok,
       value: packageVersion ?? (runtime.managedPackage ? "未安装" : "pass")
     },
@@ -293,48 +269,9 @@ function runtimeChecks(
   ];
 }
 
-function acpModeLabel(value: string) {
-  if (value === "multi_session") {
-    return "单连接多 session";
-  }
-  if (value === "per_conversation") {
-    return "每会话独立连接";
-  }
-  if (value === "unavailable") {
-    return "不可用";
-  }
-  return value || "未知";
-}
-
-function acpReadyLabel(connection: AcpRuntimeConnectionStatus) {
-  return connection.ready ? "ready" : "starting";
-}
-
-function formatAcpActivity(value?: number | null) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return "无活动";
-  }
-  return formatTimeLabel(value * 1000);
-}
-
-function compactIdentifier(value: string) {
-  if (!value) {
-    return "-";
-  }
-  if (value.length <= 18) {
-    return value;
-  }
-  return `${value.slice(0, 8)}...${value.slice(-6)}`;
-}
-
 function AgentRuntimeSettings() {
   const [settings, setSettings] = useState<AgentRuntimeSettingsState | null>(null);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState("codex");
-  const [codexCommand, setCodexCommand] = useState("");
-  const [codexPath, setCodexPath] = useState("");
-  const [codexMode, setCodexMode] = useState("read-only");
-  const [codexConfigMode, setCodexConfigMode] = useState("user-native");
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -344,16 +281,9 @@ function AgentRuntimeSettings() {
     try {
       const next = await loadAgentRuntimeSettings();
       setSettings(next);
-      const codex = next.runtimes.find((runtime) => runtime.id === "codex");
       const selected = next.runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? next.runtimes[0];
       if (selected) {
         setSelectedRuntimeId(selected.id);
-      }
-      if (codex) {
-        setCodexCommand(codex.command.join(" "));
-        setCodexPath(codex.codexPath ?? "");
-        setCodexMode(codex.mode || "read-only");
-        setCodexConfigMode(codex.configMode || "user-native");
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -366,42 +296,9 @@ function AgentRuntimeSettings() {
     void refreshSettings();
   }, []);
 
-  async function saveCodexRuntime() {
-    setBusyId("codex");
-    setError(null);
-    try {
-      await updateAgentRuntime("codex", {
-        codexPath: codexPath.trim(),
-        command: codexCommand.trim(),
-        configMode: codexConfigMode,
-        mode: codexMode
-      });
-      await refreshSettings();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function installRuntime(runtime: AgentRuntimeConfig) {
-    setBusyId(`${runtime.id}-install`);
-    setError(null);
-    try {
-      await installAgentRuntime(runtime.id);
-      await refreshSettings();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   const runtimes = settings?.runtimes ?? [];
-  const codex = runtimes.find((runtime) => runtime.id === "codex");
   const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0] ?? null;
   const checks = selectedRuntime ? runtimeChecks(selectedRuntime, settings) : [];
-  const selectedIsCodex = selectedRuntime?.id === "codex";
 
   return (
     <section className="settings-content-column">
@@ -440,19 +337,6 @@ function AgentRuntimeSettings() {
               {selectedRuntime.managedPackage?.requestedVersion ? ` @ ${selectedRuntime.managedPackage.requestedVersion}` : ""}
             </p>
           </div>
-          <div className="runtime-title-actions">
-            {selectedRuntime.canInstall ? (
-              <button
-                className="settings-secondary-button"
-                disabled={busyId === `${selectedRuntime.id}-install`}
-                onClick={() => void installRuntime(selectedRuntime)}
-                type="button"
-              >
-                <Package size={14} />
-                <span>{busyId === `${selectedRuntime.id}-install` ? "安装中" : "安装 ACP 包"}</span>
-              </button>
-            ) : null}
-          </div>
         </div>
       ) : null}
 
@@ -470,7 +354,7 @@ function AgentRuntimeSettings() {
         <div className="runtime-check-list">
           {checks.map((item) => (
             <div className="runtime-check-row" key={item.label}>
-              <span className={item.ok ? "pass" : "fail"}>{item.ok ? "✓" : "!"}</span>
+              <span className={item.ok ? "pass" : "fail"}>{item.ok ? <Check size={14} /> : <X size={14} />}</span>
               <div>
                 <strong>{item.label}</strong>
                 <p>{item.detail}</p>
@@ -481,83 +365,32 @@ function AgentRuntimeSettings() {
         </div>
       </div>
 
-      {selectedIsCodex && codex ? (
-        <div className="settings-card">
-          <div className="settings-runtime-section-head">
-            <div>
-              <span>配置管理</span>
-              <strong>Codex ACP</strong>
-            </div>
-            <button className="settings-primary-button" disabled={busyId === "codex"} onClick={() => void saveCodexRuntime()} type="button">
-              <Check size={14} />
-              <span>保存</span>
-            </button>
-          </div>
-          <div className="settings-form-grid runtime-form-grid">
-            <label className="settings-field">
-              <span>Codex 模式</span>
-              <SettingsSelect onChange={setCodexMode} options={codexModeOptions} value={codexMode} />
-            </label>
-            <label className="settings-field">
-              <span>配置来源</span>
-              <SettingsSelect onChange={setCodexConfigMode} options={codexConfigModeOptions} value={codexConfigMode} />
-            </label>
-            <label className="settings-field settings-field-wide">
-              <span>ACP 命令</span>
-              <input
-                autoComplete="off"
-                onChange={(event) => setCodexCommand(event.target.value)}
-                placeholder="留空则使用托管 codex-acp 或 npx -y @agentclientprotocol/codex-acp"
-                value={codexCommand}
-              />
-            </label>
-            <label className="settings-field settings-field-wide">
-              <span>Codex binary 路径</span>
-              <input
-                autoComplete="off"
-                onChange={(event) => setCodexPath(event.target.value)}
-                placeholder="高级配置，可留空使用 codex-acp 默认依赖"
-                value={codexPath}
-              />
-            </label>
-          </div>
-
-          <div className="settings-runtime-detail">
-            <div>
-              <span>实际启动命令</span>
-              <strong>{effectiveCommandText(codex)}</strong>
-            </div>
-            <div>
-              <span>配置命令</span>
-              <strong>{configuredCommandDetail(codex)}</strong>
-            </div>
-            <div>
-              <span>ACP 包</span>
-              <strong>
-                {codex.managedPackage?.name ?? "@agentclientprotocol/codex-acp"}
-                {codex.managedPackage?.installedVersion ? ` / ${codex.managedPackage.installedVersion}` : ""}
-              </strong>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {error ? <div className="settings-inline-error">{error}</div> : null}
     </section>
   );
 }
 
-function AcpConnectionsSettings() {
-  const [status, setStatus] = useState<AcpRuntimeStatus | null>(null);
+function acpPackageStateLabel(installed: boolean, needsUpdate: boolean) {
+  if (needsUpdate) {
+    return "可更新";
+  }
+  return installed ? "已安装" : "未安装";
+}
+
+function AcpPackageSettings() {
+  const [settings, setSettings] = useState<AcpPackageSettingsState | null>(null);
+  const [packageRootDraft, setPackageRootDraft] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function refreshStatus() {
+  async function refreshSettings(options: { check?: boolean } = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      setStatus(await loadAcpRuntimeStatus());
+      const next = await loadAcpPackageSettings(options);
+      setSettings(next);
+      setPackageRootDraft(next.packageRoot);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -565,12 +398,66 @@ function AcpConnectionsSettings() {
     }
   }
 
-  async function cleanupConnections() {
-    setBusyId("cleanup");
+  async function savePackageRoot(nextRoot: string) {
+    const trimmedRoot = nextRoot.trim();
+    if (!trimmedRoot) {
+      setError("ACP 包目录不能为空");
+      return;
+    }
+    setBusyId("package-root");
     setError(null);
     try {
-      await cleanupAcpRuntimes();
-      await refreshStatus();
+      const next = await updateAcpPackageRoot(trimmedRoot);
+      setSettings(next);
+      setPackageRootDraft(next.packageRoot);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function browsePackageRoot() {
+    setBusyId("browse");
+    setError(null);
+    try {
+      const selected = await invoke<string | null>("pick_acp_package_directory");
+      if (selected) {
+        await savePackageRoot(selected);
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function primaryPackageAction() {
+    const hasMissingPackage = Boolean(settings?.packages.some((item) => !item.installed));
+    if (settings?.packageRootIsEmpty || hasMissingPackage) {
+      setBusyId("install");
+      setError(null);
+      try {
+        const next = await installAcpPackages();
+        setSettings(next);
+        setPackageRootDraft(next.packageRoot);
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : String(requestError));
+      } finally {
+        setBusyId(null);
+      }
+      return;
+    }
+    await refreshSettings({ check: true });
+  }
+
+  async function updatePackages() {
+    setBusyId("update");
+    setError(null);
+    try {
+      const next = await installAcpPackages({ update: true });
+      setSettings(next);
+      setPackageRootDraft(next.packageRoot);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -579,134 +466,117 @@ function AcpConnectionsSettings() {
   }
 
   useEffect(() => {
-    void refreshStatus();
+    void refreshSettings();
   }, []);
 
-  const connections = status?.connections ?? [];
-  const sessionTotal = connections.reduce((sum, connection) => sum + connection.activeSessions, 0);
-  const readyTotal = connections.filter((connection) => connection.ready).length;
-  const activePromptTotal = connections.reduce(
-    (sum, connection) => sum + connection.sessions.filter((session) => session.activePrompt).length,
-    0,
-  );
+  const hasUpdate = Boolean(settings?.packages.some((item) => item.needsUpdate));
+  const hasMissingPackage = Boolean(settings?.packages.some((item) => !item.installed));
+  const primaryIsInstall = Boolean(settings?.packageRootIsEmpty || hasMissingPackage);
+  const primaryLabel = primaryIsInstall ? "安装 ACP" : "检查更新";
 
   return (
     <section className="settings-content-column acp-page">
-      <div className="settings-page-heading with-action">
-        <div>
-          <span className="eyebrow">Runtime diagnostics</span>
-          <h1>ACP 连接</h1>
+      <div className="settings-page-heading">
+        <span className="eyebrow">ACP package</span>
+        <h1>ACP 包管理</h1>
+      </div>
+
+      {error ? <div className="settings-inline-error">ACP 包设置失败：{error}</div> : null}
+
+      <div className="settings-card acp-package-card">
+        <div className="settings-runtime-section-head">
+          <div>
+            <span>ACP 包目录</span>
+            <strong>{settings?.packageRoot ?? "待检测"}</strong>
+          </div>
         </div>
-        <div className="settings-heading-actions">
-          <button className="settings-secondary-button" disabled={isLoading} onClick={() => void refreshStatus()} type="button">
+
+        <div className="acp-package-root-row">
+          <input
+            autoComplete="off"
+            onBlur={() => {
+              if (packageRootDraft.trim() && packageRootDraft.trim() !== settings?.packageRoot) {
+                void savePackageRoot(packageRootDraft);
+              }
+            }}
+            onChange={(event) => setPackageRootDraft(event.target.value)}
+            value={packageRootDraft}
+          />
+          <button
+            className="settings-secondary-button"
+            disabled={busyId !== null || isLoading}
+            onClick={() => void browsePackageRoot()}
+            type="button"
+          >
+            <FolderOpen size={14} />
+            <span>手动浏览</span>
+          </button>
+          <button className="settings-primary-button" disabled={isLoading || busyId !== null} onClick={() => void primaryPackageAction()} type="button">
+            {primaryIsInstall ? <Package size={14} /> : <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />}
+            <span>{busyId === "install" ? "安装中" : isLoading && !primaryIsInstall ? "检查中" : primaryLabel}</span>
+          </button>
+          {hasUpdate ? (
+            <button className="settings-secondary-button" disabled={busyId !== null} onClick={() => void updatePackages()} type="button">
+              <RefreshCw className={busyId === "update" ? "spin-icon" : ""} size={14} />
+              <span>{busyId === "update" ? "更新中" : "更新 ACP"}</span>
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="acp-package-grid">
+        {(settings?.packages ?? []).map((item) => (
+          <article className="settings-card acp-package-item" key={item.runtimeId}>
+            <div className="acp-package-item-head">
+              <AgentIcon label={item.label} runtimeId={item.runtimeId} size="sm" />
+              <div>
+                <strong>{item.label}</strong>
+                <span>{item.packageName}</span>
+              </div>
+              <i className={item.installed ? "pass" : "fail"}>{acpPackageStateLabel(item.installed, item.needsUpdate)}</i>
+            </div>
+            <div className="settings-runtime-detail acp-package-detail">
+              <div>
+                <span>ACP 版本</span>
+                <strong>{item.installedVersion ?? "未安装"}</strong>
+              </div>
+              <div>
+                <span>最新版本</span>
+                <strong>{item.latestVersion ?? "未检查"}</strong>
+              </div>
+              <div>
+                <span>安装目录</span>
+                <strong>{item.packageDir}</strong>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="settings-card">
+        <div className="settings-runtime-section-head">
+          <div>
+            <span>Runtime 版本</span>
+            <strong>Codex / Claude Code</strong>
+          </div>
+          <button className="settings-secondary-button" disabled={isLoading} onClick={() => void refreshSettings()} type="button">
             <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />
             <span>刷新</span>
           </button>
-          <button
-            className="settings-danger-button"
-            disabled={busyId === "cleanup" || connections.length === 0}
-            onClick={() => void cleanupConnections()}
-            type="button"
-          >
-            <X size={14} />
-            <span>{busyId === "cleanup" ? "释放中" : "释放全部连接"}</span>
-          </button>
         </div>
-      </div>
-
-      {error ? <div className="settings-inline-error">ACP 状态读取失败：{error}</div> : null}
-
-      <div className="acp-status-overview">
-        <div className="acp-metric primary">
-          <span>连接策略</span>
-          <strong>{acpModeLabel(status?.connectionMode ?? "unavailable")}</strong>
-        </div>
-        <div className="acp-metric">
-          <span>ACP 进程</span>
-          <strong>{connections.length.toLocaleString()}</strong>
-        </div>
-        <div className="acp-metric">
-          <span>ready 进程</span>
-          <strong>{readyTotal.toLocaleString()}</strong>
-        </div>
-        <div className="acp-metric">
-          <span>绑定 session</span>
-          <strong>{sessionTotal.toLocaleString()}</strong>
-        </div>
-        <div className="acp-metric">
-          <span>运行中 prompt</span>
-          <strong>{activePromptTotal.toLocaleString()}</strong>
-        </div>
-      </div>
-
-      {connections.length > 0 ? (
-        <div className="acp-process-list">
-          {connections.map((connection, index) => (
-            <article
-              className="acp-process-card"
-              key={`${connection.runtime}:${connection.acpServerKind}:${connection.pid ?? index}:${connection.conversationKey}`}
-            >
-              <div className="acp-process-head">
-                <div className="acp-process-title">
-                  <AgentIcon label={connection.runtime} runtimeId={connection.runtime} size="sm" />
-                  <div>
-                    <strong>{connection.runtime}</strong>
-                    <span>{connection.acpServerKind}</span>
-                  </div>
-                </div>
-                <div className="acp-process-badges">
-                  <span className={connection.ready ? "ready" : "starting"}>{acpReadyLabel(connection)}</span>
-                  <span>PID {connection.pid ?? "-"}</span>
-                  <span>{connection.activeSessions.toLocaleString()} session</span>
-                  <span>{formatAcpActivity(connection.latestActivityAt)}</span>
-                </div>
+        <div className="runtime-check-list compact">
+          {(settings?.runtimeVersions ?? []).map((item) => (
+            <div className="runtime-check-row" key={item.runtimeId}>
+              <span className={item.detected ? "pass" : "fail"}>{item.detected ? <Check size={14} /> : <X size={14} />}</span>
+              <div>
+                <strong>{item.label}</strong>
+                <p>{item.command.join(" ") || "未检测到命令"}</p>
               </div>
-
-              <div className="acp-process-details">
-                <div>
-                  <span>connection scope</span>
-                  <strong>{connection.workspace || "shared runtime"}</strong>
-                </div>
-                <div>
-                  <span>config</span>
-                  <strong>{connection.configMode}</strong>
-                </div>
-                <div>
-                  <span>connection key</span>
-                  <strong>{connection.conversationKey || "shared"}</strong>
-                </div>
-              </div>
-
-              {connection.sessions.length > 0 ? (
-                <div className="acp-session-table">
-                  <div className="acp-session-table-head">
-                    <span>conversation</span>
-                    <span>native session</span>
-                    <span>workspace</span>
-                    <span>state</span>
-                    <span>prompt</span>
-                  </div>
-                  {connection.sessions.map((session) => (
-                    <div className="acp-session-table-row" key={`${session.conversationId}:${session.nativeSessionId}`}>
-                      <span title={session.conversationId}>{compactIdentifier(session.conversationId)}</span>
-                      <span title={session.nativeSessionId}>{compactIdentifier(session.nativeSessionId)}</span>
-                      <span title={session.workspace || ""}>{session.workspace || "-"}</span>
-                      <span>{session.state}</span>
-                      <span>{session.activePrompt ? "running" : "idle"}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="settings-empty compact">当前连接没有绑定 session</div>
-              )}
-            </article>
+              <i className={item.detected ? "pass" : "fail"}>{item.version ?? "未检测到"}</i>
+            </div>
           ))}
         </div>
-      ) : (
-        <div className="settings-card">
-          <div className="settings-empty">当前没有运行中的 ACP 连接</div>
-        </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -1898,7 +1768,7 @@ export function SettingsPage({
 
       <main className="settings-main">
         {activeSection === "agents" ? <AgentRuntimeSettings /> : null}
-        {activeSection === "acp" ? <AcpConnectionsSettings /> : null}
+        {activeSection === "acp" ? <AcpPackageSettings /> : null}
         {activeSection === "providers" ? <ModelProvidersSettings /> : null}
         {activeSection === "logs" ? <LogsSettings /> : null}
         {activeSection === "archive" ? (

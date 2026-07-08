@@ -7,6 +7,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ensure_backend,
             minimize_window,
+            pick_acp_package_directory,
             pick_workspace_directory,
             shutdown_app,
             toggle_maximize_window
@@ -196,6 +197,17 @@ fn toggle_maximize_window(window: tauri::Window) -> Result<(), String> {
 
 #[tauri::command]
 async fn pick_workspace_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let folder = app
+        .dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|path| path.to_string());
+
+    Ok(folder)
+}
+
+#[tauri::command]
+async fn pick_acp_package_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let folder = app
         .dialog()
         .file()

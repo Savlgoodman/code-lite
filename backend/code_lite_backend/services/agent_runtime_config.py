@@ -20,6 +20,7 @@ CLAUDE_ACP_PACKAGE = "@agentclientprotocol/claude-agent-acp"
 DEFAULT_CODEX_ACP_VERSION = "1.1.0"
 DEFAULT_CLAUDE_ACP_VERSION = "0.55.0"
 SUPPORTED_ACTIVE_ADAPTERS = {"codex", "claude_code", "nanobot"}
+ACP_RUNTIME_IDS = {"codex", "claude_code"}
 
 
 class AgentRuntimeConfigError(ValueError):
@@ -87,6 +88,13 @@ def _string_list(value: Any) -> list[str]:
     return result
 
 
+def _configured_path(value: Any, fallback: Path) -> Path:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    return Path(text).expanduser().resolve()
+
+
 class AgentRuntimeConfigStore:
     def __init__(self, runtime_config: RuntimeConfig) -> None:
         self._runtime_config = runtime_config
@@ -111,12 +119,46 @@ class AgentRuntimeConfigStore:
         runtimes = config["agentRuntimes"]
         return {
             "activeAdapter": config["activeAdapter"],
+            "acpPackageRoot": config["acpPackageRoot"],
             "configPath": str(self._path),
             "runtimeRoot": str(self.runtime_root()),
             "nodeDetected": self._detect_node(),
             "npmDetected": self._detect_npm(),
             "runtimes": [self._public_runtime(runtimes[runtime_id]) for runtime_id in self._ordered_runtime_ids()],
         }
+
+    def acp_package_settings(self, *, check_latest: bool = False) -> dict[str, Any]:
+        config = self.load()
+        package_root = self.runtime_root()
+        packages = [
+            self._public_acp_package(config["agentRuntimes"][runtime_id], check_latest=check_latest)
+            for runtime_id in ("codex", "claude_code")
+        ]
+        return {
+            "packageRoot": str(package_root),
+            "packageRootExists": package_root.exists(),
+            "packageRootIsEmpty": self._is_acp_package_root_empty(package_root),
+            "nodeDetected": self._detect_node(),
+            "npmDetected": self._detect_npm(),
+            "packages": packages,
+            "runtimeVersions": [
+                self._runtime_cli_version("codex", "Codex", self._codex_binary_command()),
+                self._runtime_cli_version("claude_code", "Claude Code", ["claude", "--version"]),
+            ],
+            "checkedAt": _now_ms() if check_latest else None,
+        }
+
+    def update_acp_package_root(self, package_root: str) -> dict[str, Any]:
+        root = _configured_path(package_root, self._default_runtime_root())
+        config = self.load()
+        config["acpPackageRoot"] = str(root)
+        self.save(config)
+        return self.acp_package_settings()
+
+    def install_acp_packages(self, *, update: bool = False) -> dict[str, Any]:
+        for runtime_id in ("codex", "claude_code"):
+            self.install_runtime(runtime_id, package_version="latest" if update else None)
+        return self.acp_package_settings(check_latest=update)
 
     def update_runtime(self, runtime_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         config = self.load()
@@ -173,8 +215,8 @@ class AgentRuntimeConfigStore:
         self.save(config)
         return self.list_settings()
 
-    def install_runtime(self, runtime_id: str) -> dict[str, Any]:
-        if runtime_id not in {"codex", "claude_code"}:
+    def install_runtime(self, runtime_id: str, package_version: str | None = None) -> dict[str, Any]:
+        if runtime_id not in ACP_RUNTIME_IDS:
             raise AgentRuntimeConfigError("当前只支持安装 Codex ACP 和 Claude Code ACP 包")
 
         npm = _resolve_executable("npm")
@@ -198,8 +240,11 @@ class AgentRuntimeConfigStore:
                 encoding="utf-8",
             )
         package_name = CODEX_ACP_PACKAGE if runtime_id == "codex" else CLAUDE_ACP_PACKAGE
-        package_version = DEFAULT_CODEX_ACP_VERSION if runtime_id == "codex" else DEFAULT_CLAUDE_ACP_VERSION
-        package_spec = f"{package_name}@{package_version}"
+        requested_version = (
+            package_version
+            or (DEFAULT_CODEX_ACP_VERSION if runtime_id == "codex" else DEFAULT_CLAUDE_ACP_VERSION)
+        )
+        package_spec = f"{package_name}@{requested_version}"
         try:
             result = run_hidden(
                 [npm, "install", "--no-save", package_spec],
@@ -233,7 +278,7 @@ class AgentRuntimeConfigStore:
         runtime["distribution"] = "managed-npm"
         runtime["managedPackage"] = {
             "name": package_name,
-            "requestedVersion": package_version,
+            "requestedVersion": installed_version or requested_version,
             "installedVersion": installed_version,
             "installedAt": _now_ms(),
             "path": str(package_dir),
@@ -246,22 +291,25 @@ class AgentRuntimeConfigStore:
         return self._public_runtime(runtime)
 
     def runtime_root(self) -> Path:
+        config = _read_json_object(self._path)
+        return _configured_path(config.get("acpPackageRoot"), self._default_runtime_root())
+
+    def _default_runtime_root(self) -> Path:
         return self._runtime_config.data_dir / "runtimes" / "acp"
 
-    def managed_package_dir(self, runtime_id: str) -> Path:
+    def managed_package_dir(self, runtime_id: str, package_root: Path | None = None) -> Path:
+        root = package_root or self.runtime_root()
         if runtime_id == "codex":
-            return self.runtime_root() / "codex-acp" / DEFAULT_CODEX_ACP_VERSION
+            return root / "codex-acp"
         if runtime_id == "claude_code":
-            return self.runtime_root() / "claude-agent-acp" / DEFAULT_CLAUDE_ACP_VERSION
-        return self.runtime_root() / runtime_id
+            return root / "claude-agent-acp"
+        return root / runtime_id
 
     def managed_codex_command(self) -> list[str]:
-        bin_name = "codex-acp.cmd" if os.name == "nt" else "codex-acp"
-        return [str(self.managed_package_dir("codex") / "node_modules" / ".bin" / bin_name)]
+        return self._managed_command_for_runtime("codex")
 
     def managed_claude_command(self) -> list[str]:
-        bin_name = "claude-agent-acp.cmd" if os.name == "nt" else "claude-agent-acp"
-        return [str(self.managed_package_dir("claude_code") / "node_modules" / ".bin" / bin_name)]
+        return self._managed_command_for_runtime("claude_code")
 
     def codex_command(self) -> list[str]:
         runtime = self.load()["agentRuntimes"]["codex"]
@@ -333,22 +381,55 @@ class AgentRuntimeConfigStore:
 
     def _normalize(self, config: dict[str, Any]) -> dict[str, Any]:
         raw_runtimes = config.get("agentRuntimes") if isinstance(config.get("agentRuntimes"), dict) else {}
-        runtimes = self._default_runtimes()
+        acp_package_root = _configured_path(config.get("acpPackageRoot"), self._default_runtime_root())
+        runtimes = self._default_runtimes(acp_package_root)
         for runtime_id, runtime in runtimes.items():
             existing = raw_runtimes.get(runtime_id)
             if isinstance(existing, dict):
                 runtime.update(existing)
+                if runtime_id in ACP_RUNTIME_IDS:
+                    default_package = self._default_managed_package(runtime_id, acp_package_root)
+                    existing_package = existing.get("managedPackage") if isinstance(existing.get("managedPackage"), dict) else {}
+                    runtime["managedPackage"] = {
+                        **default_package,
+                        **existing_package,
+                        "path": default_package["path"],
+                    }
+                    if runtime.get("distribution") == "managed-npm":
+                        runtime["command"] = (
+                            self._managed_command_for_runtime(runtime_id, acp_package_root)
+                            if self._installed_package_version_at(runtime_id, acp_package_root)
+                            else []
+                        )
             runtime["id"] = runtime_id
         active_adapter = str(config.get("activeAdapter") or self._runtime_config.agent_adapter or "nanobot").strip().lower()
         if active_adapter not in SUPPORTED_ACTIVE_ADAPTERS:
             active_adapter = "nanobot"
         return {
             "schemaVersion": SCHEMA_VERSION,
+            "acpPackageRoot": str(acp_package_root),
             "activeAdapter": active_adapter,
             "agentRuntimes": runtimes,
         }
 
-    def _default_runtimes(self) -> dict[str, dict[str, Any]]:
+    def _default_managed_package(self, runtime_id: str, package_root: Path) -> dict[str, Any]:
+        if runtime_id == "codex":
+            return {
+                "name": CODEX_ACP_PACKAGE,
+                "requestedVersion": DEFAULT_CODEX_ACP_VERSION,
+                "installedVersion": None,
+                "installedAt": None,
+                "path": str(self.managed_package_dir("codex", package_root)),
+            }
+        return {
+            "name": CLAUDE_ACP_PACKAGE,
+            "requestedVersion": DEFAULT_CLAUDE_ACP_VERSION,
+            "installedVersion": None,
+            "installedAt": None,
+            "path": str(self.managed_package_dir("claude_code", package_root)),
+        }
+
+    def _default_runtimes(self, package_root: Path) -> dict[str, dict[str, Any]]:
         return {
             "codex": {
                 "id": "codex",
@@ -357,13 +438,7 @@ class AgentRuntimeConfigStore:
                 "enabled": True,
                 "status": "experimental",
                 "distribution": "dev-npx",
-                "managedPackage": {
-                    "name": CODEX_ACP_PACKAGE,
-                    "requestedVersion": DEFAULT_CODEX_ACP_VERSION,
-                    "installedVersion": None,
-                    "installedAt": None,
-                    "path": str(self.managed_package_dir("codex")),
-                },
+                "managedPackage": self._default_managed_package("codex", package_root),
                 "command": [],
                 "mode": "read-only",
                 "configMode": "user-native",
@@ -376,13 +451,7 @@ class AgentRuntimeConfigStore:
                 "enabled": False,
                 "status": "planned",
                 "distribution": "managed-npm",
-                "managedPackage": {
-                    "name": CLAUDE_ACP_PACKAGE,
-                    "requestedVersion": DEFAULT_CLAUDE_ACP_VERSION,
-                    "installedVersion": None,
-                    "installedAt": None,
-                    "path": str(self.managed_package_dir("claude_code")),
-                },
+                "managedPackage": self._default_managed_package("claude_code", package_root),
                 "command": [],
                 "mode": "ask",
                 "configMode": "user-native",
@@ -418,9 +487,10 @@ class AgentRuntimeConfigStore:
         runtime_id = str(runtime.get("id") or "")
         public = dict(runtime)
         public["command"] = _string_list(public.get("command"))
-        if isinstance(public.get("managedPackage"), dict) and runtime_id in {"codex", "claude_code"}:
+        if isinstance(public.get("managedPackage"), dict) and runtime_id in ACP_RUNTIME_IDS:
             managed_package = dict(public["managedPackage"])
             managed_package["installedVersion"] = self._installed_package_version(runtime_id)
+            managed_package["path"] = str(self.managed_package_dir(runtime_id))
             public["managedPackage"] = managed_package
         public["detected"] = self._detect_runtime(runtime)
         public["canActivate"] = runtime_id in SUPPORTED_ACTIVE_ADAPTERS
@@ -495,9 +565,93 @@ class AgentRuntimeConfigStore:
             "version": output[0] if output else None,
         }
 
-    def _installed_package_version(self, runtime_id: str) -> str | None:
+    def _managed_command_for_runtime(self, runtime_id: str, package_root: Path | None = None) -> list[str]:
+        if runtime_id == "codex":
+            bin_name = "codex-acp.cmd" if os.name == "nt" else "codex-acp"
+        else:
+            bin_name = "claude-agent-acp.cmd" if os.name == "nt" else "claude-agent-acp"
+        return [str(self.managed_package_dir(runtime_id, package_root) / "node_modules" / ".bin" / bin_name)]
+
+    def _public_acp_package(self, runtime: dict[str, Any], *, check_latest: bool) -> dict[str, Any]:
+        runtime_id = str(runtime.get("id") or "")
         package_name = CODEX_ACP_PACKAGE if runtime_id == "codex" else CLAUDE_ACP_PACKAGE
-        package_json = self.managed_package_dir(runtime_id) / "node_modules" / package_name / "package.json"
+        package_dir = self.managed_package_dir(runtime_id)
+        command = self.managed_codex_command() if runtime_id == "codex" else self.managed_claude_command()
+        installed_version = self._installed_package_version(runtime_id)
+        latest_version = self._latest_package_version(package_name) if check_latest else None
+        return {
+            "runtimeId": runtime_id,
+            "label": str(runtime.get("label") or runtime_id),
+            "packageName": package_name,
+            "packageDir": str(package_dir),
+            "command": command,
+            "installed": bool(installed_version and self._command_available(command)),
+            "installedVersion": installed_version,
+            "requestedVersion": str((runtime.get("managedPackage") or {}).get("requestedVersion") or ""),
+            "latestVersion": latest_version,
+            "needsUpdate": bool(installed_version and latest_version and installed_version != latest_version),
+        }
+
+    def _latest_package_version(self, package_name: str) -> str | None:
+        npm = _resolve_executable("npm")
+        if not Path(npm).exists() and shutil.which(npm) is None:
+            return None
+        try:
+            result = run_hidden(
+                [npm, "view", package_name, "version"],
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        version = (result.stdout or "").strip().splitlines()
+        return version[-1].strip() if version else None
+
+    def _codex_binary_command(self) -> list[str]:
+        runtime = self.load()["agentRuntimes"]["codex"]
+        codex_path = str(runtime.get("codexPath") or "").strip()
+        return [codex_path or "codex", "--version"]
+
+    def _runtime_cli_version(self, runtime_id: str, label: str, command: list[str]) -> dict[str, Any]:
+        detected = self._detect_command(command)
+        return {
+            "runtimeId": runtime_id,
+            "label": label,
+            "command": [_resolve_executable(command[0]), *command[1:]] if command else [],
+            "detected": bool(detected["ok"]),
+            "version": detected.get("version"),
+        }
+
+    @staticmethod
+    def _is_directory_empty(path: Path) -> bool:
+        if not path.exists():
+            return True
+        try:
+            next(path.iterdir())
+        except StopIteration:
+            return True
+        except OSError:
+            return False
+        return False
+
+    def _is_acp_package_root_empty(self, path: Path) -> bool:
+        if self._is_directory_empty(path):
+            return True
+        for runtime_id in ("codex", "claude_code"):
+            if self._installed_package_version_at(runtime_id, path):
+                return False
+        return True
+
+    def _installed_package_version(self, runtime_id: str) -> str | None:
+        return self._installed_package_version_at(runtime_id, self.runtime_root())
+
+    def _installed_package_version_at(self, runtime_id: str, package_root: Path) -> str | None:
+        package_name = CODEX_ACP_PACKAGE if runtime_id == "codex" else CLAUDE_ACP_PACKAGE
+        package_json = self.managed_package_dir(runtime_id, package_root) / "node_modules" / package_name / "package.json"
         payload = _read_json_object(package_json)
         version = str(payload.get("version") or "").strip()
         return version or None
