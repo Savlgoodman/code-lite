@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from pathlib import Path
 
@@ -45,6 +46,19 @@ def _normalize_claude_runtime_model(runtime_model: str | None) -> str:
     if not model or model == "default":
         return _CLAUDE_DEFAULT_MODEL
     return model
+
+
+def _normalize_codex_runtime_model(runtime_model: str | None) -> str | None:
+    model = str(runtime_model or "").strip()
+    if not model:
+        return None
+    if "[" not in model:
+        return model
+    family = model.split("[", 1)[0].strip()
+    efforts = [item.strip() for item in re.findall(r"\[([^\]]+)\]", model) if item.strip()]
+    if not family or not efforts:
+        return model
+    return f"{family}[{efforts[-1]}]"
 
 
 def _claude_model_label(
@@ -228,6 +242,8 @@ async def stream_turn(
         runtime_model = requested_model_id
         if agent_id == "claude_code":
             runtime_model = _normalize_claude_runtime_model(runtime_model)
+        elif agent_id == "codex":
+            runtime_model = _normalize_codex_runtime_model(runtime_model)
         if runtime_model:
             label = (
                 _claude_model_label(

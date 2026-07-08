@@ -57,6 +57,43 @@ type ActiveView = "chat" | "overview" | "settings";
 type PendingApprovalState = ApprovalRequest & { conversationId: string };
 type PendingInputState = InputRequest & { conversationId: string };
 
+function splitRuntimeModelId(modelId: string): { family: string; effort: string | null } {
+  const trimmed = modelId.trim();
+  if (!trimmed) {
+    return { family: "", effort: null };
+  }
+  const match = trimmed.match(/^([^\[]+)((?:\[[^\]]+\])+)?$/);
+  if (!match) {
+    return { family: trimmed, effort: null };
+  }
+  const efforts = [...(match[2] ?? "").matchAll(/\[([^\]]+)\]/g)].map((item) => item[1].trim()).filter(Boolean);
+  return {
+    family: match[1].trim(),
+    effort: efforts.length > 0 ? efforts[efforts.length - 1] : null,
+  };
+}
+
+function normalizeCodexModelSelection(modelId: string, effort?: string | null): { family: string; effort: string } {
+  const parsed = splitRuntimeModelId(modelId);
+  return {
+    family: parsed.family,
+    effort: String(effort || parsed.effort || "").trim(),
+  };
+}
+
+function buildCodexRuntimeModelId(modelFamily: string, reasoningEffort: string): string {
+  const selection = normalizeCodexModelSelection(modelFamily, reasoningEffort);
+  return selection.family && selection.effort ? `${selection.family}[${selection.effort}]` : selection.family;
+}
+
+function isCodexAgent(agent: AgentSummary | null | undefined): boolean {
+  return (agent?.runtimeId ?? agent?.id ?? "") === "codex";
+}
+
+function isCodexCapabilities(caps: SessionCapabilities): boolean {
+  return caps.agent.id === "codex";
+}
+
 function createDraftSession(): Session {
   return {
     ...createEmptySession(),
@@ -241,8 +278,7 @@ function buildDefaultConfig(caps: SessionCapabilities): SessionConfig {
   const currentModel = caps.models.find((model) => model.isCurrent) ?? caps.models[0];
   let modelFamily = "";
   if (currentModel) {
-    const familyMatch = currentModel.id.match(/^(.*?)\[/);
-    modelFamily = familyMatch ? familyMatch[1] : currentModel.id;
+    modelFamily = isCodexCapabilities(caps) ? splitRuntimeModelId(currentModel.id).family : currentModel.id;
   }
 
   return {
@@ -404,11 +440,22 @@ export function ChatPage() {
               const savedConfig = sessionObj.config;
               if (savedConfig && typeof savedConfig === "object") {
                 const cfg = savedConfig as Partial<SessionConfig>;
+                const savedAgent = (session as unknown as Record<string, unknown>).agent;
+                const isCodex = isRecord(savedAgent) && String(savedAgent.runtimeId ?? savedAgent.id ?? "") === "codex";
+                const rawModelFamily = String(cfg.modelFamily ?? "");
+                const rawReasoningEffort = String(cfg.reasoningEffort ?? "");
+                const rawSelectedConfig = (cfg.selectedConfig as Record<string, ChatConfigValue>) ?? {};
+                const modelSelection = isCodex
+                  ? normalizeCodexModelSelection(rawModelFamily, rawReasoningEffort)
+                  : { family: rawModelFamily, effort: rawReasoningEffort };
+                const selectedConfig = isCodex && modelSelection.effort
+                  ? { ...rawSelectedConfig, reasoning_effort: modelSelection.effort }
+                  : rawSelectedConfig;
                 restoredConfigs[session.id] = {
-                  modelFamily: String(cfg.modelFamily ?? ""),
+                  modelFamily: modelSelection.family,
                   accessMode: String(cfg.accessMode ?? ""),
-                  reasoningEffort: String(cfg.reasoningEffort ?? "medium"),
-                  selectedConfig: (cfg.selectedConfig as Record<string, ChatConfigValue>) ?? {},
+                  reasoningEffort: modelSelection.effort || "medium",
+                  selectedConfig,
                 };
               }
               // 恢复 context usage
@@ -834,6 +881,8 @@ export function ChatPage() {
         const savedConfig = (conversation.session as unknown as Record<string, unknown>).config;
         let restoredModel = "";
         let restoredEffort = "";
+        const conversationAgent = (conversation.session as unknown as Record<string, unknown>).agent;
+        const isCodex = isRecord(conversationAgent) && String(conversationAgent.runtimeId ?? conversationAgent.id ?? "") === "codex";
         if (savedConfig && typeof savedConfig === "object") {
           const cfg = savedConfig as Partial<SessionConfig>;
           restoredModel = String(cfg.modelFamily ?? "");
@@ -845,22 +894,27 @@ export function ChatPage() {
           restoredModel = String(modelInfo.runtimeModel ?? modelInfo.model ?? "");
           restoredEffort = String(modelInfo.reasoningEffort ?? "");
         }
+        if (isCodex && restoredModel) {
+          const modelSelection = normalizeCodexModelSelection(restoredModel, restoredEffort);
+          restoredModel = modelSelection.family;
+          restoredEffort = modelSelection.effort;
+        }
         // 从 session.agent.mode 恢复 accessMode
-        const agentMode = (conversation.session as unknown as Record<string, unknown>).agent;
-        const restoredAccessMode = typeof agentMode === "object" && agentMode
-          ? String((agentMode as Record<string, unknown>).mode ?? "")
+        const restoredAccessMode = isRecord(conversationAgent)
+          ? String(conversationAgent.mode ?? "")
           : "";
 
         if (restoredModel || restoredAccessMode) {
           setConfigBySession((prev) => {
             if (prev[sessionId]) return prev; // 已有本地配置，不覆盖
+            const selectedConfig: Record<string, ChatConfigValue> = restoredEffort ? { reasoning_effort: restoredEffort } : {};
             return {
               ...prev,
               [sessionId]: {
                 modelFamily: restoredModel,
                 accessMode: restoredAccessMode || "read-only",
                 reasoningEffort: restoredEffort || "medium",
-                selectedConfig: restoredEffort ? { reasoning_effort: restoredEffort } : {},
+                selectedConfig,
               },
             };
           });
@@ -1383,13 +1437,12 @@ export function ChatPage() {
       // 解析模型 ID：
       // - Codex 用 "模型族[推理强度]" 格式（模型 id 本身含括号）
       // - Claude Code 用短名称（如 haiku/sonnet/opus[1m]），推理强度走 effort config
-      const agentRuntimeId = sessionAgent?.runtimeId ?? sessionAgent?.id ?? "";
-      const isCodex = agentRuntimeId === "codex";
+      const isCodex = isCodexAgent(sessionAgent);
       let fullModelId: string | undefined;
       let modelLabel: string | undefined;
       if (isCodex && cfg?.modelFamily && cfg.reasoningEffort) {
         // Codex: 用 bracket 格式 "family[effort]"
-        fullModelId = `${cfg.modelFamily}[${cfg.reasoningEffort}]`;
+        fullModelId = buildCodexRuntimeModelId(cfg.modelFamily, cfg.reasoningEffort);
         modelLabel = fullModelId;
       } else if (cfg?.modelFamily) {
         // Claude Code 等：直接用模型 id，推理强度通过 effort config 传递
