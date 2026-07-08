@@ -309,6 +309,20 @@ class AcpRuntimeManager:
             return False
         return bool(getattr(session_capabilities, "resume", None))
 
+    @staticmethod
+    def _supports_close_session(connection: AcpRuntimeConnection) -> bool:
+        """检查 runtime 是否支持 session/close。"""
+        init_result = connection.initialize_result
+        if init_result is None:
+            return False
+        agent_capabilities = getattr(init_result, "agent_capabilities", None)
+        if agent_capabilities is None:
+            return False
+        session_capabilities = getattr(agent_capabilities, "session_capabilities", None)
+        if session_capabilities is None:
+            return False
+        return bool(getattr(session_capabilities, "close", None))
+
     async def _try_restore_saved_session(
         self,
         *,
@@ -414,6 +428,57 @@ class AcpRuntimeManager:
         if connection is not None:
             await self._close_connection(connection)
 
+    async def close_session_for_conversation(
+        self,
+        conversation_id: str,
+        *,
+        delete_binding: bool = False,
+        close_empty_connection: bool = False,
+    ) -> bool:
+        """释放指定 conversation 的 active ACP session。
+
+        delete_binding=True 用于删除会话；归档或空闲释放时保留磁盘绑定，
+        后续可通过 session/resume 或 session/load 恢复。
+        """
+        binding = self._session_bindings.get(conversation_id)
+        if binding is None:
+            binding = self.load_binding_from_disk(conversation_id)
+        if binding is None or not binding.native_session_id:
+            return False
+
+        connection = self.get_connection_for_conversation(conversation_id)
+        closed = False
+        if connection is not None and connection.is_ready:
+            handler = connection._client_handler
+            if handler is not None:
+                handler.detach_route(binding.native_session_id)
+                if delete_binding:
+                    handler.remove_route(binding.native_session_id)
+            if self._supports_close_session(connection):
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(
+                        connection.sdk_connection.close_session(binding.native_session_id),
+                        timeout=5,
+                    )
+                    closed = True
+            connection.sessions.pop(conversation_id, None)
+            connection.touch()
+
+        self._session_bindings.pop(conversation_id, None)
+        if delete_binding:
+            if self._conversation_store is not None:
+                with contextlib.suppress(Exception):
+                    self._conversation_store.delete_native_session(conversation_id)
+        else:
+            binding.state = "idle_closed" if closed else "detached"
+            binding.updated_at = _now_iso()
+            self._persist_binding(binding)
+
+        if close_empty_connection and connection is not None and not connection.sessions:
+            await self.close_connection(connection.key)
+
+        return True
+
     async def close_all(self) -> None:
         """关闭所有连接。"""
         for key in list(self._connections.keys()):
@@ -427,6 +492,47 @@ class AcpRuntimeManager:
         if binding is not None:
             for conn in self._connections.values():
                 conn.sessions.pop(conversation_id, None)
+
+    def status_snapshot(self) -> dict[str, Any]:
+        """返回当前 ACP connection/session 状态，供设置页和诊断使用。"""
+        connections: list[dict[str, Any]] = []
+        for connection in self._connections.values():
+            sessions: list[dict[str, Any]] = []
+            for conversation_id, native_session_id in connection.sessions.items():
+                binding = self._session_bindings.get(conversation_id)
+                route = (
+                    connection._client_handler.get_route(native_session_id)
+                    if connection._client_handler is not None
+                    else None
+                )
+                sessions.append({
+                    "conversationId": conversation_id,
+                    "nativeSessionId": native_session_id,
+                    "state": binding.state if binding is not None else "active",
+                    "activePrompt": bool(getattr(route, "active_prompt", False)),
+                    "runtime": binding.runtime_id if binding is not None else connection.descriptor.id,
+                    "acpServerKind": (
+                        binding.acp_server_kind
+                        if binding is not None
+                        else connection.descriptor.acp_server_kind
+                    ),
+                })
+            connections.append({
+                "runtime": connection.descriptor.id,
+                "acpServerKind": connection.descriptor.acp_server_kind,
+                "workspace": connection.key.workspace,
+                "configMode": connection.key.config_mode,
+                "conversationKey": connection.key.conversation_id,
+                "pid": connection.process.pid,
+                "ready": connection.is_ready,
+                "activeSessions": len(connection.sessions),
+                "latestActivityAt": connection.latest_activity_at,
+                "sessions": sessions,
+            })
+        return {
+            "connectionMode": self._connection_mode,
+            "connections": connections,
+        }
 
     def load_binding_from_disk(self, conversation_id: str) -> AcpSessionBinding | None:
         """从 native-session.json 加载绑定（不创建新 session）。"""

@@ -147,6 +147,12 @@ async def update_conversation_archive_state(
 
     if session is None:
         return JSONResponse({"error": "conversation not found"}, status_code=404)
+    if bool(payload.get("archived")) and services.runtime_manager is not None:
+        await services.runtime_manager.close_session_for_conversation(
+            conversation_id,
+            delete_binding=False,
+            close_empty_connection=True,
+        )
     return JSONResponse({"session": session})
 
 
@@ -196,5 +202,11 @@ async def delete_conversation(
 
     if not deleted:
         return JSONResponse({"error": "conversation not found"}, status_code=404)
+    if services.runtime_manager is not None:
+        await services.runtime_manager.close_session_for_conversation(
+            conversation_id,
+            delete_binding=True,
+            close_empty_connection=True,
+        )
     services.attachment_store.delete_conversation(conversation_id)
     return JSONResponse({"deleted": True})

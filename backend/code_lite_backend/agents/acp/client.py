@@ -186,6 +186,9 @@ class AcpClientHandler:
                 return route.latest_usage
         return self.latest_usage
 
+    def get_route(self, session_id: str | None) -> AcpSessionRoute | None:
+        return self._route_for_session(session_id)
+
     def _route_for_session(self, session_id: str | None) -> AcpSessionRoute | None:
         if not session_id:
             return None
