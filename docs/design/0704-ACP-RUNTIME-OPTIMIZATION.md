@@ -646,13 +646,15 @@ class AcpRuntimeConnection:
 
 ---
 
-## 10. 禁止产品态按需 npx
+## 10. 禁止按需 npx 兜底
 
-当前 Codex fallback 可以通过 `npx -y @agentclientprotocol/codex-acp` 按需启动。产品体验上应调整为：
+Codex 不再通过 `npx -y @agentclientprotocol/codex-acp` 按需启动。开发模式和产品态统一使用 code-lite 托管目录：
 
 1. 设置页检测到缺失时提示安装托管 ACP package。
-2. 对话运行只使用固定路径或用户显式 custom command。
-3. `npx` 只允许在 dev/debug 模式使用，UI 文案明确说明会慢且版本可能漂移。
+2. 安装和更新都写入 `data/runtimes/acp/<runtime-package>`。
+3. 更新时覆盖托管包目录，避免旧包残留。
+4. 对话运行只使用固定路径或用户显式 custom command。
+5. `npx` 只允许作为手工 smoke/probe 命令，不参与设置页检测和对话运行。
 
 ---
 

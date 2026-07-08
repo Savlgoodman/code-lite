@@ -176,7 +176,11 @@ class AgentRuntimeConfigStore:
             if current_runtime_id not in ACP_RUNTIME_IDS:
                 raise AgentRuntimeConfigError("当前只支持安装 Codex ACP 和 Claude Code ACP 包")
         for current_runtime_id in runtime_ids:
-            self.install_runtime(current_runtime_id, package_version="latest" if update else None)
+            self.install_runtime(
+                current_runtime_id,
+                package_version="latest" if update else None,
+                replace=update,
+            )
         return self.acp_package_settings(check_latest=update)
 
     def update_runtime(self, runtime_id: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -234,7 +238,13 @@ class AgentRuntimeConfigStore:
         self.save(config)
         return self.list_settings()
 
-    def install_runtime(self, runtime_id: str, package_version: str | None = None) -> dict[str, Any]:
+    def install_runtime(
+        self,
+        runtime_id: str,
+        package_version: str | None = None,
+        *,
+        replace: bool = False,
+    ) -> dict[str, Any]:
         if runtime_id not in ACP_RUNTIME_IDS:
             raise AgentRuntimeConfigError("当前只支持安装 Codex ACP 和 Claude Code ACP 包")
 
@@ -243,6 +253,7 @@ class AgentRuntimeConfigStore:
             raise AgentRuntimeConfigError("未检测到 npm。请先安装 Node.js，后续版本会提供托管 Node 安装。")
 
         package_dir = self.managed_package_dir(runtime_id)
+        self._prepare_package_dir_for_install(package_dir, replace=replace)
         package_dir.mkdir(parents=True, exist_ok=True)
         package_manifest = package_dir / "package.json"
         if not package_manifest.exists():
@@ -336,9 +347,6 @@ class AgentRuntimeConfigStore:
         runtime = self.load()["agentRuntimes"]["codex"]
         return self._resolve_codex_command(runtime)["command"]
 
-    def _npx_codex_command(self) -> list[str]:
-        return [_resolve_executable("npx"), "-y", CODEX_ACP_PACKAGE]
-
     def _command_available(self, command: list[str]) -> bool:
         return bool(command) and _command_reference_exists(command[0])
 
@@ -369,13 +377,12 @@ class AgentRuntimeConfigStore:
                 "source": "managed-npm",
             }
 
-        npx_command = self._npx_codex_command()
-        npm_status = self._detect_npm()
         return {
-            "ok": bool(npm_status["ok"]),
-            "command": npx_command,
+            "ok": False,
+            "command": managed,
+            "detail": "未检测到托管 Codex ACP 包，请先在 Agent Runtime 设置中安装 ACP",
             "missingCommand": [_resolve_executable(command[0]), *command[1:]] if command else None,
-            "source": "npx",
+            "source": "managed-npm",
         }
 
     def codex_env(self) -> dict[str, str]:
@@ -417,6 +424,8 @@ class AgentRuntimeConfigStore:
                         **existing_package,
                         "path": str(package_dir),
                     }
+                    if runtime_id == "codex" and runtime.get("distribution") == "dev-npx":
+                        runtime["distribution"] = "managed-npm"
                     if runtime.get("distribution") == "managed-npm":
                         runtime["command"] = (
                             self._managed_command_for_runtime(runtime_id, package_dir=package_dir)
@@ -459,7 +468,7 @@ class AgentRuntimeConfigStore:
                 "adapter": "codex",
                 "enabled": True,
                 "status": "experimental",
-                "distribution": "dev-npx",
+                "distribution": "managed-npm",
                 "managedPackage": self._default_managed_package("codex", package_root),
                 "command": [],
                 "mode": "read-only",
@@ -535,14 +544,14 @@ class AgentRuntimeConfigStore:
         if runtime_id == "codex":
             resolved = self._resolve_codex_command(runtime)
             source = str(resolved.get("source") or "")
-            if source == "npx":
-                detail = "将通过 npx 按需启动 codex-acp" if resolved["ok"] else "未检测到 npm"
-            elif source == "managed-npm":
+            if source == "managed-npm":
                 detail = "已检测到托管 Codex ACP 命令"
             elif source == "custom":
                 detail = str(resolved.get("detail") or "自定义 Codex ACP 命令不可用")
             else:
                 detail = "已检测到 Codex ACP 命令" if resolved["ok"] else "未检测到 Codex ACP 命令"
+            if not resolved["ok"]:
+                detail = str(resolved.get("detail") or detail)
             return {
                 "ok": bool(resolved["ok"]),
                 "detail": detail,
@@ -694,6 +703,21 @@ class AgentRuntimeConfigStore:
         version = str(payload.get("version") or "").strip()
         return version or None
 
+    def _prepare_package_dir_for_install(self, package_dir: Path, *, replace: bool) -> None:
+        if not replace or not package_dir.exists():
+            return
+
+        resolved_package_dir = package_dir.resolve()
+        runtime_root = self.runtime_root().resolve()
+        try:
+            resolved_package_dir.relative_to(runtime_root)
+        except ValueError:
+            return
+
+        if resolved_package_dir == runtime_root:
+            raise AgentRuntimeConfigError("拒绝清理 ACP 根目录")
+        shutil.rmtree(resolved_package_dir)
+
     def _update_codex_runtime(self, runtime: dict[str, Any], patch: dict[str, Any]) -> None:
         if "enabled" in patch:
             runtime["enabled"] = bool(patch.get("enabled"))
@@ -720,4 +744,4 @@ class AgentRuntimeConfigStore:
                 current = os.path.normcase(os.path.abspath(runtime["command"][0]))
                 runtime["distribution"] = "managed-npm" if current == managed else "custom"
             else:
-                runtime["distribution"] = "managed-npm" if self._installed_package_version("codex") else "dev-npx"
+                runtime["distribution"] = "managed-npm"

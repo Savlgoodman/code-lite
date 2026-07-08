@@ -67,6 +67,46 @@ class AgentRuntimeConfigStoreTest(unittest.TestCase):
 
             self.assertEqual(normalized["agentRuntimes"]["codex"]["command"], store.managed_codex_command())
 
+    def test_codex_does_not_fallback_to_npx_when_managed_package_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = self.make_store(Path(temp_dir))
+
+            settings = store.list_settings()
+            codex = next(item for item in settings["runtimes"] if item["id"] == "codex")
+
+            self.assertFalse(codex["detected"]["ok"])
+            self.assertEqual(codex["detected"]["source"], "managed-npm")
+            self.assertNotIn("npx", " ".join(codex["detected"]["command"]).lower())
+            self.assertIn("托管 Codex ACP 包", codex["detected"]["detail"])
+
+    def test_update_install_requests_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            AgentRuntimeConfigStore,
+            "_detect_command",
+            return_value={"ok": False, "version": None},
+        ), patch.object(
+            AgentRuntimeConfigStore,
+            "_latest_package_version",
+            return_value="1.2.3",
+        ):
+            store = self.make_store(Path(temp_dir))
+            with patch.object(store, "install_runtime") as install_runtime:
+                store.install_acp_packages(update=True, runtime_id="codex")
+
+            install_runtime.assert_called_once_with("codex", package_version="latest", replace=True)
+
+    def test_replace_install_cleans_managed_package_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = self.make_store(Path(temp_dir))
+            package_dir = store.managed_package_dir("codex")
+            stale_file = package_dir / "stale.txt"
+            stale_file.parent.mkdir(parents=True)
+            stale_file.write_text("old", encoding="utf-8")
+
+            store._prepare_package_dir_for_install(package_dir, replace=True)
+
+            self.assertFalse(package_dir.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

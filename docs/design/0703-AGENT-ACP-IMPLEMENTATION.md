@@ -306,16 +306,15 @@ MVP 可以按 workspace 复用连接，避免每 turn 都重启 runtime。
 | `managed-binary` | code-lite 托管平台二进制 |
 | `system` | 用户 PATH 中的命令 |
 | `custom` | 用户显式选择的绝对路径 |
-| `dev-npx` | 开发期临时验证，不作为产品默认 |
 
 发现优先级：
 
 1. 用户显式 custom path。
 2. code-lite managed runtime。
 3. system PATH。
-4. dev-only `npx -y`。
 
 不要自动从 workspace `node_modules/.bin` 发现 runtime，避免项目劫持执行入口。
+开发模式也不通过 `npx -y` 兜底启动 ACP server；`npx` 只允许作为手工 smoke/probe 命令，不参与设置页检测和对话运行。
 
 ## 5. 三个 ACP Runtime 适配器
 
@@ -1000,7 +999,7 @@ uv run --with agent-client-protocol python .\demo\acp-demo\python_sdk_acp_probe.
 目标：
 
 1. runtime registry 增加 `codex-acp`。
-2. 开发期支持 `npx -y @agentclientprotocol/codex-acp`。
+2. 开发期和产品态都使用 `data/runtimes/acp/codex-acp` 中的托管 npm 包。
 3. 默认 `INITIAL_AGENT_MODE=read-only`。
 4. 映射 text、tool、approval、usage、run completed。
 5. 真实 prompt 必须显式启用。
