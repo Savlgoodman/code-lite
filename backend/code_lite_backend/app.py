@@ -39,7 +39,10 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     billing_usage_recorder = BillingUsageRecorder(runtime_config.billing_dir, billing_price_store)
     model_config_store = ModelConfigStore(runtime_config)
     agent_runtime_config_store = AgentRuntimeConfigStore(runtime_config)
-    runtime_manager = AcpRuntimeManager(conversation_store=conversation_store)
+    runtime_manager = AcpRuntimeManager(
+        conversation_store=conversation_store,
+        runtime_config=runtime_config,
+    )
     services = AppServices(
         runtime_config=runtime_config,
         workspace=workspace,

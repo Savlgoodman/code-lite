@@ -12,6 +12,13 @@ ENV_NAME = "CODE_LITE_ENV"
 NANOBOT_CONFIG_NAME = "nanobot_config.json"
 APP_CONFIG_NAME = "app_config.json"
 AGENT_RUNTIME_CONFIG_NAME = "agent_runtimes.json"
+ACP_CONNECTION_MODE_ENV_NAME = "CODE_LITE_ACP_CONNECTION_MODE"
+ACP_CONNECTION_MODE_PER_CONVERSATION = "per_conversation"
+ACP_CONNECTION_MODE_MULTI_SESSION = "multi_session"
+ACP_CONNECTION_MODES = {
+    ACP_CONNECTION_MODE_PER_CONVERSATION,
+    ACP_CONNECTION_MODE_MULTI_SESSION,
+}
 
 
 MINIMAL_NANOBOT_CONFIG: dict[str, Any] = {
@@ -74,6 +81,7 @@ class RuntimeConfig:
     agent_runtime_config_path: Path
     nanobot_config_path: Path
     agent_adapter: str
+    acp_connection_mode: str
 
 
 def resolve_data_dir(*, env: str, workspace: Path, data_dir_override: Path | None = None) -> Path:
@@ -141,6 +149,12 @@ def resolve_runtime_config(
         or os.environ.get("CODE_LITE_ADAPTER")
         or "router"
     ).strip().lower()
+    acp_connection_mode = os.environ.get(
+        ACP_CONNECTION_MODE_ENV_NAME,
+        ACP_CONNECTION_MODE_PER_CONVERSATION,
+    ).strip().lower()
+    if acp_connection_mode not in ACP_CONNECTION_MODES:
+        acp_connection_mode = ACP_CONNECTION_MODE_PER_CONVERSATION
 
     return RuntimeConfig(
         env=env,
@@ -155,4 +169,5 @@ def resolve_runtime_config(
         agent_runtime_config_path=agent_runtime_config_path,
         nanobot_config_path=nanobot_config_path,
         agent_adapter=agent_adapter,
+        acp_connection_mode=acp_connection_mode,
     )

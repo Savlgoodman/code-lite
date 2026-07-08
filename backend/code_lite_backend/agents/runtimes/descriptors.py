@@ -16,6 +16,7 @@ class RuntimeDescriptor:
     id: str
     label: str
     family: str
+    acp_server_kind: str
     adapter_kind: str = "acp"
     default_mode: str = "read-only"
     config_mode: str = "user-native"
@@ -41,6 +42,7 @@ CODEX_DESCRIPTOR = RuntimeDescriptor(
     id="codex",
     label="Codex",
     family="codex",
+    acp_server_kind="codex-acp",
     adapter_kind="acp",
     default_mode="read-only",
     config_mode="user-native",
@@ -96,6 +98,7 @@ CLAUDE_DESCRIPTOR = RuntimeDescriptor(
     id="claude_code",
     label="Claude Code",
     family="claude_code",
+    acp_server_kind="claude-agent-acp",
     adapter_kind="acp",
     default_mode="ask",
     config_mode="user-native",
@@ -146,6 +149,7 @@ OPENCODE_DESCRIPTOR = RuntimeDescriptor(
     id="opencode",
     label="opencode",
     family="opencode",
+    acp_server_kind="opencode-acp",
     adapter_kind="acp",
     default_mode="ask",
     config_mode="isolated",

@@ -63,7 +63,9 @@ class AcpAgentAdapter:
         self._attachment_store = attachment_store
         self._agent_runtime_config_store = agent_runtime_config_store
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
-        self._runtime_manager = runtime_manager or AcpRuntimeManager()
+        self._runtime_manager = runtime_manager or AcpRuntimeManager(
+            runtime_config=runtime_config,
+        )
         self._profile = get_runtime_profile(runtime)
         if self._profile is None:
             raise ValueError(f"Unsupported ACP runtime profile: {runtime}")

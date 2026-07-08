@@ -21,6 +21,7 @@ from code_lite_backend.agents.acp.client import AcpClientHandler
 from code_lite_backend.agents.acp.client_capabilities import build_client_capabilities
 from code_lite_backend.agents.acp.connection import CodeLiteClientSideConnection
 from code_lite_backend.agents.runtimes import RuntimeDescriptor
+from code_lite_backend.core.config import ACP_CONNECTION_MODE_MULTI_SESSION, RuntimeConfig
 from code_lite_backend.services.approvals import ApprovalBroker
 from code_lite_backend.services.inputs import InputBroker
 
@@ -36,6 +37,7 @@ class ConnectionKey:
     """
 
     runtime_id: str
+    acp_server_kind: str
     workspace: str
     config_mode: str
     conversation_id: str  # 每个会话独立隔离
@@ -48,12 +50,15 @@ class AcpSessionBinding:
     """UI conversation 到 native ACP session 的绑定。"""
 
     conversation_id: str
+    agent_id: str
     runtime_id: str
+    acp_server_kind: str
     native_session_id: str
     workspace: str
     config_mode: str
     created_at: str
     updated_at: str
+    state: str = "active"
     capabilities: dict[str, Any] | None = None
 
 
@@ -95,13 +100,18 @@ class AcpRuntimeManager:
     避免每轮 prompt 都重新 spawn 子进程。
     """
 
-    def __init__(self, conversation_store: Any = None) -> None:
+    def __init__(self, conversation_store: Any = None, runtime_config: RuntimeConfig | None = None) -> None:
         self._connections: dict[ConnectionKey, AcpRuntimeConnection] = {}
         self._session_bindings: dict[str, AcpSessionBinding] = {}  # conversation_id -> binding
         self._turn_locks: dict[str, asyncio.Lock] = {}  # conversation_id -> lock
         self._handshake_timeout = 30.0
         self._session_timeout = 30.0
         self._conversation_store = conversation_store  # ConversationStore (optional)
+        self._connection_mode = (
+            runtime_config.acp_connection_mode
+            if runtime_config is not None
+            else "per_conversation"
+        )
 
     def get_turn_lock(self, conversation_id: str) -> asyncio.Lock:
         """获取指定 conversation 的 turn lock（串行化同一会话的 prompt）。"""
@@ -119,7 +129,11 @@ class AcpRuntimeManager:
         if binding is None:
             return None
         for conn in self._connections.values():
-            if conn.key.runtime_id == binding.runtime_id and conn.is_ready:
+            if (
+                conn.key.runtime_id == binding.runtime_id
+                and conn.key.acp_server_kind == binding.acp_server_kind
+                and conn.is_ready
+            ):
                 return conn
         return None
 
@@ -197,8 +211,9 @@ class AcpRuntimeManager:
         # 1. 内存中已有绑定则复用
         existing = self._session_bindings.get(conversation_id)
         if existing is not None:
-            if existing.native_session_id in connection.sessions.values():
+            if self._binding_matches_connection(existing, connection) and existing.native_session_id in connection.sessions.values():
                 existing.updated_at = _now_iso()
+                existing.state = "active"
                 connection.touch()
                 return existing
 
@@ -243,12 +258,15 @@ class AcpRuntimeManager:
         created_at = saved_binding.created_at if saved_binding else _now_iso()
         binding = AcpSessionBinding(
             conversation_id=conversation_id,
+            agent_id=connection.descriptor.id,
             runtime_id=connection.descriptor.id,
+            acp_server_kind=connection.descriptor.acp_server_kind,
             native_session_id=native_session_id,
             workspace=str(workspace),
             config_mode=connection.key.config_mode,
             created_at=created_at,
             updated_at=_now_iso(),
+            state="active",
             capabilities=session_data,
         )
         connection.sessions[conversation_id] = native_session_id
@@ -381,6 +399,14 @@ class AcpRuntimeManager:
         )
         return binding
 
+    @staticmethod
+    def _binding_matches_connection(binding: AcpSessionBinding, connection: AcpRuntimeConnection) -> bool:
+        return (
+            binding.runtime_id == connection.descriptor.id
+            and binding.acp_server_kind == connection.descriptor.acp_server_kind
+            and binding.config_mode == connection.key.config_mode
+        )
+
     async def close_connection(self, key: ConnectionKey) -> None:
         """关闭指定连接。"""
         connection = self._connections.pop(key, None)
@@ -410,12 +436,15 @@ class AcpRuntimeManager:
             return None
         return AcpSessionBinding(
             conversation_id=data.get("conversationId", conversation_id),
+            agent_id=data.get("agentId", data.get("runtimeId", "")),
             runtime_id=data.get("runtimeId", ""),
+            acp_server_kind=data.get("acpServerKind", data.get("runtimeId", "")),
             native_session_id=data.get("nativeSessionId", ""),
             workspace=data.get("workspace", ""),
             config_mode=data.get("configMode", ""),
             created_at=data.get("createdAt", ""),
             updated_at=data.get("updatedAt", ""),
+            state=data.get("state", "active"),
             capabilities=data.get("capabilities"),
         )
 
@@ -452,12 +481,15 @@ class AcpRuntimeManager:
         try:
             data = {
                 "conversationId": binding.conversation_id,
+                "agentId": binding.agent_id,
                 "runtimeId": binding.runtime_id,
+                "acpServerKind": binding.acp_server_kind,
                 "nativeSessionId": binding.native_session_id,
                 "workspace": binding.workspace,
                 "configMode": binding.config_mode,
                 "createdAt": binding.created_at,
                 "updatedAt": binding.updated_at,
+                "state": binding.state,
             }
             # 缓存 capabilities（首次 session/new 后写入，后续从磁盘读取）
             if binding.capabilities is not None:
@@ -674,8 +706,8 @@ class AcpRuntimeManager:
 
         logger.info("Closed ACP connection for %s", connection.descriptor.id)
 
-    @staticmethod
     def _build_key(
+        self,
         descriptor: RuntimeDescriptor,
         command: list[str],
         env: dict[str, str],
@@ -688,9 +720,14 @@ class AcpRuntimeManager:
         env_fp = hashlib.sha256(",".join(env_keys).encode()).hexdigest()[:12]
         return ConnectionKey(
             runtime_id=descriptor.id,
+            acp_server_kind=descriptor.acp_server_kind,
             workspace=str(workspace),
             config_mode=descriptor.config_mode,
-            conversation_id=conversation_id,
+            conversation_id=(
+                ""
+                if self._connection_mode == ACP_CONNECTION_MODE_MULTI_SESSION
+                else conversation_id
+            ),
             command_fingerprint=command_fp,
             env_fingerprint=env_fp,
         )
