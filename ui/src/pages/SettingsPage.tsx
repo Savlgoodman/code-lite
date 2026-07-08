@@ -38,6 +38,7 @@ import {
   loadModelSettings,
   refreshModelProviderModels,
   updateAcpPackageDir,
+  updateAgentRuntime,
   updateConfiguredModel,
   updateDefaultModel,
   updateModelProvider
@@ -56,6 +57,8 @@ import type {
   LogEntry,
   LogFileInfo,
   ModelSettingsState,
+  RuntimeExecutableInfo,
+  RuntimeExecutableOption,
   Session
 } from "../types";
 import "./SettingsPage.css";
@@ -220,6 +223,25 @@ function acpPackageStateLabel(installed: boolean, needsUpdate: boolean) {
   return installed ? "已安装" : "未安装";
 }
 
+function executableSourceLabel(source: string) {
+  if (source === "sdk") {
+    return "SDK 内置";
+  }
+  if (source === "system") {
+    return "本机";
+  }
+  return source || "自动";
+}
+
+function runtimeExecutableOptionLabel(option: RuntimeExecutableOption) {
+  const source = option.kind === "sdk" ? "SDK 内置" : option.source;
+  const version = option.version ? ` · ${option.version}` : "";
+  if (option.kind === "sdk") {
+    return `${source}${version}`;
+  }
+  return `${source} · ${option.path}${version}`;
+}
+
 function runtimeStatusLabel(runtime: AgentRuntimeConfig) {
   if (runtime.detected.ok) {
     return "可用";
@@ -238,11 +260,14 @@ function runtimeChecks(
   runtime: AgentRuntimeConfig,
   runtimeSettings: AgentRuntimeSettingsState | null,
   packageInfo: AcpPackageInfo | null,
-  runtimeVersion: AcpRuntimeVersionInfo | null
+  runtimeVersion: AcpRuntimeVersionInfo | null,
+  executableInfo: RuntimeExecutableInfo | null
 ): Array<{ detail: string; label: string; ok: boolean; value: string }> {
   const nodeOk = Boolean(runtimeSettings?.nodeDetected.ok);
   const npmOk = Boolean(runtimeSettings?.npmDetected.ok);
   const packageVersion = packageInfo?.installedVersion ?? runtime.managedPackage?.installedVersion;
+  const runtimeVersionDetail = executableInfo?.selectedPath || runtimeVersion?.command.join(" ") || commandText(runtime);
+  const runtimeVersionValue = executableInfo?.selectedVersion ?? runtimeVersion?.version;
   return [
     {
       detail: runtime.detected.detail ?? commandText(runtime),
@@ -271,10 +296,10 @@ function runtimeChecks(
       value: packageVersion ?? (runtime.managedPackage ? "未安装" : "pass")
     },
     {
-      detail: runtimeVersion?.command.join(" ") || commandText(runtime),
+      detail: runtimeVersionDetail,
       label: "Runtime 版本",
-      ok: runtime.id === "opencode" || runtime.id === "nanobot" || Boolean(runtimeVersion?.detected),
-      value: runtimeVersion?.version ?? (runtime.id === "opencode" || runtime.id === "nanobot" ? "无需检测" : "未检测到")
+      ok: runtime.id === "opencode" || runtime.id === "nanobot" || Boolean(runtimeVersionValue),
+      value: runtimeVersionValue ?? (runtime.id === "opencode" || runtime.id === "nanobot" ? "无需检测" : "未检测到")
     },
     {
       detail: runtime.configMode === "isolated" ? "使用 code-lite 隔离配置目录。" : "使用 runtime 本机配置和登录态。",
@@ -386,6 +411,36 @@ function AgentRuntimeSettings() {
     }
   }
 
+  async function selectRuntimeExecutable(runtimeId: string, optionId: string) {
+    const executable = packageSettings?.runtimeExecutables?.find((item) => item.runtimeId === runtimeId);
+    const option = executable?.options.find((item) => item.id === optionId);
+    if (!option) {
+      setError("未找到可用的 Runtime 可执行文件选项");
+      return;
+    }
+    setBusyId(`${runtimeId}-runtime-executable`);
+    setError(null);
+    try {
+      await updateAgentRuntime(runtimeId, {
+        runtimeExecutable: {
+          source: option.kind === "sdk" ? "sdk" : "system",
+          selectedPath: option.kind === "sdk" ? "" : option.path
+        }
+      });
+      const [nextRuntimes, nextPackages] = await Promise.all([
+        loadAgentRuntimeSettings(),
+        loadAcpPackageSettings()
+      ]);
+      setRuntimeSettings(nextRuntimes);
+      setPackageSettings(nextPackages);
+      setPackageDirDrafts(Object.fromEntries(nextPackages.packages.map((item) => [item.runtimeId, item.packageDir])));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   useEffect(() => {
     void refreshSettings();
   }, []);
@@ -398,7 +453,16 @@ function AgentRuntimeSettings() {
   const selectedRuntimeVersion = selectedRuntime
     ? packageSettings?.runtimeVersions.find((item) => item.runtimeId === selectedRuntime.id) ?? null
     : null;
-  const checks = selectedRuntime ? runtimeChecks(selectedRuntime, runtimeSettings, selectedPackage, selectedRuntimeVersion) : [];
+  const selectedExecutable = selectedRuntime
+    ? packageSettings?.runtimeExecutables?.find((item) => item.runtimeId === selectedRuntime.id) ?? null
+    : null;
+  const executableOptions = selectedExecutable?.options.map((item) => ({
+    label: runtimeExecutableOptionLabel(item),
+    value: item.id
+  })) ?? [];
+  const checks = selectedRuntime
+    ? runtimeChecks(selectedRuntime, runtimeSettings, selectedPackage, selectedRuntimeVersion, selectedExecutable)
+    : [];
   const packageDraft = selectedPackage ? packageDirDrafts[selectedPackage.runtimeId] ?? selectedPackage.packageDir : "";
   const primaryIsInstall = Boolean(selectedPackage && (!selectedPackage.installed || selectedPackage.packageDirIsEmpty));
   const canManagePackage = Boolean(selectedPackage);
@@ -532,6 +596,55 @@ function AgentRuntimeSettings() {
             <div>
               <span>ACP 包目录</span>
               <strong>当前 runtime 无需托管 ACP npm 包</strong>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedExecutable ? (
+        <div className="settings-card acp-runtime-package-card runtime-executable-card">
+          <div className="settings-runtime-section-head">
+            <div>
+              <span>底层 Runtime 可执行文件</span>
+              <strong>{selectedExecutable.selectedPath || "等待安装 ACP 包后检测 SDK 内置路径"}</strong>
+            </div>
+            <i className={`acp-package-status ${selectedExecutable.selectedPath ? "pass" : "fail"}`}>
+              {executableSourceLabel(selectedExecutable.selectedSource)}
+            </i>
+          </div>
+          <div className="runtime-executable-row">
+            {executableOptions.length > 0 ? (
+              <SettingsSelect
+                disabled={busyId !== null || isLoading}
+                onChange={(value) => void selectRuntimeExecutable(selectedExecutable.runtimeId, value)}
+                options={executableOptions}
+                value={selectedExecutable.selectedId}
+              />
+            ) : (
+              <div className="runtime-executable-empty">未找到可用 Runtime executable</div>
+            )}
+            <button
+              className="settings-secondary-button"
+              disabled={isLoading}
+              onClick={() => void refreshSettings({ check: true })}
+              type="button"
+            >
+              <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />
+              <span>检查版本</span>
+            </button>
+          </div>
+          <div className="settings-runtime-detail acp-package-detail runtime-executable-detail">
+            <div>
+              <span>当前版本</span>
+              <strong>{selectedExecutable.selectedVersion ?? "未检测到"}</strong>
+            </div>
+            <div>
+              <span>SDK 版本</span>
+              <strong>{selectedExecutable.sdkVersion ?? "未安装"}</strong>
+            </div>
+            <div>
+              <span>最新 runtime 包</span>
+              <strong>{selectedExecutable.latestVersion ?? "未检查"}</strong>
             </div>
           </div>
         </div>

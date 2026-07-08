@@ -489,6 +489,11 @@ export interface AgentRuntimeManagedPackage {
   requestedVersion?: string;
 }
 
+export interface AgentRuntimeExecutableConfig {
+  selectedPath?: string;
+  source: "sdk" | "system" | string;
+}
+
 export interface AgentRuntimeConfig {
   adapter: string;
   canActivate?: boolean;
@@ -505,6 +510,7 @@ export interface AgentRuntimeConfig {
   label: string;
   managedPackage?: AgentRuntimeManagedPackage;
   mode: string;
+  runtimeExecutable?: AgentRuntimeExecutableConfig;
   status: string;
 }
 
@@ -541,6 +547,29 @@ export interface AcpRuntimeVersionInfo {
   version?: string | null;
 }
 
+export interface RuntimeExecutableOption {
+  detected: boolean;
+  id: string;
+  kind: "sdk" | "system" | string;
+  label: string;
+  path: string;
+  source: string;
+  version?: string | null;
+}
+
+export interface RuntimeExecutableInfo {
+  label: string;
+  latestVersion?: string | null;
+  options: RuntimeExecutableOption[];
+  runtimeId: string;
+  sdkPath: string;
+  sdkVersion?: string | null;
+  selectedId: string;
+  selectedPath: string;
+  selectedSource: string;
+  selectedVersion?: string | null;
+}
+
 export interface AcpPackageSettingsState {
   checkedAt?: number | null;
   nodeDetected: AgentRuntimeDetected;
@@ -549,6 +578,7 @@ export interface AcpPackageSettingsState {
   packageRootExists: boolean;
   packageRootIsEmpty: boolean;
   packages: AcpPackageInfo[];
+  runtimeExecutables?: RuntimeExecutableInfo[];
   runtimeVersions: AcpRuntimeVersionInfo[];
 }
 

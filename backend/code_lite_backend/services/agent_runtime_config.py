@@ -17,10 +17,13 @@ from code_lite_backend.storage.conversations import atomic_write_json
 SCHEMA_VERSION = 1
 CODEX_ACP_PACKAGE = "@agentclientprotocol/codex-acp"
 CLAUDE_ACP_PACKAGE = "@agentclientprotocol/claude-agent-acp"
+CODEX_RUNTIME_PACKAGE = "@openai/codex"
+CLAUDE_RUNTIME_PACKAGE = "@anthropic-ai/claude-agent-sdk"
 DEFAULT_CODEX_ACP_VERSION = "1.1.0"
 DEFAULT_CLAUDE_ACP_VERSION = "0.55.0"
 SUPPORTED_ACTIVE_ADAPTERS = {"codex", "claude_code", "nanobot"}
 ACP_RUNTIME_IDS = {"codex", "claude_code"}
+RUNTIME_EXECUTABLE_SOURCES = {"sdk", "system"}
 
 
 class AgentRuntimeConfigError(ValueError):
@@ -75,6 +78,17 @@ def _command_exists(command: str) -> bool:
 def _command_reference_exists(command: str) -> bool:
     resolved = _resolve_executable(command)
     return Path(resolved).exists() or shutil.which(command) is not None
+
+
+def _existing_path(value: Any) -> Path | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    path = Path(text).expanduser()
+    try:
+        return path.resolve() if path.exists() else None
+    except OSError:
+        return None
 
 
 def _string_list(value: Any) -> list[str]:
@@ -142,8 +156,12 @@ class AgentRuntimeConfigStore:
             "npmDetected": self._detect_npm(),
             "packages": packages,
             "runtimeVersions": [
-                self._runtime_cli_version("codex", "Codex", self._codex_binary_command()),
-                self._runtime_cli_version("claude_code", "Claude Code", ["claude", "--version"]),
+                self._selected_runtime_executable_version("codex", config["agentRuntimes"]["codex"]),
+                self._selected_runtime_executable_version("claude_code", config["agentRuntimes"]["claude_code"]),
+            ],
+            "runtimeExecutables": [
+                self._public_runtime_executable(config["agentRuntimes"][runtime_id], check_latest=check_latest)
+                for runtime_id in ("codex", "claude_code")
             ],
             "checkedAt": _now_ms() if check_latest else None,
         }
@@ -189,8 +207,18 @@ class AgentRuntimeConfigStore:
         if runtime is None:
             raise AgentRuntimeConfigError("Agent runtime 不存在")
 
+        if runtime_id in ACP_RUNTIME_IDS and "runtimeExecutable" in patch:
+            self._update_runtime_executable(runtime_id, runtime, patch.get("runtimeExecutable"))
+        elif runtime_id == "codex" and "codexPath" in patch:
+            self._update_legacy_codex_path(runtime, patch.get("codexPath"))
+
         if runtime_id == "codex":
             self._update_codex_runtime(runtime, patch)
+        elif runtime_id == "claude_code":
+            allowed = {"enabled", "configMode", "command", "mode"}
+            for key in allowed:
+                if key in patch:
+                    runtime[key] = patch[key]
         else:
             allowed = {"enabled", "configMode", "command"}
             for key in allowed:
@@ -397,7 +425,8 @@ class AgentRuntimeConfigStore:
             codex_home.mkdir(parents=True, exist_ok=True)
             env["CODEX_HOME"] = str(codex_home)
 
-        codex_path = str(runtime.get("codexPath") or "").strip()
+        runtime_executable = self._normalize_runtime_executable("codex", runtime)
+        codex_path = str(runtime_executable.get("selectedPath") or runtime.get("codexPath") or "").strip()
         if codex_path:
             env["CODEX_PATH"] = codex_path
 
@@ -424,6 +453,7 @@ class AgentRuntimeConfigStore:
                         **existing_package,
                         "path": str(package_dir),
                     }
+                    runtime["runtimeExecutable"] = self._normalize_runtime_executable(runtime_id, runtime)
                     if runtime_id == "codex" and runtime.get("distribution") == "dev-npx":
                         runtime["distribution"] = "managed-npm"
                     if runtime.get("distribution") == "managed-npm":
@@ -474,6 +504,7 @@ class AgentRuntimeConfigStore:
                 "mode": "read-only",
                 "configMode": "user-native",
                 "codexPath": "",
+                "runtimeExecutable": {"source": "sdk", "selectedPath": ""},
             },
             "claude_code": {
                 "id": "claude_code",
@@ -486,6 +517,7 @@ class AgentRuntimeConfigStore:
                 "command": [],
                 "mode": "ask",
                 "configMode": "user-native",
+                "runtimeExecutable": {"source": "sdk", "selectedPath": ""},
             },
             "opencode": {
                 "id": "opencode",
@@ -536,6 +568,257 @@ class AgentRuntimeConfigStore:
 
     def _detect_npm(self) -> dict[str, Any]:
         return self._detect_command(["npm", "--version"])
+
+    def _normalize_runtime_executable(self, runtime_id: str, runtime: dict[str, Any]) -> dict[str, Any]:
+        raw = runtime.get("runtimeExecutable")
+        source = ""
+        selected_path = ""
+        if isinstance(raw, dict):
+            source = str(raw.get("source") or "").strip().lower()
+            selected_path = str(raw.get("selectedPath") or raw.get("path") or "").strip()
+        if runtime_id == "codex":
+            legacy_codex_path = str(runtime.get("codexPath") or "").strip()
+            if legacy_codex_path and not selected_path:
+                source = "system"
+                selected_path = legacy_codex_path
+        if runtime_id == "claude_code":
+            legacy_path = str(runtime.get("claudeCodeExecutable") or "").strip()
+            if legacy_path and not selected_path:
+                source = "system"
+                selected_path = legacy_path
+        if source not in RUNTIME_EXECUTABLE_SOURCES:
+            source = "sdk"
+        if source == "sdk":
+            selected_path = ""
+        return {"source": source, "selectedPath": selected_path}
+
+    def _runtime_executable_command(self, runtime_id: str, runtime: dict[str, Any]) -> list[str]:
+        executable = self._normalize_runtime_executable(runtime_id, runtime)
+        selected_path = str(executable.get("selectedPath") or "").strip()
+        if executable.get("source") == "system" and selected_path:
+            return [selected_path]
+        sdk_path = self._sdk_runtime_executable_path(runtime_id)
+        return [str(sdk_path)] if sdk_path else []
+
+    def _runtime_executable_version_command(self, runtime_id: str, runtime: dict[str, Any]) -> list[str]:
+        command = self._runtime_executable_command(runtime_id, runtime)
+        return [*command, "--version"] if command else []
+
+    def _selected_runtime_executable_version(self, runtime_id: str, runtime: dict[str, Any]) -> dict[str, Any]:
+        label = "Codex" if runtime_id == "codex" else "Claude Code"
+        command = self._runtime_executable_version_command(runtime_id, runtime)
+        return self._runtime_cli_version(runtime_id, label, command) if command else {
+            "runtimeId": runtime_id,
+            "label": label,
+            "command": [],
+            "detected": False,
+            "version": None,
+        }
+
+    def _sdk_runtime_executable_path(self, runtime_id: str) -> Path | None:
+        package_dir = self.managed_package_dir(runtime_id)
+        if runtime_id == "codex":
+            platform_package = self._codex_platform_package_name()
+            if not platform_package:
+                return None
+            binary = "codex.exe" if os.name == "nt" else "codex"
+            target_triple = self._codex_target_triple()
+            if not target_triple:
+                return None
+            path = package_dir / "node_modules" / platform_package / "vendor" / target_triple / "bin" / binary
+            return path if path.exists() else None
+
+        platform_package = self._claude_platform_package_name()
+        if not platform_package:
+            return None
+        binary = "claude.exe" if os.name == "nt" else "claude"
+        path = package_dir / "node_modules" / platform_package / binary
+        return path if path.exists() else None
+
+    def _sdk_runtime_version(self, runtime_id: str) -> str | None:
+        package_dir = self.managed_package_dir(runtime_id)
+        if runtime_id == "codex":
+            payload = _read_json_object(package_dir / "node_modules" / CODEX_RUNTIME_PACKAGE / "package.json")
+            version = str(payload.get("version") or "").strip()
+            return version or None
+        payload = _read_json_object(package_dir / "node_modules" / CLAUDE_RUNTIME_PACKAGE / "package.json")
+        version = str(payload.get("claudeCodeVersion") or payload.get("version") or "").strip()
+        return version or None
+
+    def _runtime_npm_package_name(self, runtime_id: str) -> str:
+        return CODEX_RUNTIME_PACKAGE if runtime_id == "codex" else CLAUDE_RUNTIME_PACKAGE
+
+    def _runtime_binary_name(self, runtime_id: str) -> str:
+        if runtime_id == "codex":
+            return "codex.exe" if os.name == "nt" else "codex"
+        return "claude.exe" if os.name == "nt" else "claude"
+
+    def _runtime_command_name(self, runtime_id: str) -> str:
+        return "codex" if runtime_id == "codex" else "claude"
+
+    def _codex_target_triple(self) -> str | None:
+        if sys.platform == "win32":
+            return "aarch64-pc-windows-msvc" if os.environ.get("PROCESSOR_ARCHITECTURE", "").lower() == "arm64" else "x86_64-pc-windows-msvc"
+        if sys.platform == "darwin":
+            return "aarch64-apple-darwin" if os.uname().machine == "arm64" else "x86_64-apple-darwin"
+        if sys.platform.startswith("linux"):
+            return "aarch64-unknown-linux-musl" if os.uname().machine in {"aarch64", "arm64"} else "x86_64-unknown-linux-musl"
+        return None
+
+    def _codex_platform_package_name(self) -> str | None:
+        if sys.platform == "win32":
+            return "@openai/codex-win32-arm64" if os.environ.get("PROCESSOR_ARCHITECTURE", "").lower() == "arm64" else "@openai/codex-win32-x64"
+        if sys.platform == "darwin":
+            return "@openai/codex-darwin-arm64" if os.uname().machine == "arm64" else "@openai/codex-darwin-x64"
+        if sys.platform.startswith("linux"):
+            return "@openai/codex-linux-arm64" if os.uname().machine in {"aarch64", "arm64"} else "@openai/codex-linux-x64"
+        return None
+
+    def _claude_platform_package_name(self) -> str | None:
+        if sys.platform == "win32":
+            return "@anthropic-ai/claude-agent-sdk-win32-arm64" if os.environ.get("PROCESSOR_ARCHITECTURE", "").lower() == "arm64" else "@anthropic-ai/claude-agent-sdk-win32-x64"
+        if sys.platform == "darwin":
+            return "@anthropic-ai/claude-agent-sdk-darwin-arm64" if os.uname().machine == "arm64" else "@anthropic-ai/claude-agent-sdk-darwin-x64"
+        if sys.platform.startswith("linux"):
+            arch = "arm64" if os.uname().machine in {"aarch64", "arm64"} else "x64"
+            return f"@anthropic-ai/claude-agent-sdk-linux-{arch}"
+        return None
+
+    def _discover_system_runtime_executables(self, runtime_id: str) -> list[dict[str, Any]]:
+        candidates: dict[str, dict[str, Any]] = {}
+        command_name = self._runtime_command_name(runtime_id)
+        path_candidate = _existing_path(shutil.which(command_name))
+        if path_candidate:
+            candidates[str(path_candidate)] = self._runtime_executable_candidate(runtime_id, path_candidate, "PATH")
+
+        for candidate in self._global_npm_runtime_candidates(runtime_id):
+            candidates[str(candidate)] = self._runtime_executable_candidate(runtime_id, candidate, "npm global")
+        return sorted(candidates.values(), key=lambda item: (item["source"], item["path"].lower()))
+
+    def _global_npm_runtime_candidates(self, runtime_id: str) -> list[Path]:
+        binary_name = self._runtime_binary_name(runtime_id)
+        command_name = self._runtime_command_name(runtime_id)
+        roots: list[Path] = []
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            roots.append(Path(appdata) / "npm")
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            roots.append(Path(local_appdata) / "pnpm")
+        profile = os.environ.get("USERPROFILE") or os.environ.get("HOME")
+        if profile:
+            roots.extend([
+                Path(profile) / ".bun" / "bin",
+                Path(profile) / ".npm-global" / "bin",
+            ])
+        results: list[Path] = []
+        for root in roots:
+            if not root.exists():
+                continue
+            direct_names = [binary_name, f"{command_name}.cmd", f"{command_name}.exe", command_name]
+            for name in direct_names:
+                path = root / name
+                if path.exists() and path.is_file():
+                    results.append(path.resolve())
+            for pattern in (binary_name, f"{command_name}.cmd", f"{command_name}.exe"):
+                try:
+                    for path in root.glob(f"**/{pattern}"):
+                        if path.is_file():
+                            results.append(path.resolve())
+                except OSError:
+                    continue
+        return list(dict.fromkeys(results))
+
+    def _runtime_executable_candidate(self, runtime_id: str, path: Path, source: str) -> dict[str, Any]:
+        version_result = self._detect_command([str(path), "--version"])
+        return {
+            "id": self._runtime_executable_option_id("system", str(path)),
+            "source": source,
+            "kind": "system",
+            "label": f"本机 {path.name}",
+            "path": str(path),
+            "detected": bool(version_result["ok"]),
+            "version": version_result.get("version"),
+        }
+
+    def _update_runtime_executable(self, runtime_id: str, runtime: dict[str, Any], value: Any) -> None:
+        if not isinstance(value, dict):
+            raise AgentRuntimeConfigError("Runtime 可执行文件配置不合法")
+        source = str(value.get("source") or "").strip().lower()
+        selected_path = str(value.get("selectedPath") or value.get("path") or "").strip()
+        if source not in RUNTIME_EXECUTABLE_SOURCES:
+            raise AgentRuntimeConfigError("Runtime 可执行文件来源不合法")
+        if source == "sdk":
+            selected_path = ""
+        elif not selected_path:
+            raise AgentRuntimeConfigError("请选择本机可执行文件路径")
+        elif _existing_path(selected_path) is None:
+            raise AgentRuntimeConfigError("本机可执行文件不存在")
+        runtime["runtimeExecutable"] = {"source": source, "selectedPath": selected_path}
+        if runtime_id == "codex":
+            runtime["codexPath"] = selected_path if source == "system" else ""
+        elif runtime_id == "claude_code":
+            runtime["claudeCodeExecutable"] = selected_path if source == "system" else ""
+
+    def _update_legacy_codex_path(self, runtime: dict[str, Any], codex_path: Any) -> None:
+        selected_path = str(codex_path or "").strip()
+        runtime["codexPath"] = selected_path
+        runtime["runtimeExecutable"] = {
+            "source": "system" if selected_path else "sdk",
+            "selectedPath": selected_path,
+        }
+
+    def _runtime_executable_option_id(self, source: str, path: str = "") -> str:
+        if source == "sdk":
+            return "sdk"
+        return f"system:{path}"
+
+    def _public_runtime_executable(self, runtime: dict[str, Any], *, check_latest: bool) -> dict[str, Any]:
+        runtime_id = str(runtime.get("id") or "")
+        executable = self._normalize_runtime_executable(runtime_id, runtime)
+        sdk_path = self._sdk_runtime_executable_path(runtime_id)
+        sdk_version = self._sdk_runtime_version(runtime_id)
+        sdk_option = {
+            "id": "sdk",
+            "source": "SDK 内置",
+            "kind": "sdk",
+            "label": "SDK 内置",
+            "path": str(sdk_path) if sdk_path else "",
+            "detected": bool(sdk_path),
+            "version": sdk_version,
+        }
+        system_options = self._discover_system_runtime_executables(runtime_id)
+        selected_path = str(executable.get("selectedPath") or "").strip()
+        selected_id = self._runtime_executable_option_id(
+            "system" if executable.get("source") == "system" and selected_path else "sdk",
+            selected_path,
+        )
+        if selected_id != "sdk" and not any(item["id"] == selected_id for item in system_options):
+            selected_existing = _existing_path(selected_path)
+            system_options.append({
+                "id": selected_id,
+                "source": "手动路径",
+                "kind": "system",
+                "label": "手动路径",
+                "path": selected_path,
+                "detected": bool(selected_existing),
+                "version": self._detect_command([selected_path, "--version"]).get("version") if selected_existing else None,
+            })
+        options = [sdk_option, *system_options]
+        selected = next((item for item in options if item["id"] == selected_id), sdk_option)
+        latest_runtime_version = self._latest_package_version(self._runtime_npm_package_name(runtime_id)) if check_latest else None
+        return {
+            "runtimeId": runtime_id,
+            "label": str(runtime.get("label") or runtime_id),
+            "selectedId": selected.get("id"),
+            "selectedSource": executable.get("source"),
+            "selectedPath": selected.get("path") or "",
+            "selectedVersion": selected.get("version"),
+            "sdkPath": str(sdk_path) if sdk_path else "",
+            "sdkVersion": sdk_version,
+            "latestVersion": latest_runtime_version,
+            "options": options,
+        }
 
     def _detect_runtime(self, runtime: dict[str, Any]) -> dict[str, Any]:
         runtime_id = str(runtime.get("id") or "")
@@ -731,7 +1014,7 @@ class AgentRuntimeConfigStore:
             if config_mode not in {"user-native", "isolated"}:
                 raise AgentRuntimeConfigError("Codex 配置模式不合法")
             runtime["configMode"] = config_mode
-        if "codexPath" in patch:
+        if "codexPath" in patch and "runtimeExecutable" not in patch:
             runtime["codexPath"] = str(patch.get("codexPath") or "").strip()
         if "command" in patch:
             command = patch.get("command")

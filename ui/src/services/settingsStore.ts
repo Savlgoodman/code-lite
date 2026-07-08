@@ -108,6 +108,10 @@ export async function updateAgentRuntime(
   runtimeId: string,
   patch: Partial<Omit<Pick<AgentRuntimeConfig, "codexPath" | "command" | "configMode" | "enabled" | "mode">, "command">> & {
     command?: string | string[];
+    runtimeExecutable?: {
+      selectedPath?: string;
+      source: string;
+    };
   }
 ): Promise<AgentRuntimeConfig> {
   return requestJson<AgentRuntimeConfig>(`/api/settings/agent-runtimes/${runtimeId}`, {

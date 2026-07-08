@@ -137,9 +137,12 @@ uv run --with agent-client-protocol python .\demo\acp-demo\python_sdk_acp_probe.
 code-lite 的产品策略：
 
 1. 默认使用 code-lite 托管 Node + 固定版本 ACP npm package。
-2. 允许高级用户用 `CODEX_PATH`、自定义 command 或 system path 指向本机已安装 runtime。
-3. 认证与账号配置不写入仓库，优先走 runtime 原生登录态或用户私有配置目录。
-4. opencode 暂按 system command `opencode acp` 处理，后续确认可托管分发方式后再加入 managed install。
+2. ACP package 目录与底层 runtime executable 来源是两个平级配置。前者定位 `codex-acp` / `claude-agent-acp` npm 包，后者定位真正被 wrapper 调用的 Codex / Claude Code binary。
+3. 默认使用 ACP npm 包依赖中自带的 SDK/native binary；检测到本机已安装 Codex CLI 或 Claude Code executable 时，设置页允许用户显式切换。
+4. Codex 切换到本机 binary 时通过 `CODEX_PATH` 注入；Claude Code 切换到本机 binary 时通过 `CLAUDE_CODE_EXECUTABLE` 注入。
+5. 更新托管 runtime 时覆盖更新 ACP package 目录，从而更新 SDK 内置 binary；本机 binary 的升级由用户自己的安装渠道管理，code-lite 只做发现、选择和版本检查。
+6. 认证与账号配置不写入仓库，优先走 runtime 原生登录态或用户私有配置目录。
+7. opencode 暂按 system command `opencode acp` 处理，后续确认可托管分发方式后再加入 managed install。
 
 ## 3. Backend 模块设计
 
@@ -342,7 +345,7 @@ Descriptor：
 | `INITIAL_AGENT_MODE` | 默认 `read-only` |
 | `APP_SERVER_LOGS` | 指向 code-lite runtime log 目录 |
 | `CODEX_HOME` | isolated 模式才设置 |
-| `CODEX_PATH` | 高级用户选择本机 Codex binary 时设置 |
+| `CODEX_PATH` | 用户在设置页选择本机 Codex executable 时设置；默认不设置，走 `@openai/codex` SDK 内置 binary |
 | `CODEX_CONFIG` | 用于注入本轮受控配置，禁止写入密钥 |
 
 已验证能力：
@@ -385,8 +388,10 @@ Descriptor：
 
 1. 设置页使用托管 Node 安装固定版本 `@agentclientprotocol/claude-agent-acp`。
 2. 安装后检查 Claude Agent SDK optional native binary 是否存在。
-3. preflight 先只做 `initialize` 和 `session/new`。
-4. 真实 prompt 需显式启用，避免误触发额度或工具调用。
+3. 默认使用 `@anthropic-ai/claude-agent-sdk-<platform>` 自带的 `claude` native binary。
+4. 检测到本机 Claude Code executable 时，设置页可切换为本机路径，并通过 `CLAUDE_CODE_EXECUTABLE` 传给 `claude-agent-acp`。
+5. preflight 先只做 `initialize` 和 `session/new`。
+6. 真实 prompt 需显式启用，避免误触发额度或工具调用。
 
 待验证能力：
 

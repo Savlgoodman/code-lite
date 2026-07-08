@@ -865,6 +865,26 @@
   margin-left: 0;
 }
 
+.runtime-executable-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.runtime-executable-empty {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  border: 1px solid #e4e0dc;
+  border-radius: 8px;
+  background: #fbfbfa;
+  padding: 0 11px;
+  color: #697079;
+  font-size: 13px;
+}
+
 .acp-runtime-package-card {
   margin-bottom: 16px;
 }
@@ -891,6 +911,14 @@
 
 .acp-package-detail > div:last-child {
   grid-column: 1 / -1;
+}
+
+.runtime-executable-detail {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.runtime-executable-detail > div:last-child {
+  grid-column: auto;
 }
 
 .settings-empty.compact {
@@ -1215,6 +1243,8 @@
   .settings-form-grid,
   .settings-default-row,
   .acp-package-root-row,
+  .runtime-executable-row,
+  .runtime-executable-detail,
   .settings-about-grid,
   .settings-runtime-title-row {
     grid-template-columns: 1fr;

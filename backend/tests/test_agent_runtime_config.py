@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from code_lite_backend.core.config import resolve_runtime_config
 from code_lite_backend.services.agent_runtime_config import CODEX_ACP_PACKAGE, AgentRuntimeConfigStore
+from code_lite_backend.agents.runtimes.descriptors import claude_env
 
 
 class AgentRuntimeConfigStoreTest(unittest.TestCase):
@@ -106,6 +107,77 @@ class AgentRuntimeConfigStoreTest(unittest.TestCase):
             store._prepare_package_dir_for_install(package_dir, replace=True)
 
             self.assertFalse(package_dir.exists())
+
+    def test_runtime_executable_defaults_to_sdk_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            AgentRuntimeConfigStore,
+            "_detect_command",
+            return_value={"ok": True, "version": "codex-cli 0.1.0"},
+        ):
+            store = self.make_store(Path(temp_dir))
+            sdk_binary = store._sdk_runtime_executable_path("codex")
+            if sdk_binary is None:
+                platform_package = store._codex_platform_package_name()
+                target_triple = store._codex_target_triple()
+                self.assertIsNotNone(platform_package)
+                self.assertIsNotNone(target_triple)
+                binary_name = "codex.exe" if sys.platform == "win32" else "codex"
+                sdk_binary = store.managed_package_dir("codex") / "node_modules" / platform_package / "vendor" / target_triple / "bin" / binary_name
+            sdk_binary.parent.mkdir(parents=True)
+            sdk_binary.write_text("binary", encoding="utf-8")
+            runtime_package = store.managed_package_dir("codex") / "node_modules" / "@openai" / "codex" / "package.json"
+            runtime_package.parent.mkdir(parents=True)
+            runtime_package.write_text('{"version":"0.142.5"}', encoding="utf-8")
+
+            settings = store.acp_package_settings()
+            executable = next(item for item in settings["runtimeExecutables"] if item["runtimeId"] == "codex")
+
+            self.assertEqual(executable["selectedSource"], "sdk")
+            self.assertEqual(executable["selectedPath"], str(sdk_binary))
+            self.assertEqual(executable["sdkVersion"], "0.142.5")
+
+    def test_update_runtime_executable_can_select_system_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = self.make_store(root)
+            binary = root / "bin" / ("claude.exe" if sys.platform == "win32" else "claude")
+            binary.parent.mkdir(parents=True)
+            binary.write_text("binary", encoding="utf-8")
+
+            runtime = store.update_runtime(
+                "claude_code",
+                {
+                    "runtimeExecutable": {
+                        "source": "system",
+                        "selectedPath": str(binary),
+                    }
+                },
+            )
+
+            self.assertEqual(runtime["runtimeExecutable"]["source"], "system")
+            self.assertEqual(runtime["runtimeExecutable"]["selectedPath"], str(binary))
+            env = claude_env(runtime)
+            self.assertEqual(env["CLAUDE_CODE_EXECUTABLE"], str(binary))
+
+    def test_codex_env_uses_selected_system_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = self.make_store(root)
+            binary = root / "bin" / ("codex.exe" if sys.platform == "win32" else "codex")
+            binary.parent.mkdir(parents=True)
+            binary.write_text("binary", encoding="utf-8")
+
+            store.update_runtime(
+                "codex",
+                {
+                    "runtimeExecutable": {
+                        "source": "system",
+                        "selectedPath": str(binary),
+                    }
+                },
+            )
+
+            self.assertEqual(store.codex_env()["CODEX_PATH"], str(binary))
 
 
 if __name__ == "__main__":

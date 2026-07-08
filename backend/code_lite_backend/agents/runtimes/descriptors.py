@@ -81,7 +81,12 @@ def codex_env(
         env.setdefault("APP_SERVER_LOGS", logs_dir)
     if runtime_config_dict.get("configMode") == "isolated" and isolated_codex_home:
         env["CODEX_HOME"] = isolated_codex_home
-    codex_path = str(runtime_config_dict.get("codexPath") or "").strip()
+    runtime_executable = runtime_config_dict.get("runtimeExecutable")
+    codex_path = ""
+    if isinstance(runtime_executable, dict) and runtime_executable.get("source") == "system":
+        codex_path = str(runtime_executable.get("selectedPath") or "").strip()
+    if not codex_path:
+        codex_path = str(runtime_config_dict.get("codexPath") or "").strip()
     if codex_path:
         env["CODEX_PATH"] = codex_path
     return env
@@ -135,6 +140,14 @@ def claude_env(
     env["INITIAL_AGENT_MODE"] = mode
     if logs_dir:
         env.setdefault("APP_SERVER_LOGS", logs_dir)
+    runtime_executable = runtime_config_dict.get("runtimeExecutable")
+    claude_path = ""
+    if isinstance(runtime_executable, dict) and runtime_executable.get("source") == "system":
+        claude_path = str(runtime_executable.get("selectedPath") or "").strip()
+    if not claude_path:
+        claude_path = str(runtime_config_dict.get("claudeCodeExecutable") or "").strip()
+    if claude_path:
+        env["CLAUDE_CODE_EXECUTABLE"] = claude_path
     return env
 
 
