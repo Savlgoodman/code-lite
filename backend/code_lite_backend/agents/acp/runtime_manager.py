@@ -33,13 +33,13 @@ logger = logging.getLogger(__name__)
 class ConnectionKey:
     """连接复用键。
 
-    每个 conversation 一个独立连接，彻底隔离事件流。
-    同一 conversation 的多轮 turn 复用同一连接。
+    multi_session 模式下按 runtime/acpServerKind/config/command/env 复用连接，
+    workspace 只作为 native session 的 cwd 和 binding 字段。
     """
 
     runtime_id: str
     acp_server_kind: str
-    workspace: str
+    workspace: str  # per-conversation fallback 使用；multi_session 为空表示 shared
     config_mode: str
     conversation_id: str  # 每个会话独立隔离
     command_fingerprint: str
@@ -109,6 +109,7 @@ class AcpRuntimeManager:
         self._handshake_timeout = 30.0
         self._session_timeout = 30.0
         self._conversation_store = conversation_store  # ConversationStore (optional)
+        self._process_cwd = runtime_config.data_dir if runtime_config is not None else None
         self._connection_mode = (
             runtime_config.acp_connection_mode
             if runtime_config is not None
@@ -159,8 +160,8 @@ class AcpRuntimeManager:
     ) -> AcpRuntimeConnection:
         """确保存在 ready 的 ACP 连接。
 
-        每个 conversation 一个独立连接，彻底隔离事件流。
-        同一 conversation 的多轮 turn 复用同一连接。
+        multi_session 模式下，同一 runtime/acpServerKind/config/command/env
+        复用同一个 ACP 连接；workspace 只用于 native session cwd。
         """
         key = self._build_key(descriptor, command, env, workspace, conversation_id)
 
@@ -182,7 +183,7 @@ class AcpRuntimeManager:
             descriptor=descriptor,
             command=command,
             env=env,
-            workspace=workspace,
+            workspace=self._connection_process_workspace(workspace),
             approvals=approvals,
             inputs=inputs,
             key=key,
@@ -215,6 +216,7 @@ class AcpRuntimeManager:
         if existing is not None:
             if (
                 self._binding_matches_connection(existing, connection)
+                and self._binding_matches_workspace(existing, workspace)
                 and connection.sessions.get(conversation_id) == existing.native_session_id
             ):
                 existing.updated_at = _now_iso()
@@ -229,6 +231,7 @@ class AcpRuntimeManager:
             saved_binding is not None
             and saved_binding.native_session_id
             and self._binding_matches_connection(saved_binding, connection)
+            and self._binding_matches_workspace(saved_binding, workspace)
         ):
             restored = await self._try_restore_saved_session(
                 connection=connection,
@@ -436,8 +439,11 @@ class AcpRuntimeManager:
             binding.runtime_id == connection.descriptor.id
             and binding.acp_server_kind == connection.descriptor.acp_server_kind
             and binding.config_mode == connection.key.config_mode
-            and _workspace_key(binding.workspace) == _workspace_key(connection.key.workspace)
         )
+
+    @staticmethod
+    def _binding_matches_workspace(binding: AcpSessionBinding, workspace: Path) -> bool:
+        return _workspace_key(binding.workspace) == _workspace_key(str(workspace))
 
     def _detach_conversation_from_other_connections(
         self,
@@ -541,6 +547,7 @@ class AcpRuntimeManager:
                     "nativeSessionId": native_session_id,
                     "state": binding.state if binding is not None else "active",
                     "activePrompt": bool(getattr(route, "active_prompt", False)),
+                    "workspace": binding.workspace if binding is not None else "",
                     "runtime": binding.runtime_id if binding is not None else connection.descriptor.id,
                     "acpServerKind": (
                         binding.acp_server_kind
@@ -853,13 +860,17 @@ class AcpRuntimeManager:
         conversation_id: str = "",
     ) -> ConnectionKey:
         command_fp = hashlib.sha256(" ".join(command).encode()).hexdigest()[:12]
-        # env fingerprint: 只记录 key 名，不记录 value（避免泄露 secret）
-        env_keys = sorted(env.keys())
-        env_fp = hashlib.sha256(",".join(env_keys).encode()).hexdigest()[:12]
+        # env value 参与哈希，避免同名变量但值不同的 runtime 误复用旧连接。
+        env_items = [f"{key}={env[key]}" for key in sorted(env.keys())]
+        env_fp = hashlib.sha256("\n".join(env_items).encode()).hexdigest()[:12]
         return ConnectionKey(
             runtime_id=descriptor.id,
             acp_server_kind=descriptor.acp_server_kind,
-            workspace=str(workspace),
+            workspace=(
+                ""
+                if self._connection_mode == ACP_CONNECTION_MODE_MULTI_SESSION
+                else str(workspace)
+            ),
             config_mode=descriptor.config_mode,
             conversation_id=(
                 ""
@@ -869,6 +880,12 @@ class AcpRuntimeManager:
             command_fingerprint=command_fp,
             env_fingerprint=env_fp,
         )
+
+    def _connection_process_workspace(self, session_workspace: Path) -> Path:
+        if self._connection_mode == ACP_CONNECTION_MODE_MULTI_SESSION and self._process_cwd is not None:
+            self._process_cwd.mkdir(parents=True, exist_ok=True)
+            return self._process_cwd
+        return session_workspace
 
 
 def _now_iso() -> str:

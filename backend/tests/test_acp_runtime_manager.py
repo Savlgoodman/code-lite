@@ -15,6 +15,7 @@ from code_lite_backend.agents.acp.runtime_manager import (
     AcpSessionBinding,
     ConnectionKey,
 )
+from code_lite_backend.core.config import ACP_CONNECTION_MODE_MULTI_SESSION
 
 
 class FakeStore:
@@ -114,6 +115,13 @@ def make_binding() -> dict[str, Any]:
     }
 
 
+def make_runtime_config() -> SimpleNamespace:
+    return SimpleNamespace(
+        acp_connection_mode=ACP_CONNECTION_MODE_MULTI_SESSION,
+        data_dir=Path("H:/code-lite-data"),
+    )
+
+
 def make_connection(
     *,
     sdk: Any,
@@ -121,6 +129,8 @@ def make_connection(
     resume: bool,
     load: bool,
     workspace: str = "H:/codex-lite",
+    key_workspace: str = "",
+    key_conversation_id: str = "",
 ) -> AcpRuntimeConnection:
     session_caps = SimpleNamespace(resume=SimpleNamespace() if resume else None)
     agent_caps = SimpleNamespace(
@@ -131,9 +141,9 @@ def make_connection(
         key=ConnectionKey(
             runtime_id="codex",
             acp_server_kind="codex-acp",
-            workspace=workspace,
+            workspace=key_workspace,
             config_mode="managed",
-            conversation_id="conv-1",
+            conversation_id=key_conversation_id,
             command_fingerprint="cmd",
             env_fingerprint="env",
         ),
@@ -151,7 +161,10 @@ def make_connection(
 class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
     async def test_restore_prefers_resume_when_supported(self) -> None:
         sdk = FakeSdk()
-        manager = AcpRuntimeManager(conversation_store=FakeStore(make_binding()))
+        manager = AcpRuntimeManager(
+            conversation_store=FakeStore(make_binding()),
+            runtime_config=make_runtime_config(),
+        )
         connection = make_connection(
             sdk=sdk,
             handler=FakeHandler(),
@@ -171,7 +184,10 @@ class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
     async def test_load_fallback_suppresses_replay_output(self) -> None:
         handler = FakeHandler()
         sdk = LoadObservingSdk(handler)
-        manager = AcpRuntimeManager(conversation_store=FakeStore(make_binding()))
+        manager = AcpRuntimeManager(
+            conversation_store=FakeStore(make_binding()),
+            runtime_config=make_runtime_config(),
+        )
         connection = make_connection(
             sdk=sdk,
             handler=handler,
@@ -193,13 +209,18 @@ class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
     async def test_rebinding_conversation_detaches_stale_connection_mapping(self) -> None:
         old_handler = FakeHandler()
         new_handler = FakeHandler()
-        manager = AcpRuntimeManager(conversation_store=FakeStore(None))
+        manager = AcpRuntimeManager(
+            conversation_store=FakeStore(None),
+            runtime_config=make_runtime_config(),
+        )
         old_connection = make_connection(
             sdk=FakeSdk(),
             handler=old_handler,
             resume=True,
             load=True,
             workspace="H:/old",
+            key_workspace="H:/old",
+            key_conversation_id="conv-1",
         )
         new_connection = make_connection(
             sdk=FakeSdk(),
@@ -240,7 +261,10 @@ class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
     async def test_saved_binding_with_different_workspace_is_not_restored(self) -> None:
         sdk = FakeSdk()
         sdk.next_session_id = "native-fresh"
-        manager = AcpRuntimeManager(conversation_store=FakeStore(make_binding()))
+        manager = AcpRuntimeManager(
+            conversation_store=FakeStore(make_binding()),
+            runtime_config=make_runtime_config(),
+        )
         connection = make_connection(
             sdk=sdk,
             handler=FakeHandler(),
@@ -258,6 +282,65 @@ class AcpRuntimeManagerRestoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(binding.native_session_id, "native-fresh")
         self.assertEqual(sdk.calls, ["new"])
         self.assertEqual(connection.sessions["conv-1"], "native-fresh")
+
+    async def test_multi_session_connection_key_is_shared_across_workspaces(self) -> None:
+        manager = AcpRuntimeManager(
+            conversation_store=FakeStore(None),
+            runtime_config=make_runtime_config(),
+        )
+        descriptor = SimpleNamespace(
+            id="codex",
+            acp_server_kind="codex-acp",
+            config_mode="managed",
+        )
+
+        first = manager._build_key(
+            descriptor,
+            ["codex-acp"],
+            {},
+            Path("H:/first"),
+            "conv-1",
+        )
+        second = manager._build_key(
+            descriptor,
+            ["codex-acp"],
+            {},
+            Path("H:/second"),
+            "conv-2",
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first.workspace, "")
+        self.assertEqual(first.conversation_id, "")
+
+    async def test_multi_session_connection_key_splits_on_env_value(self) -> None:
+        manager = AcpRuntimeManager(
+            conversation_store=FakeStore(None),
+            runtime_config=make_runtime_config(),
+        )
+        descriptor = SimpleNamespace(
+            id="codex",
+            acp_server_kind="codex-acp",
+            config_mode="managed",
+        )
+
+        first = manager._build_key(
+            descriptor,
+            ["codex-acp"],
+            {"CODE_LITE_TEST_MODE": "first"},
+            Path("H:/workspace"),
+            "conv-1",
+        )
+        second = manager._build_key(
+            descriptor,
+            ["codex-acp"],
+            {"CODE_LITE_TEST_MODE": "second"},
+            Path("H:/workspace"),
+            "conv-2",
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(first.env_fingerprint, second.env_fingerprint)
 
 
 if __name__ == "__main__":

@@ -524,6 +524,7 @@ export interface AcpRuntimeSessionStatus {
   nativeSessionId: string;
   runtime: string;
   state: string;
+  workspace?: string;
 }
 
 export interface AcpRuntimeConnectionStatus {

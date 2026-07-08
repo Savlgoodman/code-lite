@@ -664,8 +664,8 @@ function AcpConnectionsSettings() {
 
               <div className="acp-process-details">
                 <div>
-                  <span>workspace</span>
-                  <strong title={connection.workspace}>{connection.workspace}</strong>
+                  <span>connection scope</span>
+                  <strong>{connection.workspace || "shared runtime"}</strong>
                 </div>
                 <div>
                   <span>config</span>
@@ -682,6 +682,7 @@ function AcpConnectionsSettings() {
                   <div className="acp-session-table-head">
                     <span>conversation</span>
                     <span>native session</span>
+                    <span>workspace</span>
                     <span>state</span>
                     <span>prompt</span>
                   </div>
@@ -689,6 +690,7 @@ function AcpConnectionsSettings() {
                     <div className="acp-session-table-row" key={`${session.conversationId}:${session.nativeSessionId}`}>
                       <span title={session.conversationId}>{compactIdentifier(session.conversationId)}</span>
                       <span title={session.nativeSessionId}>{compactIdentifier(session.nativeSessionId)}</span>
+                      <span title={session.workspace || ""}>{session.workspace || "-"}</span>
                       <span>{session.state}</span>
                       <span>{session.activePrompt ? "running" : "idle"}</span>
                     </div>
