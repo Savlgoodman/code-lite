@@ -517,6 +517,33 @@ export interface AgentRuntimeSettingsState {
   runtimes: AgentRuntimeConfig[];
 }
 
+export interface AcpRuntimeSessionStatus {
+  acpServerKind: string;
+  activePrompt: boolean;
+  conversationId: string;
+  nativeSessionId: string;
+  runtime: string;
+  state: string;
+}
+
+export interface AcpRuntimeConnectionStatus {
+  acpServerKind: string;
+  activeSessions: number;
+  configMode: string;
+  conversationKey: string;
+  latestActivityAt?: number | null;
+  pid?: number | null;
+  ready: boolean;
+  runtime: string;
+  sessions: AcpRuntimeSessionStatus[];
+  workspace: string;
+}
+
+export interface AcpRuntimeStatus {
+  connectionMode: string;
+  connections: AcpRuntimeConnectionStatus[];
+}
+
 export interface LogFileInfo {
   bytes: number;
   category: string;

@@ -1,5 +1,6 @@
 import { ensureBackend } from "./agentClient";
 import type {
+  AcpRuntimeStatus,
   AppAboutInfo,
   AgentRuntimeModelsResult,
   AgentRuntimeConfig,
@@ -93,6 +94,16 @@ export async function updateActiveAgentRuntime(adapter: string): Promise<AgentRu
 
 export async function loadAgentRuntimeModels(runtimeId: string): Promise<AgentRuntimeModelsResult> {
   return requestJson<AgentRuntimeModelsResult>(`/api/settings/agent-runtimes/${runtimeId}/models`);
+}
+
+export async function loadAcpRuntimeStatus(): Promise<AcpRuntimeStatus> {
+  return requestJson<AcpRuntimeStatus>("/api/runtimes/acp/status");
+}
+
+export async function cleanupAcpRuntimes(): Promise<{ closed: boolean }> {
+  return requestJson<{ closed: boolean }>("/api/runtimes/acp/cleanup", {
+    method: "POST"
+  });
 }
 
 export async function fetchProviderModels(options: {
