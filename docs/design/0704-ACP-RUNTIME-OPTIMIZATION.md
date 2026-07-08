@@ -2,6 +2,8 @@
 
 设计日期：2026-07-04
 
+> 更新说明（2026-07-08）：本文记录的是从“每轮临时 spawn”迁移到“常驻 ACP runtime”的阶段性方案，其中 per-conversation 连接隔离用于快速解决早期事件串流问题。后续连接生命周期、runtime 类型隔离、单 connection 多 native session、空闲释放和旧实现清理，以 `docs/design/0708-ACP-MULTI-SESSION-CONNECTION.md` 为准。
+
 本文是 code-lite 基于 VibeX ACP Runtime 调研结论，针对当前 ACP 接入体验和会话存储方案的优化设计。本文是 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` 和 `docs/design/0703-AGENT-UNIFIED-ACP.md` 的补充，聚焦于运行时性能优化和事件存储重构。
 
 ---

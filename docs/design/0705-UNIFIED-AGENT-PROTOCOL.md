@@ -3,6 +3,8 @@
 设计日期：2026-07-05  
 作者：Kevin & Claude
 
+> 更新说明（2026-07-08）：本文中的“连接池”和 per-conversation 连接隔离表述属于阶段性实现记录。后续 ACP 连接管理目标是：按 runtime/acpServerKind/workspace/config 管理一条 connection，每个 conversation 绑定独立 native session，并通过 `sessionId -> route` 路由事件。最新方案见 `docs/design/0708-ACP-MULTI-SESSION-CONNECTION.md`。
+
 ---
 
 ## 1. 背景与动机

@@ -44,6 +44,7 @@ docs/
 | --- | --- | --- |
 | `design/0703-AGENT-ACP-IMPLEMENTATION.md` | 设计 | ACP adapter 实施设计，后续开发优先读它 |
 | `design/0703-AGENT-UNIFIED-ACP.md` | 设计 | 统一前端会话能力、模型、模式和事件格式 |
+| `design/0708-ACP-MULTI-SESSION-CONNECTION.md` | 设计 | ACP 多 session 连接管理、runtime 类型隔离、空闲释放、resume/load 恢复和旧实现清理方案 |
 | `research/0702-AGENT-ACP-RESEARCH.md` | 调研 | ACP 协议、runtime 分发、认证、权限和配置调研 |
 | `research/0703-BACKEND-ACP-RESEARCH.md` | 调研 | Python backend 侧 ACP client 设计推导和 demo 记录 |
 | `research/0703-VIBEX-ACP-RESEARCH.md` | 调研 | VibeX ACP runtime 生命周期、会话存储和 code-lite 改进方案 |
