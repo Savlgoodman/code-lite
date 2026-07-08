@@ -59,6 +59,7 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 | `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` | ACP Agent Adapter 实施设计，记录 Codex、Claude Code、opencode 的主线接入方案 |
 | `docs/design/0703-AGENT-UNIFIED-ACP.md` | 统一前端交互协议设计，记录 session capabilities、模型、模式和事件映射 |
 | `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` | Agent adapter 归位、结构化日志、诊断错误和设置页日志查看重构方案 |
+| `docs/refactor/0709-ACP-RUNTIME-FORCE-DISCONNECT.md` | ACP Runtime 强制断开、进程树清理、设置变更联动断开和升级占用修复方案 |
 | `docs/design/0702-REMOTE-SYNC.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
 | `docs/design/0703-RUNTIME-MODEL-PROVIDER.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
 | `docs/guides/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
@@ -69,7 +70,7 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 1. 做产品需求相关任务，先读 `docs/README.md` 和 `docs/guides/PRD.md`。
 2. 做架构、模块边界相关任务，先读 `docs/architecture/ARCHITECTURE.md` 和 `docs/architecture/PROJECT_STRUCTURE.md`。
 3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/guides/UI_DEVELOPMENT.md`。
-4. 做 Codex、Claude Code、opencode、ACP adapter 和 runtime 事件相关任务，先读 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md`、`docs/design/0703-AGENT-UNIFIED-ACP.md` 和 `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md`。
+4. 做 Codex、Claude Code、opencode、ACP adapter、runtime 事件、ACP 连接释放和进程清理相关任务，先读 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md`、`docs/design/0703-AGENT-UNIFIED-ACP.md`、`docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` 和 `docs/refactor/0709-ACP-RUNTIME-FORCE-DISCONNECT.md`。
 5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/design/0702-REMOTE-SYNC.md`。
 6. 做模型供应商、模型选择和 runtime 配置相关任务，先读 `docs/design/0703-RUNTIME-MODEL-PROVIDER.md`。
 7. 做运行时数据、聊天 UI、adapter 迁移、日志或诊断重构相关任务，先读 `docs/refactor/0703-RUNTIME-DATA-CHAT-UI.md` 和 `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md`。
