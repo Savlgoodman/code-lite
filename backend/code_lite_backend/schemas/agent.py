@@ -50,6 +50,7 @@ class AgentRunRequest:
     runtime_model: str | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
     reasoning_effort: str | None = None
+    fast_mode: str | None = None
     input_blocks: list[UserInputBlock] = field(default_factory=list)
 
 

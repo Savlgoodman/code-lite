@@ -79,7 +79,7 @@ export function TokenUsageModal({ billingSummary, contextUsage, open, onClose }:
               <div className="token-divider" />
 
               {modelUsages.map(mu => (
-                <div key={mu.modelId} className="token-section token-model-section">
+                <div key={mu.usageKey} className="token-section token-model-section">
                   <div className="token-model-header">
                     <span className="token-model-label">{mu.modelLabel}</span>
                     <span className="token-model-turns">{mu.turnCount} 轮</span>
@@ -88,6 +88,11 @@ export function TokenUsageModal({ billingSummary, contextUsage, open, onClose }:
                     <span>费用</span>
                     <strong>{mu.cost ? formatUsd(mu.cost.totalCostUsd) : "价格未知"}</strong>
                   </div>
+                  {mu.cost && mu.cost.billingMultiplier > 1 ? (
+                    <div className="token-cost-note">
+                      Fast mode 计费倍率 {mu.cost.billingMultiplier}x，基础费用 {formatUsd(mu.cost.baseTotalCostUsd)}。
+                    </div>
+                  ) : null}
 
                   <div className="token-rows">
                     {mu.inputTokens > 0 ? (

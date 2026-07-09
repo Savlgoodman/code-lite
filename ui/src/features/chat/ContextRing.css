@@ -1,3 +1,27 @@
+.context-ring-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.fast-mode-indicator {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff7d8;
+  color: #b7791f;
+}
+
+.fast-mode-indicator svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
+}
+
 .context-ring {
   position: relative;
   width: 28px;

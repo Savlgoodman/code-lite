@@ -141,7 +141,7 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
   const [isAccessMenuOpen, setIsAccessMenuOpen] = useState(false);
-  const [isModelListOpen, setIsModelListOpen] = useState(false);
+  const [expandedStatusSection, setExpandedStatusSection] = useState<"model" | "speed" | null>(null);
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [composerLayoutVersion, setComposerLayoutVersion] = useState(0);
@@ -175,11 +175,17 @@ export function ChatComposer({
   // 推理强度选项 —— 从 configOptions 中提取
   const reasoningConfig = configOptions.find((o) => o.id === "reasoning_effort") ?? null;
   const reasoningValues = reasoningConfig?.values ?? [];
+  const fastModeConfig = configOptions.find((o) => o.id === "fast_mode" || o.id === "fast-mode" || o.id === "fast") ?? null;
+  const hasFastModePicker = Boolean(fastModeConfig);
+  const fastModeValue = normalizeFastModeValue(selectedConfig.fast_mode ?? selectedConfig.fastMode ?? selectedConfig["fast-mode"] ?? selectedConfig.fast ?? fastModeConfig?.currentValue);
+  const isFastModeOn = fastModeValue === "on";
 
   const hasModes = modes.length > 1;
   const hasModelPicker = modelFamilies.length > 0;
   const hasReasoningPicker = reasoningValues.length > 0;
-  const hasAnyControls = hasModelPicker || hasReasoningPicker;
+  const hasAnyControls = hasModelPicker || hasReasoningPicker || hasFastModePicker;
+  const isModelListOpen = expandedStatusSection === "model";
+  const isSpeedListOpen = expandedStatusSection === "speed";
   const currentMode = modes.find((mode) => mode.id === accessMode) ?? modes.find((mode) => mode.isDefault) ?? modes[0];
   const runtimeTone = agentRuntimeTone(agent);
   const billingSummary = useMemo(
@@ -211,7 +217,7 @@ export function ChatComposer({
       }
       if (isStatusMenuOpen && !statusMenuRef.current?.contains(target)) {
         setIsStatusMenuOpen(false);
-        setIsModelListOpen(false);
+        setExpandedStatusSection(null);
       }
       if (isCommandMenuOpen && !commandMenuRef.current?.contains(target)) {
         setIsCommandMenuOpen(false);
@@ -221,6 +227,12 @@ export function ChatComposer({
     window.addEventListener("mousedown", closeOnOutside);
     return () => window.removeEventListener("mousedown", closeOnOutside);
   }, [isAccessMenuOpen, isStatusMenuOpen, isCommandMenuOpen]);
+
+  useEffect(() => {
+    if (!configLoading && !hasFastModePicker && isFastModeOn) {
+      onConfigChange("fast_mode", "off");
+    }
+  }, [configLoading, hasFastModePicker, isFastModeOn, onConfigChange]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -388,39 +400,61 @@ export function ChatComposer({
   function toggleAccessMenu() {
     setIsAccessMenuOpen((open) => !open);
     setIsStatusMenuOpen(false);
-    setIsModelListOpen(false);
+    setExpandedStatusSection(null);
   }
 
   function selectFamily(familyId: string) {
     onModelFamilyChange(familyId);
     setIsStatusMenuOpen(false);
-    setIsModelListOpen(false);
+    setExpandedStatusSection(null);
   }
 
   function selectReasoning(value: string) {
     onReasoningEffortChange(value);
     onConfigChange("reasoning_effort", value);
     setIsStatusMenuOpen(false);
-    setIsModelListOpen(false);
+    setExpandedStatusSection(null);
+  }
+
+  function selectFastMode(value: "off" | "on") {
+    onConfigChange("fast_mode", value);
+    setIsStatusMenuOpen(false);
+    setExpandedStatusSection(null);
   }
 
   function toggleStatusMenu() {
     const nextOpen = !isStatusMenuOpen;
     setIsStatusMenuOpen(nextOpen);
     if (!nextOpen) {
-      setIsModelListOpen(false);
+      setExpandedStatusSection(null);
     }
+  }
+
+  function toggleStatusSection(section: "model" | "speed") {
+    setExpandedStatusSection((current) => (current === section ? null : section));
   }
 
   const statusLabel = [
     currentFamily?.label,
     hasReasoningPicker ? reasoningEffort : null,
-  ].filter(Boolean).join(" ") || (hasReasoningPicker ? "推理" : "模型");
+    hasFastModePicker && isFastModeOn ? "1.5x" : null,
+  ].filter(Boolean).join(" ") || (hasFastModePicker ? "速率" : hasReasoningPicker ? "推理" : "模型");
 
   function reasoningOptionLabel(value: string) {
     return ({ low: "低", medium: "中", high: "高", xhigh: "超高", none: "无" } as Record<string, string>)[value]
       ?? reasoningConfig?.valueLabels?.[value]
       ?? value;
+  }
+
+  function normalizeFastModeValue(value: ChatConfigValue | null | undefined): "off" | "on" {
+    if (typeof value === "boolean") {
+      return value ? "on" : "off";
+    }
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (["on", "true", "fast", "1.5x", "1"].includes(normalized)) {
+      return "on";
+    }
+    return "off";
   }
 
   return (
@@ -598,6 +632,7 @@ export function ChatComposer({
               {/* 上下文使用圆环 */}
               <ContextRing
                 billingSummary={billingSummary}
+                fastModeOn={isFastModeOn}
                 usage={contextUsage}
                 onTokenDetailsClick={() => setIsTokenModalOpen(true)}
               />
@@ -610,7 +645,7 @@ export function ChatComposer({
                 </div>
               ) : hasAnyControls ? (
                 <div className="composer-status-bar">
-                  {(hasModelPicker || hasReasoningPicker) && (
+                  {(hasModelPicker || hasReasoningPicker || hasFastModePicker) && (
                     <div className="status-combined-picker" ref={statusMenuRef}>
                       <button
                         className="status-chip"
@@ -624,7 +659,7 @@ export function ChatComposer({
                         <ChevronDown size={13} />
                       </button>
                       {isStatusMenuOpen && (
-                        <div className={`status-menu-panels ${isModelListOpen ? "model-open" : ""}`}>
+                        <div className={`status-menu-panels ${expandedStatusSection ? "section-open" : ""}`}>
                           <div className="status-menu-panel status-primary-menu" role="menu">
                             {hasReasoningPicker ? (
                               <>
@@ -641,13 +676,48 @@ export function ChatComposer({
                                     {value === reasoningEffort ? <Check size={14} /> : null}
                                   </button>
                                 ))}
+                                {hasFastModePicker ? (
+                                  <>
+                                    <div className="status-dropdown-divider" />
+                                    <button
+                                      aria-expanded={isSpeedListOpen}
+                                      className={`status-dropdown-item status-model-trigger ${isSpeedListOpen ? "expanded" : ""}`}
+                                      onClick={() => toggleStatusSection("speed")}
+                                      role="menuitem"
+                                      type="button"
+                                    >
+                                      <span>速率</span>
+                                      <ChevronDown size={14} />
+                                    </button>
+                                    {isSpeedListOpen ? (
+                                      <div className="status-model-list" role="group" aria-label="速率">
+                                        <div className="status-model-list-title">速率</div>
+                                        {[
+                                          { value: "off" as const, label: "1x 普通速率" },
+                                          { value: "on" as const, label: "1.5x 高速" },
+                                        ].map((option) => (
+                                          <button
+                                            key={option.value}
+                                            className={`status-dropdown-item ${option.value === fastModeValue ? "selected" : ""}`}
+                                            onClick={() => selectFastMode(option.value)}
+                                            role="menuitem"
+                                            type="button"
+                                          >
+                                            <span>{option.label}</span>
+                                            {option.value === fastModeValue ? <Check size={14} /> : null}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : null}
                                 {currentFamily ? (
                                   <>
                                     <div className="status-dropdown-divider" />
                                     <button
                                       aria-expanded={isModelListOpen}
                                       className={`status-dropdown-item status-model-trigger ${isModelListOpen ? "expanded" : ""}`}
-                                      onClick={() => setIsModelListOpen((open) => !open)}
+                                      onClick={() => toggleStatusSection("model")}
                                       role="menuitem"
                                       type="button"
                                     >
@@ -676,19 +746,72 @@ export function ChatComposer({
                               </>
                             ) : (
                               <>
-                                <div className="status-menu-title">模型</div>
-                                {modelFamilies.map((family) => (
-                                  <button
-                                    key={family.id}
-                                    className={`status-dropdown-item ${family.id === currentFamily?.id ? "selected" : ""}`}
-                                    onClick={() => selectFamily(family.id)}
-                                    role="menuitem"
-                                    type="button"
-                                  >
-                                    <span>{family.label}</span>
-                                    {family.id === currentFamily?.id ? <Check size={14} /> : null}
-                                  </button>
-                                ))}
+                                {hasFastModePicker ? (
+                                  <>
+                                    <button
+                                      aria-expanded={isSpeedListOpen}
+                                      className={`status-dropdown-item status-model-trigger ${isSpeedListOpen ? "expanded" : ""}`}
+                                      onClick={() => toggleStatusSection("speed")}
+                                      role="menuitem"
+                                      type="button"
+                                    >
+                                      <span>速率</span>
+                                      <ChevronDown size={14} />
+                                    </button>
+                                    {isSpeedListOpen ? (
+                                      <div className="status-model-list" role="group" aria-label="速率">
+                                        <div className="status-model-list-title">速率</div>
+                                        {[
+                                          { value: "off" as const, label: "1x 普通速率" },
+                                          { value: "on" as const, label: "1.5x 高速" },
+                                        ].map((option) => (
+                                          <button
+                                            key={option.value}
+                                            className={`status-dropdown-item ${option.value === fastModeValue ? "selected" : ""}`}
+                                            onClick={() => selectFastMode(option.value)}
+                                            role="menuitem"
+                                            type="button"
+                                          >
+                                            <span>{option.label}</span>
+                                            {option.value === fastModeValue ? <Check size={14} /> : null}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                    {currentFamily ? <div className="status-dropdown-divider" /> : null}
+                                  </>
+                                ) : null}
+                                {currentFamily ? (
+                                  <>
+                                    <button
+                                      aria-expanded={isModelListOpen}
+                                      className={`status-dropdown-item status-model-trigger ${isModelListOpen ? "expanded" : ""}`}
+                                      onClick={() => toggleStatusSection("model")}
+                                      role="menuitem"
+                                      type="button"
+                                    >
+                                      <span>{currentFamily.label}</span>
+                                      <ChevronDown size={14} />
+                                    </button>
+                                    {isModelListOpen ? (
+                                      <div className="status-model-list" role="group" aria-label="模型">
+                                        <div className="status-model-list-title">模型</div>
+                                        {modelFamilies.map((family) => (
+                                          <button
+                                            key={family.id}
+                                            className={`status-dropdown-item ${family.id === currentFamily?.id ? "selected" : ""}`}
+                                            onClick={() => selectFamily(family.id)}
+                                            role="menuitem"
+                                            type="button"
+                                          >
+                                            <span>{family.label}</span>
+                                            {family.id === currentFamily?.id ? <Check size={14} /> : null}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : null}
                               </>
                             )}
                           </div>

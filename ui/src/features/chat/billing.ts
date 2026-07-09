@@ -1,8 +1,11 @@
 import type { BillingModelPrice, BillingPricesResult, ChatMessage } from "../../types";
 
 export interface ModelUsage {
+  billingMultiplier: number;
   cachedReadTokens: number;
   cachedWriteTokens: number;
+  displayRate?: string;
+  fastModeEnabled: boolean;
   inputTokens: number;
   modelCandidates: string[];
   modelId: string;
@@ -11,9 +14,12 @@ export interface ModelUsage {
   thoughtTokens: number;
   totalTokens: number;
   turnCount: number;
+  usageKey: string;
 }
 
 export interface ModelCost {
+  baseTotalCostUsd: number;
+  billingMultiplier: number;
   cachedReadCostUsd: number;
   cachedWriteCostUsd: number;
   inputCostUsd: number;
@@ -115,13 +121,21 @@ function buildModelUsage(messages: ChatMessage[]): ModelUsage[] {
     const runtimeModel = modelValue(modelInfo?.runtimeModel);
     const model = modelValue(modelInfo?.model);
     const modelId = runtimeModel || model || "unknown";
-    const modelLabel = modelValue(modelInfo?.label) || (modelId === "unknown" ? "未知模型" : modelId);
-    const modelCandidates = buildModelCandidates([runtimeModel, model, modelLabel]);
+    const baseModelLabel = modelValue(modelInfo?.label) || (modelId === "unknown" ? "未知模型" : modelId);
+    const modelCandidates = buildModelCandidates([runtimeModel, model, baseModelLabel]);
+    const fastMode = readFastModeCostState(modelInfo?.fastMode);
+    const usageKey = `${modelId}::fast:${fastMode.billingMultiplier}:${fastMode.displayRate ?? ""}`;
+    const modelLabel = fastMode.enabled && fastMode.displayRate
+      ? `${baseModelLabel} (${fastMode.displayRate})`
+      : baseModelLabel;
 
-    if (!map.has(modelId)) {
-      map.set(modelId, {
+    if (!map.has(usageKey)) {
+      map.set(usageKey, {
+        billingMultiplier: fastMode.billingMultiplier,
         cachedReadTokens: 0,
         cachedWriteTokens: 0,
+        displayRate: fastMode.displayRate,
+        fastModeEnabled: fastMode.enabled,
         inputTokens: 0,
         modelCandidates,
         modelId,
@@ -130,11 +144,12 @@ function buildModelUsage(messages: ChatMessage[]): ModelUsage[] {
         thoughtTokens: 0,
         totalTokens: 0,
         turnCount: 0,
+        usageKey,
       });
     }
 
     const usage = msg.usage;
-    const modelUsage = map.get(modelId)!;
+    const modelUsage = map.get(usageKey)!;
     modelUsage.inputTokens += tokenValue(usage.inputTokens) || tokenValue(usage.promptTokens);
     modelUsage.outputTokens += tokenValue(usage.outputTokens) || tokenValue(usage.completionTokens);
     modelUsage.cachedReadTokens += tokenValue(usage.cachedReadTokens);
@@ -160,8 +175,12 @@ function calculateModelCost(usage: ModelUsage, prices: BillingPricesResult | nul
   const thoughtCostUsd = usage.thoughtTokens * (price.outputCostPerToken ?? 0);
   const cachedReadCostUsd = usage.cachedReadTokens * (price.cachedReadCostPerToken ?? price.inputCostPerToken ?? 0);
   const cachedWriteCostUsd = usage.cachedWriteTokens * (price.cachedWriteCostPerToken ?? price.inputCostPerToken ?? 0);
+  const baseTotalCostUsd = inputCostUsd + outputCostUsd + thoughtCostUsd + cachedReadCostUsd + cachedWriteCostUsd;
+  const billingMultiplier = usage.billingMultiplier > 0 ? usage.billingMultiplier : 1;
 
   return {
+    baseTotalCostUsd,
+    billingMultiplier,
     cachedReadCostUsd,
     cachedWriteCostUsd,
     inputCostUsd,
@@ -169,7 +188,7 @@ function calculateModelCost(usage: ModelUsage, prices: BillingPricesResult | nul
     price,
     priceModelId: match.modelId,
     thoughtCostUsd,
-    totalCostUsd: inputCostUsd + outputCostUsd + thoughtCostUsd + cachedReadCostUsd + cachedWriteCostUsd,
+    totalCostUsd: baseTotalCostUsd * billingMultiplier,
   };
 }
 
@@ -228,4 +247,20 @@ function normalizeModelKey(value: string): string {
 
 function tokenValue(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readFastModeCostState(value: unknown): { billingMultiplier: number; displayRate?: string; enabled: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { billingMultiplier: 1, enabled: false };
+  }
+  const fastMode = value as Record<string, unknown>;
+  const enabled = fastMode.enabled === true;
+  const rawMultiplier = fastMode.billingMultiplier;
+  const multiplier = typeof rawMultiplier === "number" && Number.isFinite(rawMultiplier) && rawMultiplier > 0
+    ? rawMultiplier
+    : enabled ? 2 : 1;
+  const displayRate = typeof fastMode.displayRate === "string" && fastMode.displayRate.trim()
+    ? fastMode.displayRate.trim()
+    : enabled ? "1.5x" : undefined;
+  return { billingMultiplier: multiplier, displayRate, enabled };
 }

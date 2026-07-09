@@ -79,6 +79,52 @@ class BillingUsageRecorderTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(entry["workspaceKey"].startswith("sha256:"))
             self.assertEqual(entry["cost"]["priceModelId"], "gpt-5.5")
 
+    async def test_fast_mode_keeps_tokens_and_multiplies_cost(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            recorder = BillingUsageRecorder(Path(tmp) / "billing", FakePriceStore())
+            await recorder.start()
+            recorder.enqueue_turn_usage(
+                conversation_id="conv-fast",
+                turn_id="turn-fast",
+                assistant_message_id="assistant-fast",
+                workspace=Path(tmp) / "workspace",
+                agent_id="codex",
+                agent_label="Codex",
+                model_metadata={
+                    "runtimeModel": "gpt-5.5[xhigh]",
+                    "fastMode": {
+                        "enabled": True,
+                        "speedMode": "fast",
+                        "displayRate": "1.5x",
+                        "runtimeConfigId": "fast-mode",
+                        "runtimeValue": "on",
+                        "billingMultiplier": 2,
+                    },
+                },
+                usage={
+                    "inputTokens": 10,
+                    "outputTokens": 5,
+                    "cachedReadTokens": 20,
+                    "cachedWriteTokens": 2,
+                    "thoughtTokens": 3,
+                    "totalTokens": 40,
+                    "source": "acp.prompt_response.usage",
+                },
+                created_at_ms=timestamp_ms("2026-07-06T10:20:00+08:00"),
+            )
+            await recorder.stop()
+
+            files = list((Path(tmp) / "billing" / "daily").glob("*.json"))
+            daily = json.loads(files[0].read_text(encoding="utf-8"))
+
+            self.assertEqual(daily["totals"]["totalTokens"], 40)
+            self.assertAlmostEqual(daily["totals"]["estimatedCostUsd"], 0.058)
+            entry = daily["entries"][0]
+            self.assertEqual(entry["fastMode"]["enabled"], True)
+            self.assertEqual(entry["fastMode"]["billingMultiplier"], 2)
+            self.assertAlmostEqual(entry["cost"]["baseEstimatedCostUsd"], 0.029)
+            self.assertAlmostEqual(entry["cost"]["estimatedCostUsd"], 0.058)
+
     async def test_duplicate_turn_is_upserted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             recorder = BillingUsageRecorder(Path(tmp) / "billing", FakePriceStore())

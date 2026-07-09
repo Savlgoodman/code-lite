@@ -80,6 +80,7 @@ class BillingUsageRecorder:
         model_id = _model_value(model_info.get("runtimeModel")) or _model_value(model_info.get("model")) or "unknown"
         model_label = _model_value(model_info.get("label")) or _model_value(model_info.get("model")) or model_id
         model_candidates = _build_model_candidates([model_id, model_label, _model_value(model_info.get("model"))])
+        fast_mode = _normalize_fast_mode_metadata(model_info.get("fastMode"))
         workspace_path = _resolve_workspace(workspace)
 
         entry = {
@@ -101,6 +102,8 @@ class BillingUsageRecorder:
             "usage": normalized_usage,
             "confidence": confidence,
         }
+        if fast_mode:
+            entry["fastMode"] = fast_mode
         self._writer.enqueue(
             BillingUsageWriteTask(
                 entry_id=entry_id,
@@ -277,6 +280,8 @@ def _normalize_usage(usage: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
 def _enrich_cost(entry: dict[str, Any], prices: dict[str, Any]) -> dict[str, Any]:
     usage = entry.get("usage") if isinstance(entry.get("usage"), dict) else {}
+    fast_mode = entry.get("fastMode") if isinstance(entry.get("fastMode"), dict) else {}
+    billing_multiplier = _billing_multiplier(fast_mode)
     match = _find_price(entry.get("modelCandidates") or [], prices)
     if match is None:
         return {
@@ -284,6 +289,8 @@ def _enrich_cost(entry: dict[str, Any], prices: dict[str, Any]) -> dict[str, Any
             "cost": {
                 "currency": "USD",
                 "estimatedCostUsd": 0,
+                "baseEstimatedCostUsd": 0,
+                "billingMultiplier": billing_multiplier,
                 "matched": False,
                 "priceStale": bool(prices.get("stale")),
             },
@@ -299,11 +306,14 @@ def _enrich_cost(entry: dict[str, Any], prices: dict[str, Any]) -> dict[str, Any
     cached_write_cost = _number(usage.get("cachedWriteTokens")) * _number(
         price.get("cachedWriteCostPerToken"), fallback=price.get("inputCostPerToken")
     )
+    base_cost = input_cost + output_cost + thought_cost + cached_read_cost + cached_write_cost
     return {
         **entry,
         "cost": {
             "currency": price.get("currency") or prices.get("currency") or "USD",
-            "estimatedCostUsd": input_cost + output_cost + thought_cost + cached_read_cost + cached_write_cost,
+            "estimatedCostUsd": base_cost * billing_multiplier,
+            "baseEstimatedCostUsd": base_cost,
+            "billingMultiplier": billing_multiplier,
             "inputCostUsd": input_cost,
             "outputCostUsd": output_cost,
             "cachedReadCostUsd": cached_read_cost,
@@ -466,6 +476,7 @@ def _public_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "usage": entry.get("usage"),
         "cost": entry.get("cost"),
         "confidence": entry.get("confidence"),
+        "fastMode": entry.get("fastMode"),
     }
 
 
@@ -520,6 +531,26 @@ def _number(value: Any, *, fallback: Any = 0) -> int | float:
             return 0
         return int(parsed) if parsed.is_integer() else parsed
     return 0
+
+
+def _billing_multiplier(fast_mode: dict[str, Any]) -> int | float:
+    multiplier = _number(fast_mode.get("billingMultiplier"), fallback=1)
+    return multiplier if multiplier > 0 else 1
+
+
+def _normalize_fast_mode_metadata(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    enabled = bool(value.get("enabled"))
+    multiplier = _billing_multiplier(value)
+    return {
+        "enabled": enabled,
+        "speedMode": str(value.get("speedMode") or ("fast" if enabled else "normal")),
+        "displayRate": str(value.get("displayRate") or ("1.5x" if enabled else "1x")),
+        "runtimeConfigId": value.get("runtimeConfigId"),
+        "runtimeValue": str(value.get("runtimeValue") or ("on" if enabled else "off")),
+        "billingMultiplier": multiplier,
+    }
 
 
 def _model_value(value: Any) -> str:

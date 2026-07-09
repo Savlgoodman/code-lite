@@ -78,6 +78,9 @@ class BaseRuntimeProfile:
     def effort_config_id(self) -> str:
         return "reasoning_effort"
 
+    def fast_mode_config_id(self) -> str | None:
+        return None
+
     async def apply_turn_config(
         self,
         *,
@@ -88,6 +91,7 @@ class BaseRuntimeProfile:
         await self._apply_mode(conn=conn, session_id=session_id, request=request)
         await self._apply_model(conn=conn, session_id=session_id, request=request)
         await self._apply_reasoning_effort(conn=conn, session_id=session_id, request=request)
+        await self._apply_fast_mode(conn=conn, session_id=session_id, request=request)
 
     async def _apply_mode(self, *, conn: Any, session_id: str, request: AgentRunRequest) -> None:
         mode = self.resolve_mode(request.access_mode)
@@ -251,6 +255,66 @@ class BaseRuntimeProfile:
                 },
             )
 
+    async def _apply_fast_mode(self, *, conn: Any, session_id: str, request: AgentRunRequest) -> None:
+        fast_mode = str(request.fast_mode or "").strip().lower()
+        if fast_mode not in {"on", "off"}:
+            return
+        config_id = self.fast_mode_config_id()
+        if not config_id:
+            return
+        logger.info(
+            "[configure] turn=%s conversation=%s fast_mode=%s config_id=%s runtime=%s",
+            request.turn_id,
+            request.conversation_id[:12],
+            fast_mode,
+            config_id,
+            self.descriptor.id,
+            extra={
+                "category": "acp",
+                "runtime": self.descriptor.id,
+                "conversationId": request.conversation_id,
+                "turnId": request.turn_id,
+                "nativeSessionId": session_id,
+                "stage": "configure.fast_mode",
+                "fields": {"configId": config_id, "fastMode": fast_mode},
+            },
+        )
+        try:
+            await asyncio.wait_for(
+                conn.set_config_option(session_id=session_id, config_id=config_id, value=fast_mode),
+                timeout=10,
+            )
+            logger.info(
+                "[configure] set_config_option(%s=%s) OK",
+                config_id,
+                fast_mode,
+                extra={
+                    "category": "acp",
+                    "runtime": self.descriptor.id,
+                    "conversationId": request.conversation_id,
+                    "turnId": request.turn_id,
+                    "nativeSessionId": session_id,
+                    "stage": "configure.fast_mode",
+                    "fields": {"configId": config_id, "fastMode": fast_mode},
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "[configure] set_config_option(%s=%s) failed: %s",
+                config_id,
+                fast_mode,
+                exc,
+                extra={
+                    "category": "acp",
+                    "runtime": self.descriptor.id,
+                    "conversationId": request.conversation_id,
+                    "turnId": request.turn_id,
+                    "nativeSessionId": session_id,
+                    "stage": "configure.fast_mode",
+                    "fields": {"configId": config_id, "fastMode": fast_mode, "errorType": type(exc).__name__},
+                },
+            )
+
 
 @dataclass(frozen=True)
 class CodexRuntimeProfile(BaseRuntimeProfile):
@@ -275,6 +339,9 @@ class CodexRuntimeProfile(BaseRuntimeProfile):
     def resolve_mode(self, requested_mode: str | None) -> str | None:
         return resolve_codex_mode(requested_mode)
 
+    def fast_mode_config_id(self) -> str | None:
+        return "fast-mode"
+
 
 @dataclass(frozen=True)
 class ClaudeCodeRuntimeProfile(BaseRuntimeProfile):
@@ -296,6 +363,9 @@ class ClaudeCodeRuntimeProfile(BaseRuntimeProfile):
 
     def effort_config_id(self) -> str:
         return "effort"
+
+    def fast_mode_config_id(self) -> str | None:
+        return "fast"
 
     async def _set_model(self, *, conn: Any, session_id: str, model: str) -> None:
         await asyncio.wait_for(

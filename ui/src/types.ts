@@ -294,11 +294,21 @@ export interface BillingUsageEntry {
   confidence?: "measured" | "partial" | "estimated" | string;
   conversationId?: string;
   cost?: {
+    baseEstimatedCostUsd?: number;
+    billingMultiplier?: number;
     estimatedCostUsd?: number;
     matched?: boolean;
     priceModelId?: string;
   };
   createdAtIso?: string;
+  fastMode?: {
+    billingMultiplier?: number;
+    displayRate?: string;
+    enabled?: boolean;
+    runtimeConfigId?: unknown;
+    runtimeValue?: string;
+    speedMode?: string;
+  };
   id?: string;
   localDate?: string;
   localHour?: string;

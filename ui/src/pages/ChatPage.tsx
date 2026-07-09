@@ -109,6 +109,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function isConfigValue(value: unknown): value is ChatConfigValue {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function configValueRecord(value: unknown): Record<string, ChatConfigValue> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  return Object.entries(value).reduce<Record<string, ChatConfigValue>>((result, [key, item]) => {
+    if (isConfigValue(item)) {
+      result[key] = item;
+    }
+    return result;
+  }, {});
+}
+
+function fastModeFromModelInfo(modelInfo: Record<string, unknown>): "off" | "on" | null {
+  const fastMode = modelInfo.fastMode;
+  if (!isRecord(fastMode)) {
+    return null;
+  }
+  const raw = fastMode.runtimeValue ?? fastMode.speedMode ?? fastMode.displayRate ?? fastMode.enabled;
+  if (typeof raw === "boolean") {
+    return raw ? "on" : "off";
+  }
+  const normalized = String(raw ?? "").trim().toLowerCase();
+  if (["on", "true", "fast", "high", "1.5x"].includes(normalized)) {
+    return "on";
+  }
+  if (["off", "false", "normal", "default", "1x"].includes(normalized)) {
+    return "off";
+  }
+  return null;
+}
+
 function mergeRecords(previous: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
   return Object.entries(incoming).reduce<Record<string, unknown>>((merged, [key, value]) => {
     const current = merged[key];
@@ -881,23 +916,32 @@ export function ChatPage() {
         const savedConfig = (conversation.session as unknown as Record<string, unknown>).config;
         let restoredModel = "";
         let restoredEffort = "";
+        let restoredSelectedConfig: Record<string, ChatConfigValue> = {};
         const conversationAgent = (conversation.session as unknown as Record<string, unknown>).agent;
         const isCodex = isRecord(conversationAgent) && String(conversationAgent.runtimeId ?? conversationAgent.id ?? "") === "codex";
         if (savedConfig && typeof savedConfig === "object") {
           const cfg = savedConfig as Partial<SessionConfig>;
           restoredModel = String(cfg.modelFamily ?? "");
           restoredEffort = String(cfg.reasoningEffort ?? "");
+          restoredSelectedConfig = configValueRecord(cfg.selectedConfig);
         }
         // fallback: 从最后一条消息的 model 字段解析
         if (!restoredModel && lastAssistant?.model) {
           const modelInfo = lastAssistant.model as Record<string, unknown>;
           restoredModel = String(modelInfo.runtimeModel ?? modelInfo.model ?? "");
           restoredEffort = String(modelInfo.reasoningEffort ?? "");
+          const restoredFastMode = fastModeFromModelInfo(modelInfo);
+          if (restoredFastMode) {
+            restoredSelectedConfig.fast_mode = restoredFastMode;
+          }
         }
         if (isCodex && restoredModel) {
           const modelSelection = normalizeCodexModelSelection(restoredModel, restoredEffort);
           restoredModel = modelSelection.family;
           restoredEffort = modelSelection.effort;
+          if (restoredEffort) {
+            restoredSelectedConfig.reasoning_effort = restoredEffort;
+          }
         }
         // 从 session.agent.mode 恢复 accessMode
         const restoredAccessMode = isRecord(conversationAgent)
@@ -907,7 +951,9 @@ export function ChatPage() {
         if (restoredModel || restoredAccessMode) {
           setConfigBySession((prev) => {
             if (prev[sessionId]) return prev; // 已有本地配置，不覆盖
-            const selectedConfig: Record<string, ChatConfigValue> = restoredEffort ? { reasoning_effort: restoredEffort } : {};
+            const selectedConfig: Record<string, ChatConfigValue> = restoredEffort
+              ? { ...restoredSelectedConfig, reasoning_effort: restoredEffort }
+              : restoredSelectedConfig;
             return {
               ...prev,
               [sessionId]: {

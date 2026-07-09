@@ -34,6 +34,8 @@ router = APIRouter()
 # 不查产品级 model_config。nanobot 是唯一的产品级模型 adapter。
 _ACP_RUNTIME_IDS = {"codex", "claude_code", "opencode"}
 _CLAUDE_DEFAULT_MODEL = "sonnet"
+_FAST_MODE_ON_VALUES = {"1.5x", "fast", "high", "on", "true", "yes", "1"}
+_FAST_MODE_OFF_VALUES = {"1x", "normal", "off", "false", "no", "0", "default"}
 
 
 def _clean_label(value: str | None) -> str | None:
@@ -59,6 +61,56 @@ def _normalize_codex_runtime_model(runtime_model: str | None) -> str | None:
     if not family or not efforts:
         return model
     return f"{family}[{efforts[-1]}]"
+
+
+def _normalize_fast_mode(value: object) -> str | None:
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        if value == 1.5:
+            return "on"
+        if value == 1:
+            return "off"
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized in _FAST_MODE_ON_VALUES:
+            return "on"
+        if normalized in _FAST_MODE_OFF_VALUES:
+            return "off"
+    return None
+
+
+def _fast_mode_from_config(selected_config: dict[str, object] | None) -> str | None:
+    if not selected_config:
+        return None
+    for key in ("fast_mode", "fastMode", "speedMode", "speed_mode", "fast-mode", "fast"):
+        if key in selected_config:
+            return _normalize_fast_mode(selected_config.get(key))
+    return None
+
+
+def _fast_mode_metadata(fast_mode: str | None, *, runtime_config_id: str | None) -> dict[str, object] | None:
+    if fast_mode not in {"on", "off"}:
+        return None
+    enabled = fast_mode == "on"
+    return {
+        "enabled": enabled,
+        "speedMode": "fast" if enabled else "normal",
+        "displayRate": "1.5x" if enabled else "1x",
+        "runtimeConfigId": runtime_config_id,
+        "runtimeValue": fast_mode,
+        "billingMultiplier": 2 if enabled else 1,
+    }
+
+
+def _runtime_fast_config_id(agent_id: str) -> str | None:
+    if agent_id == "codex":
+        return "fast-mode"
+    if agent_id == "claude_code":
+        return "fast"
+    return None
 
 
 def _claude_model_label(
@@ -218,6 +270,7 @@ async def stream_turn(
     # selectedConfig 中的 reasoning_effort 覆盖旧字段（兼容过渡期）
     if selected_config and "reasoning_effort" in selected_config:
         requested_reasoning_effort = str(selected_config["reasoning_effort"] or "").strip() or None
+    requested_fast_mode = _fast_mode_from_config(selected_config)
     persisted = None if not conversation_id else services.conversation_store.get_conversation(conversation_id)
     persisted_agent = None
     session_workspace: str | None = None
@@ -262,6 +315,12 @@ async def stream_turn(
                 "source": f"{agent_id}-acp",
                 "reasoningEffort": requested_reasoning_effort or "none",
             }
+            fast_mode_info = _fast_mode_metadata(
+                requested_fast_mode,
+                runtime_config_id=_runtime_fast_config_id(agent_id),
+            )
+            if fast_mode_info:
+                model_metadata["fastMode"] = fast_mode_info
     else:
         try:
             if requested_model_id:
@@ -302,6 +361,9 @@ async def stream_turn(
             if resolved_model is not None
             else {}
         )
+        fast_mode_info = _fast_mode_metadata(requested_fast_mode, runtime_config_id=None)
+        if fast_mode_info and model_metadata:
+            model_metadata["fastMode"] = fast_mode_info
     input_blocks, user_attachments, content_error = _parse_content_blocks(
         body=body,
         prompt=prompt,
@@ -349,17 +411,18 @@ async def stream_turn(
         access_mode=requested_access_mode,
         model_metadata=model_metadata,
         reasoning_effort=requested_reasoning_effort,
+        fast_mode=requested_fast_mode,
         input_blocks=input_blocks,
     )
 
     # 详细日志：记录完整请求参数，帮助排查模型选择问题
     prompt_preview = prompt[:80] + ("..." if len(prompt) > 80 else "")
     logger.info(
-        "POST /turns/stream [%s] conversation=%s turn=%s agent=%s(%s) model=%s runtime_model=%s mode=%s effort=%s workspace=%s selectedConfig=%s prompt_len=%d prompt=%s",
+        "POST /turns/stream [%s] conversation=%s turn=%s agent=%s(%s) model=%s runtime_model=%s mode=%s effort=%s fast_mode=%s workspace=%s selectedConfig=%s prompt_len=%d prompt=%s",
         "ACP" if agent_id in _ACP_RUNTIME_IDS else "product",
         conversation_id, turn_id, agent_id, agent_metadata.get("label"),
         requested_model_id, runtime_model,
-        requested_access_mode, requested_reasoning_effort,
+        requested_access_mode, requested_reasoning_effort, requested_fast_mode,
         workspace,
         selected_config,
         len(prompt), prompt_preview,

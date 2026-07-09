@@ -50,6 +50,7 @@ docs/
 | `research/0703-VIBEX-ACP-RESEARCH.md` | 调研 | VibeX ACP runtime 生命周期、会话存储和 code-lite 改进方案 |
 | `research/0706-AGENT-INTERACTION-TOOLS-RESEARCH.md` | 调研 | Codex / Claude Code 交互工具、Plan 模式、用户选择和前端展示边界 |
 | `research/0707-AGENT-MULTIMODAL-INPUT-RESEARCH.md` | 调研 | Agent 多模态图片输入、ACP ContentBlock、附件存储和 runtime 能力协商 |
+| `research/0709-AGENT-FAST-MODE-RESEARCH.md` | 调研 | Codex / Claude Code fast mode 传参、UI 速率开关、消息记录和 daily billing 倍率方案 |
 
 ### 配套专项
 

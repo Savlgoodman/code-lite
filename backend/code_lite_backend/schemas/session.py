@@ -84,6 +84,7 @@ class SessionCapabilities:
 # 已知的 config option 展示标签映射
 _CONFIG_OPTION_LABELS: dict[str, str] = {
     "reasoning_effort": "思考强度",
+    "fast_mode": "速率",
     "fast-mode": "快速模式",
     "mode": "运行模式",
     "model": "模型",
@@ -96,6 +97,10 @@ _CONFIG_VALUE_LABELS: dict[str, dict[str, str]] = {
         "medium": "中思考",
         "high": "高思考",
         "xhigh": "超高思考",
+    },
+    "fast_mode": {
+        "off": "1x 普通速率",
+        "on": "1.5x 高速",
     },
 }
 
@@ -318,6 +323,7 @@ def build_session_capabilities(
 
     # 思考强度别名：Claude Code 用 "effort"，Codex 用 "reasoning_effort"，统一暴露
     THOUGHT_LEVEL_IDS = {"reasoning_effort", "effort"}
+    FAST_MODE_IDS = {"fast-mode", "fast"}
 
     # 解析 config options（排除 mode 和 model，因为它们已通过 modes/models 提供）
     config_options = []
@@ -332,8 +338,13 @@ def build_session_capabilities(
             config_values = [str(v) for v in config_values]
         else:
             config_values = None
-        # 思考强度统一用 reasoning_effort 作为前端 id（前端只认这个）
-        effective_id = "reasoning_effort" if config_id in THOUGHT_LEVEL_IDS else config_id
+        # 思考强度和 fast mode 统一成前端稳定 id。
+        if config_id in THOUGHT_LEVEL_IDS:
+            effective_id = "reasoning_effort"
+        elif config_id in FAST_MODE_IDS:
+            effective_id = "fast_mode"
+        else:
+            effective_id = config_id
         # 优先使用 ACP 返回的 option_labels，其次用内置映射
         option_labels = config_def.get("option_labels") or _CONFIG_VALUE_LABELS.get(effective_id)
         # 优先使用 ACP 返回的 name 作为 label
