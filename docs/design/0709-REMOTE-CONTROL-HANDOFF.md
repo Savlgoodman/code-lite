@@ -86,4 +86,22 @@
 
 **验收**：后端 69 项测试全绿，UI build 通过。
 
+### 阶段四：中继 + ui-remote
+
+分四次提交完成：
+
+1. **proxy_server**（`1ff4352`）：FastAPI + uvicorn 中继服务器，房间模型（SHA256 roomId）、hello/ready/msg/ping 握手、盲转发、心跳保活、10 项集成测试。
+2. **ui-remote**（`102be42`）：React + Vite 移动端 PWA，RelayTransport 实现，三页面（配对/项目/聊天），复用 packages/*。
+3. **RemoteBridge**（`167f8cd`）：后端出站连中继，pair key 管理，app.py 集成启停。
+4. **远控设置页**（`19dde29`）：WS RPC `remote.config.get/update/generate_key`，桌面端 SettingsPage 新增「远程控制」入口。
+
+**验收**：79 项后端测试（69 + 10 proxy）全绿，桌面 UI + ui-remote build 通过。
+
+### 剩余工作（阶段五）
+
+- 断线重连按 `afterSequence` 补发 / 快照自愈
+- 载荷 E2E 加密（HKDF + AEAD）
+- 首连确认、设备列表/踢出、key 轮换（设计文档 8.5）
+- presence、观看者列表、审计完善
+
 <!-- HANDOFF_PLACEHOLDER -->
