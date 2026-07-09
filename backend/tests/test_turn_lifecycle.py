@@ -64,26 +64,38 @@ def _create_conversation(client: TestClient) -> str:
 
 class TurnLifecycleTest(unittest.TestCase):
     def test_normal_turn_streams_and_persists(self) -> None:
-        """非 remote 主路径：NDJSON 流正常收到完整事件并落盘。"""
+        """非 remote 主路径（WS RPC）：事件经总线回流并落盘。"""
         app = _make_app()
         with TestClient(app) as client:
             conversation_id = _create_conversation(client)
             types: list[str] = []
             text = ""
-            with client.stream(
-                "POST",
-                "/api/turns/stream",
-                json={"conversationId": conversation_id, "input": "hi", "turnId": "turn-1"},
-            ) as stream:
-                for line in stream.iter_lines():
-                    if not line.strip():
-                        continue
-                    event = json.loads(line)
-                    types.append(event["type"])
-                    if event["type"] == "agent.text.delta":
-                        text += event["delta"]
+            with client.websocket_connect("/api/ws") as ws:
+                # 先订阅该会话频道
+                ws.send_json({
+                    "v": 1, "kind": "req", "method": "subscribe",
+                    "requestId": "s1", "payload": {"channel": conversation_id},
+                })
+                snapshot = ws.receive_json()
+                self.assertEqual(snapshot["kind"], "snapshot")
 
-            self.assertEqual(types[0], "conversation.turn.started")
+                # 发起 turn
+                ws.send_json({
+                    "v": 1, "kind": "req", "method": "turn.start", "requestId": "t1",
+                    "payload": {"conversationId": conversation_id, "input": "hi", "turnId": "turn-1"},
+                })
+
+                for _ in range(50):
+                    msg = ws.receive_json()
+                    if msg["kind"] == "event":
+                        event = msg["payload"]
+                        types.append(event["type"])
+                        if event["type"] == "agent.text.delta":
+                            text += event["delta"]
+                        if event["type"] == "agent.run.completed":
+                            break
+
+            self.assertIn("conversation.turn.started", types)
             self.assertEqual(types[-1], "agent.run.completed")
             self.assertEqual(text, "hello world")
 
@@ -99,18 +111,28 @@ class TurnLifecycleTest(unittest.TestCase):
         app = _make_app(pre_complete_delay=0.6)
         with TestClient(app) as client:
             conversation_id = _create_conversation(client)
-            # 只读第一行（conversation.turn.started）就断开
-            with client.stream(
-                "POST",
-                "/api/turns/stream",
-                json={"conversationId": conversation_id, "input": "hi", "turnId": "turn-1"},
-            ) as stream:
-                for line in stream.iter_lines():
-                    if line.strip():
-                        first = json.loads(line)
-                        self.assertEqual(first["type"], "conversation.turn.started")
+            # 先订阅频道，发起 turn，然后断开
+            with client.websocket_connect("/api/ws") as ws:
+                ws.send_json({
+                    "v": 1, "kind": "req", "method": "subscribe",
+                    "requestId": "s1", "payload": {"channel": conversation_id},
+                })
+                ws.receive_json()  # snapshot
+                ws.send_json({
+                    "v": 1, "kind": "req", "method": "turn.start", "requestId": "t1",
+                    "payload": {"conversationId": conversation_id, "input": "hi", "turnId": "turn-1"},
+                })
+                # 读取消息直到收到一个 event（跳过可能的 result ack），然后断开
+                got_event = False
+                for _ in range(10):
+                    msg = ws.receive_json()
+                    if msg["kind"] == "event":
+                        event = msg["payload"]
+                        self.assertEqual(event["type"], "conversation.turn.started")
+                        got_event = True
                         break
-                # 退出 with：连接断开，中继结束；后台 turn 应继续
+                self.assertTrue(got_event, "expected conversation.turn.started event before disconnect")
+                # 退出 with：连接断开，后台 turn 应继续
 
             # 轮询直到后台 turn 完成并落盘
             deadline = time.time() + 5

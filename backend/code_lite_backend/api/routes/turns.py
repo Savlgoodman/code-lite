@@ -7,11 +7,10 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 
 from code_lite_backend.api.dependencies import get_services
-from code_lite_backend.core.json_utils import encode_ndjson_event
 from code_lite_backend.schemas.agent import (
     AgentRunRequest,
     ImageAttachmentSource,
@@ -38,15 +37,13 @@ class TurnStartOutcome:
 
     - error 非 None：turn 未启动，调用方渲染该 agent.run.failed 错误文案。
     - busy 为 True：会话已有活动 turn，被互锁拒绝。
-    - 否则：turn 已在后台启动，conversation_id/turn_id 为最终值；
-      若调用方请求了中继订阅，subscription 为该会话的总线订阅。
+    - 否则：turn 已在后台启动，conversation_id/turn_id 为最终值。
     """
 
     conversation_id: str
     turn_id: str
     error: str | None = None
     busy: bool = False
-    subscription: object | None = None
 
 
 # ACP runtime adapters 使用 runtime 原生模型（从 session/new 获取），
@@ -378,15 +375,12 @@ async def cancel_turn(
 async def prepare_and_start_turn(
     services: AppServices,
     body: dict[str, object],
-    *,
-    subscribe_for_relay: bool = False,
 ) -> TurnStartOutcome:
     """解析请求、解析模型、构建并在后台启动一个会话 turn。
 
-    HTTP /turns/stream 与 WS turn.start 共用本函数，避免两份参数逻辑漂移。
+    唯一调用方是 WS turn.start RPC（0709 阶段二移除 HTTP NDJSON 后）。
     turn 在 ActiveTurnRegistry 的后台 task 中执行，事件经 SessionEventBus 广播。
-    subscribe_for_relay=True 时先订阅总线（早于 task 启动，保证不漏事件）并回传订阅，
-    供 HTTP 中继按 turnId 转发；WS 端已在 subscribe 频道，无需再订阅。
+    订阅由 WS 端自行管理，本函数只负责启动 turn。
     """
     conversation_id = str(body.get("conversationId") or "").strip()
     if not conversation_id:
@@ -704,85 +698,21 @@ async def prepare_and_start_turn(
                 logger.warning("run_turn_task: turn %s discarded (not completed)", turn_id)
                 services.conversation_recorder.discard_turn(conversation_id)
 
-    # 会话级串行互锁 + 订阅 + 启动后台 turn，全部同步完成（0709 第 6 节、5.1.1）。
+    # 会话级串行互锁 + 启动后台 turn，全部同步完成（0709 第 6 节、5.1.1）。
     # 必须同步：不能推迟到惰性生成器里，否则返回响应到开始消费之间会出现
     # is_running=False 的窗口，导致互锁失效。
     if turn_registry is not None and turn_registry.is_running(conversation_id):
         return TurnStartOutcome(conversation_id=conversation_id, turn_id=turn_id, busy=True)
 
-    # 中继场景先订阅（早于 task 启动，保证不漏事件），再登记启动后台 turn。
-    subscription = event_bus.subscribe(conversation_id) if (event_bus and subscribe_for_relay) else None
     try:
         if turn_registry is not None:
             turn_registry.start(conversation_id, run_turn_task)
         else:
             asyncio.ensure_future(run_turn_task())
     except Exception:
-        if subscription is not None:
-            subscription.close()
         raise
 
     return TurnStartOutcome(
         conversation_id=conversation_id,
         turn_id=turn_id,
-        subscription=subscription,
-    )
-
-
-@router.post("/turns/stream")
-async def stream_turn(
-    request: Request,
-    services: AppServices = Depends(get_services),
-) -> StreamingResponse:
-    """HTTP NDJSON 入口（非 remote 桌面端主路径）。
-
-    薄封装：调用 prepare_and_start_turn 启动后台 turn，再把本 turn 的事件从
-    总线中继为 NDJSON。客户端断开只结束中继，不影响后台 turn（0709 5.1.1）。
-    """
-    body = await request.json()
-
-    def error_response(conversation_id: str, turn_id: str, message: str) -> StreamingResponse:
-        async def error_stream():
-            yield encode_ndjson_event(
-                {
-                    "type": "agent.run.failed",
-                    "conversationId": conversation_id,
-                    "turnId": turn_id,
-                    "error": message,
-                }
-            )
-
-        return StreamingResponse(error_stream(), media_type="application/x-ndjson; charset=utf-8")
-
-    outcome = await prepare_and_start_turn(services, body, subscribe_for_relay=True)
-
-    if outcome.busy:
-        return error_response(outcome.conversation_id, outcome.turn_id, "当前会话已有正在运行的任务。")
-    if outcome.error is not None:
-        return error_response(outcome.conversation_id, outcome.turn_id, outcome.error)
-
-    subscription = outcome.subscription
-    turn_id = outcome.turn_id
-    if subscription is None:
-        # 无总线/无输入：返回空流（保持既有对空 prompt 的行为）
-        async def empty_stream():
-            if False:
-                yield b""
-        return StreamingResponse(empty_stream(), media_type="application/x-ndjson; charset=utf-8")
-
-    async def relay_stream():
-        try:
-            async for event in subscription:  # type: ignore[attr-defined]
-                # 只转发本 turn 的事件（本 turn 的所有事件都带 turnId==turn_id）
-                if event.get("turnId") != turn_id:
-                    continue
-                yield encode_ndjson_event(event)
-                if event.get("type") in {"agent.run.completed", "agent.run.failed"}:
-                    break
-        finally:
-            subscription.close()  # type: ignore[attr-defined]
-
-    return StreamingResponse(
-        relay_stream(),
-        media_type="application/x-ndjson; charset=utf-8",
     )

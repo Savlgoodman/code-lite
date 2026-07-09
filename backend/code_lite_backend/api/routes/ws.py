@@ -133,7 +133,7 @@ async def _handle_turn_start(
         payload = {**payload, "conversationId": conversation_id}
     _ensure_channel_pump(ws, services, conversation_id, tasks)  # 订阅早于 turn 启动
 
-    outcome = await prepare_and_start_turn(services, payload, subscribe_for_relay=False)
+    outcome = await prepare_and_start_turn(services, payload)
     if outcome.busy:
         await _send(
             ws,
