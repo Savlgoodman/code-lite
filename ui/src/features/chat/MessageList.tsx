@@ -43,6 +43,16 @@ function scrollCruiseProgress(progress: number) {
   return (t - ramp / 2) / (1 - ramp);
 }
 
+function formatFullDateTime(value: number) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(new Date(value));
+}
+
 function AssistantMessageContent({
   isCompactTurn,
   message,
@@ -226,7 +236,7 @@ const MessageItem = memo(function MessageItem({
         ) : null}
 
         {showTurnEndTime && !isCompactTurn ? (
-          <div className="conversation-boundary-time">
+          <div className="conversation-boundary-time" title={formatFullDateTime(turnEndTime)}>
             {formatConversationBoundaryTime(turnEndTime)}
           </div>
         ) : null}
