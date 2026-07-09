@@ -87,18 +87,14 @@ export async function createConversation(options: {
   preview?: string;
   workspace?: string;
 }): Promise<{ session: Session; messages: unknown[] }> {
-  const baseUrl = await ensureBackend();
-  const response = await fetch(`${baseUrl}/api/conversations`, {
-    body: JSON.stringify(options),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    throw new Error(`Backend returned ${response.status}`);
-  }
-
-  return response.json() as Promise<{ session: Session; messages: unknown[] }>;
+  // 0709 阶段二：走 WS RPC，后端自动广播 conversation.created 到全局频道
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<{ session: Session; messages: unknown[] }>(
+    "conversation.create",
+    options,
+  );
+  return result;
 }
 
 export async function attachmentImageUrl(
@@ -302,20 +298,11 @@ export async function sendApprovalDecision(
   approvalId: string,
   decision: "allow" | "deny",
 ): Promise<{ session?: Session }> {
-  const baseUrl = await ensureBackend();
-  const response = await fetch(`${baseUrl}/api/approvals/${approvalId}/decision`, {
-    body: JSON.stringify({ decision }),
-    headers: {
-      "Content-Type": "application/json"
-    },
-    method: "POST"
-  });
-
-  if (!response.ok) {
-    throw new Error(`Backend returned ${response.status}`);
-  }
-
-  return response.json() as Promise<{ session?: Session }>;
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<{ ok: boolean }>("approval.decision", { approvalId, decision });
+  // 后端 approval.decision 返回 { ok: boolean }，审批状态通过事件总线回流
+  return { session: undefined };
 }
 
 export async function sendInputResponse(
@@ -323,20 +310,15 @@ export async function sendInputResponse(
   action: "accept" | "decline" | "cancel",
   content?: Record<string, unknown>,
 ): Promise<{ session?: Session }> {
-  const baseUrl = await ensureBackend();
-  const response = await fetch(`${baseUrl}/api/inputs/${inputRequestId}/response`, {
-    body: JSON.stringify({ action, ...(content ? { content } : {}) }),
-    headers: {
-      "Content-Type": "application/json"
-    },
-    method: "POST"
+  const transport = getLocalTransport();
+  await transport.connect();
+  await transport.request("input.response", {
+    inputRequestId,
+    action,
+    ...(content ? { content } : {}),
   });
-
-  if (!response.ok) {
-    throw new Error(`Backend returned ${response.status}`);
-  }
-
-  return response.json() as Promise<{ session?: Session }>;
+  // 后端 input.response 后，会话状态通过事件总线回流
+  return { session: undefined };
 }
 
 export async function cancelTurn(turnId: string): Promise<void> {
