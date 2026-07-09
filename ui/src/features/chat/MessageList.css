@@ -249,11 +249,10 @@
 .thinking-indicator {
   position: relative;
   width: fit-content;
-  margin-top: 6px;
   overflow: hidden;
   color: #697079;
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 400;
   line-height: 1.7;
 }
 
@@ -263,7 +262,7 @@
   content: attr(data-text);
   color: transparent;
   background:
-    linear-gradient(100deg, transparent 0%, transparent 28%, #ffffff 50%, transparent 72%, transparent 100%);
+    linear-gradient(100deg, transparent 0%, transparent 28%, rgba(255, 255, 255, 0.95) 50%, transparent 72%, transparent 100%);
   background-repeat: no-repeat;
   background-size: 46% 100%;
   background-clip: text;
@@ -282,6 +281,12 @@
   100% {
     background-position: 180% 0;
   }
+}
+
+.chat-running-thinking {
+  display: flex;
+  justify-content: flex-start;
+  margin: 4px 0 18px;
 }
 
 .message-error {

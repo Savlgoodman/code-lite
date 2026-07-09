@@ -115,6 +115,7 @@ export function ChatWorkspace({
       </section>
       <MessageList
         isRunning={isRunning}
+        isWaitingForUser={Boolean(pendingApproval || pendingInput)}
         messages={messages}
         sessionId={sessionId}
         updatedAt={updatedAt}

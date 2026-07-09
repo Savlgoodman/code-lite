@@ -189,8 +189,6 @@ const MessageItem = memo(function MessageItem({
   showTurnEndTime: boolean;
   turnEndTime: number;
 }) {
-  const isThinking = message.role === "assistant" && Boolean(message.streaming) && (isCompactTurn || !message.content.trim());
-  const thinkingText = isCompactTurn ? "正在压缩" : "正在思考";
   const showCompactionIndicator =
     message.role === "assistant" && !message.streaming && !message.error && (isCompactTurn || isCompactedMessage(message));
 
@@ -205,12 +203,6 @@ const MessageItem = memo(function MessageItem({
             {message.content ? <p className="user-message-text">{message.content}</p> : null}
           </div>
         )}
-
-        {isThinking ? (
-          <div className="thinking-indicator" aria-live="polite" data-text={thinkingText}>
-            {thinkingText}
-          </div>
-        ) : null}
 
         {message.reasoning ? (
           <details className="reasoning-block">
@@ -245,23 +237,40 @@ const MessageItem = memo(function MessageItem({
 
 interface MessageListProps {
   isRunning: boolean;
+  isWaitingForUser?: boolean;
   messages: ChatMessage[];
   sessionId: string;
   updatedAt: number;
 }
 
-export function MessageList({ isRunning, messages, sessionId, updatedAt }: MessageListProps) {
+export function MessageList({ isRunning, isWaitingForUser = false, messages, sessionId, updatedAt }: MessageListProps) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const smoothScrollFrameRef = useRef<number | null>(null);
   const smoothScrollActiveRef = useRef(false);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [showRunningThinking, setShowRunningThinking] = useState(false);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [scrollbarState, setScrollbarState] = useState({
     thumbHeight: 100,
     thumbTop: 0,
     visible: false
   });
+  const latestStreamingAssistantIndex = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role === "assistant" && message.streaming) {
+        return index;
+      }
+    }
+    return -1;
+  }, [messages]);
+  const latestStreamingAssistant = latestStreamingAssistantIndex >= 0 ? messages[latestStreamingAssistantIndex] : null;
+  const compactSourceMessage =
+    latestStreamingAssistantIndex >= 0 ? messages[latestStreamingAssistantIndex - 1] : messages[messages.length - 1];
+  const runningThinkingText = isCompactPrompt(compactSourceMessage?.content) ? "正在压缩" : "正在思考";
+  const canShowRunningThinking = isRunning && !isWaitingForUser;
+  const shouldShowThinkingImmediately = canShowRunningThinking && (!latestStreamingAssistant || !latestStreamingAssistant.content.trim());
 
   function isAtBottom(element: HTMLElement) {
     return element.scrollHeight - element.scrollTop - element.clientHeight <= 8;
@@ -344,6 +353,26 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
   }
 
   useEffect(() => {
+    if (!canShowRunningThinking) {
+      setShowRunningThinking(false);
+      return undefined;
+    }
+    if (shouldShowThinkingImmediately) {
+      setShowRunningThinking(true);
+      return undefined;
+    }
+
+    setShowRunningThinking(false);
+    const timer = window.setTimeout(() => setShowRunningThinking(true), 1200);
+    return () => window.clearTimeout(timer);
+  }, [
+    canShowRunningThinking,
+    latestStreamingAssistant?.content,
+    latestStreamingAssistant?.id,
+    shouldShowThinkingImmediately
+  ]);
+
+  useEffect(() => {
     const element = scrollRef.current;
     if (!element) {
       return;
@@ -386,7 +415,7 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
         updateScrollbarState(element);
       }
     });
-  }, [isPinnedToBottom, messages]);
+  }, [isPinnedToBottom, messages, showRunningThinking]);
 
   useEffect(() => {
     requestAnimationFrame(() => scrollToBottom("auto"));
@@ -407,6 +436,13 @@ export function MessageList({ isRunning, messages, sessionId, updatedAt }: Messa
               turnEndTime={message.updatedAt ?? (index === messages.length - 1 ? updatedAt : message.createdAt)}
             />
           ))}
+          {showRunningThinking ? (
+            <div className="chat-running-thinking" role="status" aria-live="polite">
+              <span className="thinking-indicator" data-text={runningThinkingText}>
+                {runningThinkingText}
+              </span>
+            </div>
+          ) : null}
         </div>
       </section>
       {scrollbarState.visible ? (
