@@ -124,3 +124,67 @@
   color: var(--subtle);
   margin-top: 8px;
 }
+
+.rc-peer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rc-peer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.rc-peer-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rc-peer-id {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.rc-peer-role {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--sidebar);
+  color: var(--muted);
+}
+
+.rc-peer-role-pending {
+  background: rgba(230, 160, 30, 0.15);
+  color: var(--orange);
+}
+
+.rc-peer-role-operator {
+  background: rgba(40, 160, 90, 0.15);
+  color: var(--green);
+}
+
+.rc-peer-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.rc-btn-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.rc-btn-danger {
+  color: var(--orange);
+  border-color: var(--orange);
+}

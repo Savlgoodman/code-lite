@@ -82,6 +82,9 @@ class RemoteBridgeConfig:
     relay_url: str = "ws://localhost:18766/ws"
     pair_key: str = ""  # hex string
     room_id: str = ""   # SHA256(pair_key) hex
+    # 新接入设备默认是否只读（0710 第 6 节）。True=首连须宿主确认才可介入；
+    # False=接入即 operator（默认，契合"随时介入"目标，但仍需首连确认）。
+    default_readonly: bool = False
 
 
 class _PeerSession:
@@ -96,6 +99,10 @@ class _PeerSession:
         self._real_ws = real_ws
         self.peer_id = peer_id
         self.pump_tasks: dict[str, asyncio.Task] = {}
+        # 权限角色：pending（新接入未确认，只读）| viewer（只读）| operator（可介入）。
+        # 见 docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md 第 6 节。
+        self.role: str = "pending"
+        self.connected_at: float = time.time()
 
     async def send_json(self, data: dict) -> None:
         envelope = {"type": "msg", "to": self.peer_id, "from": "host", "payload": data}
@@ -105,6 +112,33 @@ class _PeerSession:
         for task in self.pump_tasks.values():
             task.cancel()
         self.pump_tasks.clear()
+
+
+# 各 RPC 方法所需的最低权限等级（0710 第 3.3 节）。
+# viewer 只读；operator 可发消息/审批/新建/归档/删除等介入操作。
+_METHOD_MIN_ROLE: dict[str, str] = {
+    "subscribe": "viewer",
+    "unsubscribe": "viewer",
+    "conversation.list": "viewer",
+    "conversation.get": "viewer",
+    "session.initialize": "viewer",
+    "diff.get": "viewer",
+    "conversation.create": "operator",
+    "conversation.config.update": "operator",
+    "conversation.archive": "operator",
+    "conversation.delete": "operator",
+    "turn.start": "operator",
+    "turn.cancel": "operator",
+    "approval.decision": "operator",
+    "input.response": "operator",
+}
+
+_ROLE_RANK: dict[str, int] = {"pending": 0, "viewer": 1, "operator": 2, "owner": 3}
+
+
+def _role_allows(role: str, method: str) -> bool:
+    required = _METHOD_MIN_ROLE.get(method, "operator")
+    return _ROLE_RANK.get(role, 0) >= _ROLE_RANK.get(required, 2)
 
 
 class RemoteBridge:
@@ -123,6 +157,42 @@ class RemoteBridge:
     def config(self) -> RemoteBridgeConfig:
         return self._config
 
+    def peer_list(self) -> list[dict[str, Any]]:
+        """当前已接入设备列表（供设置页展示 + 踢出，0710 第 6 节）。"""
+        return [
+            {"peerId": p.peer_id, "role": p.role, "connectedAt": p.connected_at}
+            for p in self._remote_peers.values()
+        ]
+
+    def authorize_peer(self, peer_id: str, role: str = "operator") -> bool:
+        """宿主确认某设备并赋予角色（viewer/operator）。"""
+        peer = self._remote_peers.get(peer_id)
+        if peer is None:
+            return False
+        if role not in ("viewer", "operator"):
+            role = "operator"
+        peer.role = role
+        logger.info("peer %s authorized as %s", peer_id, role)
+        return True
+
+    async def kick_peer(self, peer_id: str) -> bool:
+        """踢出设备：取消其订阅并拒绝后续命令（软断开，0710 第 6 节）。"""
+        peer = self._remote_peers.pop(peer_id, None)
+        if peer is None:
+            return False
+        peer.cancel_pumps()
+        logger.info("peer %s kicked", peer_id)
+        return True
+
+    def _notify_local(self, event: dict[str, Any]) -> None:
+        """向本地前端（宿主）推一条 presence 事件，走全局频道总线。
+
+        用于首连确认弹窗、设备列表刷新等。本地 WS 订阅了 "*" 频道。
+        """
+        bus = self._services.event_bus
+        if bus is not None:
+            bus.publish("*", event)
+
     @property
     def is_connected(self) -> bool:
         return self._ws is not None and self._running
@@ -139,6 +209,7 @@ class RemoteBridge:
                 relay_url=data.get("relay_url", "ws://localhost:18766/ws"),
                 pair_key=data.get("pair_key", ""),
                 room_id=data.get("room_id", ""),
+                default_readonly=data.get("default_readonly", False),
             )
         return RemoteBridgeConfig()
 
@@ -149,6 +220,7 @@ class RemoteBridge:
             "relay_url": self._config.relay_url,
             "pair_key": self._config.pair_key,
             "room_id": self._config.room_id,
+            "default_readonly": self._config.default_readonly,
         }, indent=2))
 
     def generate_pair_key(self) -> str:
@@ -222,13 +294,24 @@ class RemoteBridge:
                         peer_id = msg.get("peerId", "")
                         logger.info("remote peer joined: %s", peer_id)
                         # 每个 peer 一个独立会话（含独立 pump_tasks），互不串台（0710 第 4.1 节）。
-                        self._remote_peers[peer_id] = _PeerSession(ws, peer_id)
+                        peer = _PeerSession(ws, peer_id)
+                        # 新接入默认 pending（只读）；宿主确认后才可介入（0710 第 6 节）。
+                        # default_readonly=False 时确认后默认 operator，但首连仍需确认。
+                        peer.role = "pending"
+                        self._remote_peers[peer_id] = peer
+                        # 通知本地前端弹首连确认
+                        self._notify_local({
+                            "type": "remote.peer.pending",
+                            "peerId": peer_id,
+                            "defaultReadonly": self._config.default_readonly,
+                        })
                     elif msg_type == "peer.left":
                         peer_id = msg.get("peerId", "")
                         logger.info("remote peer left: %s", peer_id)
                         peer = self._remote_peers.pop(peer_id, None)
                         if peer is not None:
                             peer.cancel_pumps()
+                        self._notify_local({"type": "remote.peer.left", "peerId": peer_id})
                     elif msg_type == "msg":
                         payload = msg.get("payload", {})
                         # 路由来源取自外层 from（中继强制覆盖为真实 peerId，防伪造）。
@@ -255,6 +338,16 @@ class RemoteBridge:
         peer = self._remote_peers.get(peer_id)
         if peer is None:
             logger.warning("rpc from unknown peer %s: %s", peer_id, method)
+            return
+
+        # 权限校验（0710 第 6 节）：pending 设备只允许只读观看类方法，
+        # 介入类方法（turn.start/审批/新建等）需宿主确认为 operator 后才放行。
+        effective_role = "viewer" if peer.role == "pending" else peer.role
+        if not _role_allows(effective_role, method):
+            await peer.send_json(_envelope(
+                "error", requestId=request_id,
+                payload={"code": "forbidden", "method": method, "role": peer.role},
+            ))
             return
 
         services = self._services

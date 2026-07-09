@@ -55,7 +55,14 @@ export type WireMethod =
   | "approval.decision"
   | "input.response"
   | "attachment.upload"
-  | "diff.get";
+  | "diff.get"
+  // 远控设备管理（仅宿主本地前端调用，不经中继）。见 0710 第 6 节。
+  | "remote.config.get"
+  | "remote.config.update"
+  | "remote.config.generate_key"
+  | "remote.peers.list"
+  | "remote.peer.authorize"
+  | "remote.peer.kick";
 
 /** 后端 -> 客户端的控制信令（见设计文档 7.2 control）。 */
 export type WireControlType =

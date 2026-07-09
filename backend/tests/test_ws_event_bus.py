@@ -177,6 +177,22 @@ class RemoteBridgeDispatchTest(unittest.TestCase):
             f"5-arg handlers {five_arg} != _HANDLERS_NEEDING_TASKS {_HANDLERS_NEEDING_TASKS}",
         )
 
+    def test_role_permission_gate(self) -> None:
+        """pending/viewer 只读放行、介入类拒绝；operator 全放行（0710 第 6 节）。"""
+        from code_lite_backend.services.remote_bridge import _role_allows
+
+        # 只读方法：viewer 及以上放行
+        for method in ("subscribe", "conversation.list", "conversation.get", "diff.get"):
+            self.assertTrue(_role_allows("viewer", method))
+            self.assertTrue(_role_allows("operator", method))
+        # 介入方法：viewer 拒绝，operator 放行
+        for method in ("turn.start", "approval.decision", "conversation.delete"):
+            self.assertFalse(_role_allows("viewer", method))
+            self.assertTrue(_role_allows("operator", method))
+        # 未知方法默认按 operator 要求
+        self.assertFalse(_role_allows("viewer", "some.unknown.method"))
+        self.assertTrue(_role_allows("operator", "some.unknown.method"))
+
 
 if __name__ == "__main__":
     unittest.main()

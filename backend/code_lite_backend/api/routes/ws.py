@@ -449,6 +449,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     "relayUrl": cfg.relay_url if cfg else "",
                     "pairKey": cfg.pair_key if cfg else "",
                     "roomId": cfg.room_id if cfg else "",
+                    "defaultReadonly": cfg.default_readonly if cfg else False,
                 }))
             elif method == "remote.config.update":
                 bridge = services.remote_bridge
@@ -466,6 +467,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                             import hashlib
                             changes["pair_key"] = key
                             changes["room_id"] = hashlib.sha256(key.encode()).hexdigest()
+                    if "defaultReadonly" in payload:
+                        changes["default_readonly"] = bool(payload["defaultReadonly"])
                     bridge.update_config(**changes)
                     if changes.get("enabled") and bridge.config.pair_key:
                         await bridge.stop()
@@ -478,6 +481,21 @@ async def ws_endpoint(ws: WebSocket) -> None:
                         "pairKey": bridge.config.pair_key,
                         "roomId": bridge.config.room_id,
                     }))
+            elif method == "remote.peers.list":
+                bridge = services.remote_bridge
+                peers = bridge.peer_list() if bridge else []
+                await _send(ws, _envelope("result", requestId=request_id, payload={"peers": peers}))
+            elif method == "remote.peer.authorize":
+                bridge = services.remote_bridge
+                peer_id = str(payload.get("peerId") or "").strip()
+                role = str(payload.get("role") or "operator").strip()
+                ok = bool(bridge and peer_id and bridge.authorize_peer(peer_id, role))
+                await _send(ws, _envelope("result", requestId=request_id, payload={"ok": ok}))
+            elif method == "remote.peer.kick":
+                bridge = services.remote_bridge
+                peer_id = str(payload.get("peerId") or "").strip()
+                ok = bool(bridge and peer_id and await bridge.kick_peer(peer_id))
+                await _send(ws, _envelope("result", requestId=request_id, payload={"ok": ok}))
             elif method == "remote.config.generate_key":
                 bridge = services.remote_bridge
                 if not bridge:
