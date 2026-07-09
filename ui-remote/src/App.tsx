@@ -1,30 +1,21 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Folder, MessageSquare, Settings, Send, ArrowLeft } from "lucide-react";
+import type { AgentEvent, ChatMessage, Session } from "@code-lite/protocol";
+import {
+  applyConversationListEvent,
+  isConversationListEvent,
+  reduceAgentEvent,
+  sessionViewFromSnapshot,
+  emptySessionView,
+  type SessionViewState,
+} from "@code-lite/chat-core";
 import { RelayTransport } from "./services/RelayTransport";
 
 type Page = "projects" | "chat" | "settings";
 
-interface Session {
-  id: string;
-  title: string;
-  preview: string;
-  workspace?: string;
-  workspaceKind?: string;
-  agent?: { id: string; label: string };
-  status: string;
-  updatedAt: number;
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  createdAt: number;
-  streaming?: boolean;
-}
-
 const LS_RELAY_URL = "code-lite-relay-url";
 const LS_PAIR_KEY = "code-lite-pair-key";
+const GLOBAL_CHANNEL = "*";
 
 async function computeRoomId(pairKey: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -34,24 +25,71 @@ async function computeRoomId(pairKey: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+interface SnapshotPayload {
+  snapshot: { session: Session | null; messages: ChatMessage[] } | null;
+  latestSequence?: number;
+}
+
 export function App() {
   const [page, setPage] = useState<Page>("settings");
-  const [transport, setTransport] = useState<RelayTransport | null>(null);
   const [relayUrl, setRelayUrl] = useState(localStorage.getItem(LS_RELAY_URL) || "ws://localhost:18766/ws");
   const [pairKey, setPairKey] = useState(localStorage.getItem(LS_PAIR_KEY) || "");
   const [connected, setConnected] = useState(false);
   const [hostOnline, setHostOnline] = useState(false);
-  const hostOnlineRef = useRef(false);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [messages, setMessages] = useState<Record<string, ChatMessage[]>>({});
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // 每个会话一份视图状态，由 snapshot + 事件 reduce 得到（复用 chat-core，与桌面同源）。
+  const [views, setViews] = useState<Record<string, SessionViewState>>({});
   const [draft, setDraft] = useState("");
-  const [running, setRunning] = useState<Set<string>>(new Set());
+
+  const transportRef = useRef<RelayTransport | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  activeSessionIdRef.current = activeSessionId;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, activeSession]);
+  }, [views, activeSessionId]);
+
+  // 事件入口：全局频道走列表 reducer，会话频道走单会话 reducer（0710 第 5 节）。
+  const handleEvent = useCallback((event: AgentEvent, meta: { channel: string }) => {
+    if (meta.channel === GLOBAL_CHANNEL || isConversationListEvent(event)) {
+      if (isConversationListEvent(event)) {
+        setSessions((current) => applyConversationListEvent(current, event));
+      }
+      return;
+    }
+    const channel = (event as { conversationId?: string }).conversationId || meta.channel;
+    if (!channel) return;
+    setViews((current) => {
+      const prev = current[channel] ?? emptySessionView(null);
+      return { ...current, [channel]: reduceAgentEvent(prev, event) };
+    });
+    // 运行态变化同步到列表项的 status（供列表显示"运行中"）。
+    const type = (event as { type: string }).type;
+    if (type === "turn.lock" || type === "turn.unlock" || type === "agent.run.completed" || type === "agent.run.failed") {
+      const running = type === "turn.lock";
+      setSessions((current) =>
+        current.map((s) => (s.id === channel ? { ...s, status: running ? "running" : s.status === "running" ? "idle" : s.status } : s)),
+      );
+    }
+  }, []);
+
+  const handleSnapshot = useCallback((channel: string, payload: unknown) => {
+    if (channel === GLOBAL_CHANNEL) return;
+    const snap = payload as SnapshotPayload;
+    if (!snap?.snapshot) return;
+    const view = sessionViewFromSnapshot(snap.snapshot);
+    setViews((current) => ({ ...current, [channel]: view }));
+    if (view.session) {
+      setSessions((current) => {
+        const exists = current.some((s) => s.id === view.session!.id);
+        return exists
+          ? current.map((s) => (s.id === view.session!.id ? { ...s, ...view.session! } : s))
+          : [view.session!, ...current];
+      });
+    }
+  }, []);
 
   const connect = async () => {
     if (!pairKey.trim()) return;
@@ -61,16 +99,16 @@ export function App() {
     const t = new RelayTransport({
       relayUrl,
       roomId,
-      onHostStatusChange: (online) => { hostOnlineRef.current = online; setHostOnline(online); },
+      onHostStatusChange: (online) => setHostOnline(online),
     });
     t.onStatus((s) => setConnected(s !== "idle" && s !== "closed"));
+    t.onEvent(handleEvent);
+    t.onSnapshot(handleSnapshot);
+    transportRef.current = t;
     try {
       await t.connect();
-      setTransport(t);
-      // 订阅全局频道以接收会话列表事件
-      await t.subscribe("*");
+      await t.subscribe(GLOBAL_CHANNEL);
       setPage("projects");
-      // 直接拉取会话列表（host 不在线时 RPC 会超时，显示空列表即可）
       try {
         const listResult = await t.request<{ sessions: Session[] }>("conversation.list", {});
         setSessions(listResult.sessions);
@@ -84,85 +122,44 @@ export function App() {
   };
 
   const openSession = async (session: Session) => {
+    const transport = transportRef.current;
     if (!transport) return;
-    setActiveSession(session);
+    setActiveSessionId(session.id);
     setPage("chat");
-    // 订阅该会话频道
+    // 订阅该会话频道：后端先回 snapshot（handleSnapshot 建初始态），再推增量事件。
     await transport.subscribe(session.id);
-    // 加载消息
-    const result = await transport.request<{ session: Session; messages: ChatMessage[] }>("conversation.get", {
-      conversationId: session.id,
-    });
-    setMessages((prev) => ({ ...prev, [session.id]: result.messages }));
+  };
+
+  const closeSession = () => {
+    const transport = transportRef.current;
+    const id = activeSessionIdRef.current;
+    if (transport && id) {
+      transport.request("unsubscribe", { channel: id }).catch(() => {});
+    }
+    setActiveSessionId(null);
+    setPage("projects");
   };
 
   const sendMessage = async () => {
-    if (!transport || !activeSession || !draft.trim()) return;
+    const transport = transportRef.current;
+    const id = activeSessionIdRef.current;
     const text = draft.trim();
+    if (!transport || !id || !text) return;
     setDraft("");
     const turnId = `turn-${Date.now()}`;
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: text,
-      createdAt: Date.now(),
-    };
-    const assistantMsg: ChatMessage = {
-      id: `assistant-${Date.now()}`,
-      role: "assistant",
-      content: "",
-      createdAt: Date.now(),
-      streaming: true,
-    };
-    setMessages((prev) => ({
-      ...prev,
-      [activeSession.id]: [...(prev[activeSession.id] || []), userMsg, assistantMsg],
-    }));
-    setRunning((prev) => new Set(prev).add(activeSession.id));
-
-    // 监听事件更新消息
-    const unsub = transport.onEvent((event) => {
-      if (event.conversationId !== activeSession.id) return;
-      if (event.type === "agent.text.delta") {
-        setMessages((prev) => {
-          const msgs = prev[activeSession.id] || [];
-          const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
-          if (!lastAssistant) return prev;
-          return {
-            ...prev,
-            [activeSession.id]: msgs.map((m) =>
-              m.id === lastAssistant.id ? { ...m, content: m.content + (event as { delta: string }).delta } : m,
-            ),
-          };
-        });
-      } else if (event.type === "agent.run.completed" || event.type === "agent.run.failed") {
-        setRunning((prev) => {
-          const next = new Set(prev);
-          next.delete(activeSession.id);
-          return next;
-        });
-        setMessages((prev) => {
-          const msgs = prev[activeSession.id] || [];
-          const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
-          if (!lastAssistant) return prev;
-          return {
-            ...prev,
-            [activeSession.id]: msgs.map((m) =>
-              m.id === lastAssistant.id ? { ...m, streaming: false } : m,
-            ),
-          };
-        });
-        unsub();
-      }
-    });
-
-    await transport.request("turn.start", {
-      conversationId: activeSession.id,
-      input: text,
-      turnId,
-    });
+    // 只发 turn.start RPC，不本地插入消息；消息骨架由回流的 conversation.turn.started 生成。
+    try {
+      await transport.request("turn.start", { conversationId: id, input: text, turnId });
+    } catch (e) {
+      console.error("turn.start failed", e);
+    }
   };
 
+  const activeView = activeSessionId ? views[activeSessionId] : null;
+  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? activeView?.session ?? null;
+  const activeRunning = activeView?.running ?? false;
+
+  // ── 配对页 ──
   if (!connected && page === "settings") {
     return (
       <div className="app-shell">
@@ -180,34 +177,55 @@ export function App() {
             value={pairKey}
             onChange={(e) => setPairKey(e.target.value)}
           />
-          <button onClick={connect} disabled={!pairKey.trim()}>
-            连接
-          </button>
-          {connected && !hostOnline && <p className="status">已连接中继，等待宿主上线...</p>}
-          {connected && hostOnline && <p className="status" style={{ color: "var(--green)" }}>已连接宿主</p>}
-          {!connected && <p className="status">未连接</p>}
+          <button onClick={connect} disabled={!pairKey.trim()}>连接</button>
+          <p className="status">未连接</p>
         </div>
       </div>
     );
   }
 
-  if (page === "chat" && activeSession) {
-    const sessionMessages = messages[activeSession.id] || [];
+  // ── 会话页 ──
+  if (page === "chat" && activeSession && activeView) {
     return (
       <div className="app-shell chat-page">
         <div className="chat-header">
-          <button className="back-btn" onClick={() => { setPage("projects"); setActiveSession(null); }}>
+          <button className="back-btn" onClick={closeSession}>
             <ArrowLeft size={20} />
           </button>
-          <div className="title">{activeSession.title}</div>
+          <div className="title">{activeSession.title || "未命名会话"}</div>
         </div>
         <div className="chat-messages">
-          {sessionMessages.map((msg) => (
-            <div key={msg.id} className={`message ${msg.role}`}>
-              {msg.content || (msg.streaming ? "思考中..." : "")}
-              {msg.streaming && <span className="thinking-dots">...</span>}
-            </div>
+          {activeView.messages.map((msg) => (
+            <MessageView key={msg.id} message={msg} />
           ))}
+          {activeView.pendingApproval && (
+            <div className="approval-card">
+              <div className="approval-title">需要审批：{activeView.pendingApproval.name}</div>
+              <div className="approval-purpose">{activeView.pendingApproval.purpose}</div>
+              <div className="approval-actions">
+                <button
+                  onClick={() =>
+                    transportRef.current?.request("approval.decision", {
+                      approvalId: activeView.pendingApproval!.approvalId,
+                      decision: "allow",
+                    })
+                  }
+                >
+                  允许
+                </button>
+                <button
+                  onClick={() =>
+                    transportRef.current?.request("approval.decision", {
+                      approvalId: activeView.pendingApproval!.approvalId,
+                      decision: "deny",
+                    })
+                  }
+                >
+                  拒绝
+                </button>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
         <div className="chat-input-bar">
@@ -215,10 +233,10 @@ export function App() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            placeholder="输入消息..."
-            disabled={running.has(activeSession.id)}
+            placeholder={activeRunning ? "另一端正在运行..." : "输入消息..."}
+            disabled={activeRunning}
           />
-          <button onClick={sendMessage} disabled={!draft.trim() || running.has(activeSession.id)}>
+          <button onClick={sendMessage} disabled={!draft.trim() || activeRunning}>
             <Send size={18} />
           </button>
         </div>
@@ -226,17 +244,31 @@ export function App() {
     );
   }
 
-  // 项目列表页
-  const projectGroups = sessions
+  // ── 项目/会话列表页 ──
+  const visibleSessions = sessions.filter((s) => !s.archived);
+  const projectGroups = visibleSessions
     .filter((s) => s.workspaceKind === "project" && s.workspace)
     .reduce((acc, s) => {
       const key = s.workspace!;
-      if (!acc[key]) acc[key] = { name: key.split("/").pop() || key, sessions: [] };
+      if (!acc[key]) acc[key] = { name: key.split(/[/\\]/).pop() || key, sessions: [] };
       acc[key].sessions.push(s);
       return acc;
     }, {} as Record<string, { name: string; sessions: Session[] }>);
+  const generalSessions = visibleSessions.filter((s) => s.workspaceKind !== "project" || !s.workspace);
 
-  const generalSessions = sessions.filter((s) => s.workspaceKind !== "project" || !s.workspace);
+  const renderItem = (s: Session) => (
+    <div key={s.id} className="project-item" onClick={() => openSession(s)}>
+      <div className="icon">
+        <MessageSquare size={18} />
+      </div>
+      <div className="info">
+        <div className="name">{s.title || "未命名会话"}</div>
+        <div className="meta">
+          {s.agent?.label || "未知"} · {s.status === "running" ? "运行中" : "空闲"}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="app-shell">
@@ -252,42 +284,16 @@ export function App() {
             <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
               <Folder size={14} /> {group.name}
             </div>
-            <div className="project-list">
-              {group.sessions.map((s) => (
-                <div key={s.id} className="project-item" onClick={() => openSession(s)}>
-                  <div className="icon">
-                    <MessageSquare size={18} />
-                  </div>
-                  <div className="info">
-                    <div className="name">{s.title || "未命名会话"}</div>
-                    <div className="meta">
-                      {s.agent?.label || "未知"} · {running.has(s.id) ? "运行中" : "空闲"}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="project-list">{group.sessions.map(renderItem)}</div>
           </div>
         ))}
         {generalSessions.length > 0 && (
           <div>
             <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>普通会话</div>
-            <div className="project-list">
-              {generalSessions.map((s) => (
-                <div key={s.id} className="project-item" onClick={() => openSession(s)}>
-                  <div className="icon" style={{ background: "var(--muted)" }}>
-                    <MessageSquare size={18} />
-                  </div>
-                  <div className="info">
-                    <div className="name">{s.title || "未命名会话"}</div>
-                    <div className="meta">{s.agent?.label || "未知"}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="project-list">{generalSessions.map(renderItem)}</div>
           </div>
         )}
-        {sessions.length === 0 && (
+        {visibleSessions.length === 0 && (
           <div className="empty-state">
             <div className="icon">📁</div>
             <p>暂无会话</p>
@@ -295,13 +301,31 @@ export function App() {
         )}
       </div>
       <div className="tab-bar">
-        <button className={page === "projects" ? "active" : ""} onClick={() => setPage("projects")}>
-          项目
-        </button>
+        <button className={page === "projects" ? "active" : ""} onClick={() => setPage("projects")}>项目</button>
         <button onClick={() => setPage("settings")}>
           <Settings size={18} style={{ verticalAlign: "middle" }} />
         </button>
       </div>
+    </div>
+  );
+}
+
+/** 单条消息渲染：文本 + 工具调用摘要 + 流式指示。 */
+function MessageView({ message }: { message: ChatMessage }) {
+  const hasContent = Boolean(message.content) || (message.toolCalls?.length ?? 0) > 0;
+  return (
+    <div className={`message ${message.role}`}>
+      {message.reasoning && <div className="reasoning">{message.reasoning}</div>}
+      {message.content || (message.streaming && !hasContent ? "思考中..." : "")}
+      {message.toolCalls?.map((tool) => (
+        <div key={tool.id} className={`tool-call ${tool.status}`}>
+          <span className="tool-name">{tool.name}</span>
+          <span className="tool-status">{tool.status}</span>
+          {tool.error && <div className="tool-error">{tool.error}</div>}
+        </div>
+      ))}
+      {message.error && <div className="message-error">{message.error}</div>}
+      {message.streaming && <span className="thinking-dots">...</span>}
     </div>
   );
 }

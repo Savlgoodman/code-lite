@@ -243,6 +243,82 @@ html, body, #root {
   color: rgba(255,255,255,0.7);
 }
 
+.message .reasoning {
+  font-size: 13px;
+  color: var(--subtle);
+  font-style: italic;
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+}
+
+.message .tool-call {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.message .tool-call .tool-name {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+}
+
+.message .tool-call .tool-status {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--subtle);
+  text-transform: uppercase;
+}
+
+.message .tool-call.error {
+  border-color: var(--orange);
+}
+
+.message .tool-call .tool-error,
+.message .message-error {
+  color: var(--orange);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.approval-card {
+  align-self: stretch;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--orange);
+}
+
+.approval-card .approval-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.approval-card .approval-purpose {
+  font-size: 13px;
+  color: var(--subtle);
+  margin-bottom: 10px;
+}
+
+.approval-card .approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.approval-card .approval-actions button {
+  flex: 1;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  cursor: pointer;
+}
+
 .chat-input-bar {
   display: flex;
   gap: 8px;
