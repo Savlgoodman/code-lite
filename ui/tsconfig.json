@@ -17,9 +17,10 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@code-lite/protocol": ["../packages/protocol/src/index.ts"]
+      "@code-lite/protocol": ["../packages/protocol/src/index.ts"],
+      "@code-lite/transport": ["../packages/transport/src/index.ts"]
     }
   },
-  "include": ["src", "../packages/protocol/src"],
+  "include": ["src", "../packages/protocol/src", "../packages/transport/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
