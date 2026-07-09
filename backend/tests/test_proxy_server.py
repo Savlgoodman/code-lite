@@ -35,8 +35,15 @@ def _run_server() -> uvicorn.Server:
 
 
 async def _send_hello(ws, role: str, room_id: str) -> dict:
+    """发送 hello 握手，返回最终的 ready/waiting/error 响应。
+    当 host 已在线时 remote 会先收到 host.online 再收到 ready，
+    此函数自动消费中间的 host.online 消息。"""
     await ws.send(json.dumps({"type": "hello", "role": role, "roomId": room_id}))
-    return json.loads(await ws.recv())
+    while True:
+        msg = json.loads(await ws.recv())
+        if msg.get("type") in ("ready", "waiting", "error"):
+            return msg
+        # 跳过 host.online 等中间消息
 
 
 async def _send_msg(ws, payload: dict) -> None:

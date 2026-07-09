@@ -142,6 +142,8 @@ async def handle_hello(ws: WebSocket, payload: dict, room: Room) -> dict | None:
         else:
             await safe_send_json(room.host, make_envelope("peer.joined", peerId=peer_id))
             logger.info("remote %s joined room %s", peer_id, room.room_id[:12])
+            # host 已在线，告知 remote
+            await safe_send_json(ws, make_envelope("host.online"))
             return make_envelope("ready", role="remote", peerId=peer_id)
 
 
