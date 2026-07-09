@@ -697,6 +697,14 @@ async def prepare_and_start_turn(
             if not completed:
                 logger.warning("run_turn_task: turn %s discarded (not completed)", turn_id)
                 services.conversation_recorder.discard_turn(conversation_id)
+            # 显式广播 turn.unlock（0710 第 5.3 节）：让只订阅了本会话频道、
+            # 但不解析 terminal 事件的订阅者也能准确解锁输入框、显示"空闲"。
+            # 与 turn.lock 对称，走同一会话频道。terminal 事件仍是最终状态真相源。
+            publish({
+                "type": "turn.unlock",
+                "conversationId": conversation_id,
+                "turnId": turn_id,
+            })
 
     # 会话级串行互锁 + 启动后台 turn，全部同步完成（0709 第 6 节、5.1.1）。
     # 必须同步：不能推迟到惰性生成器里，否则返回响应到开始消费之间会出现

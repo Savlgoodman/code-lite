@@ -76,7 +76,22 @@ async def initialize_session(
 
     使用 AcpRuntimeManager 复用连接和 session，不再每轮临时 spawn。
     """
-    logger.info("POST /sessions/%s/initialize — entry", conversation_id)
+    result, error = await initialize_session_core(services, conversation_id)
+    if error is not None:
+        return JSONResponse(error, status_code=int(error.get("statusCode", 502)))
+    return JSONResponse(result)
+
+
+async def initialize_session_core(
+    services: AppServices,
+    conversation_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """初始化 session 的核心逻辑，供 HTTP 路由与 WS RPC 共用（0710 第 3.3 节）。
+
+    返回 (result, error)：成功时 result 为 capabilities dict、error 为 None；
+    失败时 result 为 None、error 含 code/error/statusCode。
+    """
+    logger.info("initialize_session_core — conversation=%s", conversation_id)
 
     # 优先从会话绑定的 agent 解析，其次 fallback 到全局 activeAdapter
     persisted_agent = None
@@ -106,14 +121,12 @@ async def initialize_session(
         caps = build_nanobot_session_capabilities(
             model_config_store=services.model_config_store,
         )
-        return JSONResponse(caps.to_dict())
+        return caps.to_dict(), None
 
     descriptor = get_descriptor(agent_id)
     if descriptor is None:
         logger.error("  No descriptor for agent_id=%s", agent_id)
-        return JSONResponse({
-            "error": f"不支持的 agent: {agent_id}",
-        }, status_code=400)
+        return None, {"error": f"不支持的 agent: {agent_id}", "statusCode": 400}
 
     logger.info("  descriptor: id=%s label=%s status=%s default_mode=%s",
                 descriptor.id, descriptor.label, descriptor.status, descriptor.default_mode)
@@ -132,7 +145,7 @@ async def initialize_session(
         logger.info("  modes: %s", [m.id for m in caps.modes])
         logger.info("  models: %s", [m.id for m in caps.models])
         logger.info("  configOptions: %s", [o.id for o in caps.config_options])
-        return JSONResponse(caps.to_dict())
+        return caps.to_dict(), None
     except FileNotFoundError as exc:
         diagnostic = _log_session_diagnostic(
             services=services,
@@ -144,10 +157,11 @@ async def initialize_session(
             stage="session.initialize.spawn",
         )
         logger.error("  FAIL — command not found: %s", exc)
-        return JSONResponse({
+        return None, {
             "error": f"初始化 session 失败：{agent_label} 的可执行文件未找到 ({exc})。请在设置页安装 ACP 包。",
             "diagnostic": diagnostic,
-        }, status_code=502)
+            "statusCode": 502,
+        }
     except Exception as exc:
         diagnostic = _log_session_diagnostic(
             services=services,
@@ -159,10 +173,11 @@ async def initialize_session(
             stage="session.initialize",
         )
         logger.exception("  FAIL — unexpected error: %s: %s", type(exc).__name__, exc)
-        return JSONResponse({
+        return None, {
             "error": f"初始化 session 失败: {type(exc).__name__}: {exc}",
             "diagnostic": diagnostic,
-        }, status_code=502)
+            "statusCode": 502,
+        }
 
 
 async def _initialize_acp_session(

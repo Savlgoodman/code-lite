@@ -284,6 +284,109 @@ async def _handle_conversation_config_update(
     await _send(ws, _envelope("result", requestId=request_id, payload={"session": updated}))
 
 
+async def _handle_conversation_archive(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """归档/取消归档会话，并广播到全局频道（0710 第 5.2 节，远端也能发起）。"""
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    if not conversation_id:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_conversation_id"}))
+        return
+    archived = bool(payload.get("archived"))
+    try:
+        session = services.conversation_store.update_archive_state(conversation_id, archived=archived)
+    except ValueError:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "invalid_conversation_id"}))
+        return
+    if session is None:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_found"}))
+        return
+    if archived and services.runtime_manager is not None:
+        await services.runtime_manager.close_session_for_conversation(
+            conversation_id, delete_binding=False, close_empty_connection=True,
+        )
+    if services.event_bus is not None and archived:
+        services.event_bus.publish(GLOBAL_CHANNEL, {"type": "conversation.archived", "session": session})
+    await _send(ws, _envelope("result", requestId=request_id, payload={"session": session}))
+
+
+async def _handle_conversation_delete(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """删除会话，并广播到全局频道（0710 第 5.2 节，远端也能发起）。"""
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    if not conversation_id:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_conversation_id"}))
+        return
+    try:
+        deleted = services.conversation_store.delete_conversation(conversation_id)
+    except ValueError:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "invalid_conversation_id"}))
+        return
+    if not deleted:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_found"}))
+        return
+    if services.runtime_manager is not None:
+        await services.runtime_manager.close_session_for_conversation(
+            conversation_id, delete_binding=True, close_empty_connection=True,
+        )
+    services.attachment_store.delete_conversation(conversation_id)
+    if services.event_bus is not None:
+        services.event_bus.publish(
+            GLOBAL_CHANNEL, {"type": "conversation.deleted", "session": {"id": conversation_id}},
+        )
+    await _send(ws, _envelope("result", requestId=request_id, payload={"ok": True}))
+
+
+async def _handle_session_initialize(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """初始化会话并返回 SessionCapabilities（0710 第 3.3 节，远端也能进入会话）。"""
+    from code_lite_backend.api.routes.sessions import initialize_session_core
+
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    if not conversation_id:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_conversation_id"}))
+        return
+    result, error = await initialize_session_core(services, conversation_id)
+    if error is not None:
+        await _send(ws, _envelope("error", requestId=request_id, payload=error))
+        return
+    await _send(ws, _envelope("result", requestId=request_id, payload=result))
+
+
+async def _handle_diff_get(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """拉取 diff 全文（0710 第 3.3 节，远端按需懒加载，不随事件推全文）。"""
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    diff_id = str(payload.get("diffId") or "").strip()
+    if not conversation_id or not diff_id:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_params"}))
+        return
+    try:
+        diff = services.diff_artifact_store.load_diff(conversation_id, diff_id)
+    except ValueError:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "invalid_diff_id"}))
+        return
+    if diff is None:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_found"}))
+        return
+    await _send(ws, _envelope("result", requestId=request_id, payload={"diff": diff}))
+
+
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     """本地/远程订阅入口（0709 阶段一）。
@@ -330,6 +433,14 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 await _handle_conversation_create(ws, services, request_id, payload)
             elif method == "conversation.config.update":
                 await _handle_conversation_config_update(ws, services, request_id, payload)
+            elif method == "conversation.archive":
+                await _handle_conversation_archive(ws, services, request_id, payload)
+            elif method == "conversation.delete":
+                await _handle_conversation_delete(ws, services, request_id, payload)
+            elif method == "session.initialize":
+                await _handle_session_initialize(ws, services, request_id, payload)
+            elif method == "diff.get":
+                await _handle_diff_get(ws, services, request_id, payload)
             elif method == "remote.config.get":
                 bridge = services.remote_bridge
                 cfg = bridge.config if bridge else None

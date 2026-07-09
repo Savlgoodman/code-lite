@@ -45,11 +45,15 @@ def _get_rpc_handlers() -> dict[str, Any]:
     """懒加载 WS RPC handlers，避免循环导入"""
     from code_lite_backend.api.routes.ws import (
         _handle_approval_decision,
+        _handle_conversation_archive,
         _handle_conversation_config_update,
         _handle_conversation_create,
+        _handle_conversation_delete,
         _handle_conversation_get,
         _handle_conversation_list,
+        _handle_diff_get,
         _handle_input_response,
+        _handle_session_initialize,
         _handle_subscribe,
         _handle_turn_cancel,
         _handle_turn_start,
@@ -64,6 +68,10 @@ def _get_rpc_handlers() -> dict[str, Any]:
         "conversation.get": _handle_conversation_get,
         "conversation.create": _handle_conversation_create,
         "conversation.config.update": _handle_conversation_config_update,
+        "conversation.archive": _handle_conversation_archive,
+        "conversation.delete": _handle_conversation_delete,
+        "session.initialize": _handle_session_initialize,
+        "diff.get": _handle_diff_get,
     }
 
 

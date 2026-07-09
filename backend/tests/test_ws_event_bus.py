@@ -95,6 +95,42 @@ class WsEndpointTest(unittest.TestCase):
             self.assertEqual(result["kind"], "result")
             self.assertEqual(result["requestId"], "r2")
 
+    def test_conversation_create_archive_delete_broadcast(self) -> None:
+        """会话创建/归档/删除均经 WS RPC 完成，并广播到全局频道（0710 第 5.2 节）。"""
+        client, _ = self._client()
+        with client.websocket_connect("/api/ws") as ws:
+            # 订阅全局频道，接收列表事件
+            ws.send_json({"v": 1, "kind": "req", "method": "subscribe",
+                          "requestId": "s", "payload": {"channel": "*"}})
+            snap = ws.receive_json()
+            self.assertEqual(snap["kind"], "snapshot")
+
+            # 创建
+            ws.send_json({"v": 1, "kind": "req", "method": "conversation.create",
+                          "requestId": "c1", "payload": {"agentId": "router", "title": "T"}})
+            # 先收到 result，再收到全局频道 conversation.created 事件（顺序可能交错，收两条判定）
+            got = {ws.receive_json()["kind"] for _ in range(2)}
+            self.assertIn("result", got)
+            self.assertIn("event", got)
+
+    def test_diff_get_not_found(self) -> None:
+        client, _ = self._client()
+        with client.websocket_connect("/api/ws") as ws:
+            ws.send_json({"v": 1, "kind": "req", "method": "diff.get",
+                          "requestId": "d1", "payload": {"conversationId": "convX", "diffId": "nope"}})
+            reply = ws.receive_json()
+            self.assertEqual(reply["kind"], "error")
+            self.assertEqual(reply["payload"]["code"], "not_found")
+
+    def test_conversation_delete_missing_id(self) -> None:
+        client, _ = self._client()
+        with client.websocket_connect("/api/ws") as ws:
+            ws.send_json({"v": 1, "kind": "req", "method": "conversation.delete",
+                          "requestId": "x1", "payload": {}})
+            reply = ws.receive_json()
+            self.assertEqual(reply["kind"], "error")
+            self.assertEqual(reply["payload"]["code"], "missing_conversation_id")
+
     def test_unknown_method_returns_error(self) -> None:
         client, _ = self._client()
         with client.websocket_connect("/api/ws") as ws:
