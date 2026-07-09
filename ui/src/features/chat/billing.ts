@@ -252,10 +252,14 @@ function readFastModeCostState(value: unknown): { billingMultiplier: number; dis
     return { billingMultiplier: 1, enabled: false };
   }
   const fastMode = value as Record<string, unknown>;
-  const enabled = fastMode.enabled === true && fastMode.applied !== false;
+  const enabled = fastMode.effective === true || (
+    fastMode.effective == null &&
+    fastMode.enabled === true &&
+    fastMode.applied === true
+  );
   const rawMultiplier = fastMode.billingMultiplier;
   const multiplier = typeof rawMultiplier === "number" && Number.isFinite(rawMultiplier) && rawMultiplier > 0
-    ? rawMultiplier
+    ? enabled ? rawMultiplier : 1
     : enabled ? 2 : 1;
   const displayRate = typeof fastMode.displayRate === "string" && fastMode.displayRate.trim()
     ? fastMode.displayRate.trim()

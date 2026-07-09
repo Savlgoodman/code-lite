@@ -67,8 +67,9 @@ Claude Code 的传参方式需要确认。
 4. 两个 wrapper 当前都接受 `on` / `off` 字符串；当 client 声明 boolean config option 能力时，也可以接受布尔值。
 5. code-lite 当前没有声明 ACP boolean config option 能力，因此 runtime 会以 `select` 形式暴露 fast mode；MVP 直接传 `on` / `off` 最稳。
 6. fast mode option 只在当前模型支持 fast mode 时出现。模型不支持时，不应强行传参；如传参失败，应作为 warning 记录，不阻断 turn。
-7. 后端应使用 code-lite 统一字段表达速率，例如 `selectedConfig.fastMode` 或 `selectedConfig.speedMode`，由 runtime profile 映射为原生 config id，避免前端绑定 `fast-mode` / `fast` 差异。
-8. 每日账本应保留真实 token 数，并额外记录 `billingMultiplier: 2`；费用估算字段乘以 `2`，不要把原始 token usage 改写成两倍。
+7. `session/set_config_option` 成功不等于本轮已经按 fast 档位计费。它只证明 ACP wrapper 接受了配置请求；真实生效还要看当前模型支持、组织策略、cooldown 或 wrapper 返回的最新 config options。
+8. 后端应使用 code-lite 统一字段表达速率，例如 `selectedConfig.fastMode` 或 `selectedConfig.speedMode`，由 runtime profile 映射为原生 config id，避免前端绑定 `fast-mode` / `fast` 差异。
+9. 每日账本应保留真实 token 数，并额外记录 `billingMultiplier`；只有 `fastMode.effective === true` 时费用估算才乘以 `2`，不要把原始 token usage 改写成两倍。
 
 ## 4. Codex ACP Fast Mode
 
@@ -147,6 +148,13 @@ Codex wrapper 逻辑：
 2. prompt 前用 `resolveFastServiceTier(fastModeEnabled, currentModelSupportsFast)`。
 3. 当前模型支持 fast mode 且开关为 on 时，向底层 Codex app server 传 `serviceTier = "fast"`。
 4. 当前模型不支持时，`serviceTier = null`。
+
+重要限制：
+
+1. `set_config_option(fast-mode=on) OK` 只表示 `sessionState.fastModeEnabled=true` 已写入 wrapper 状态。
+2. Codex wrapper 的模型支持判断来自当前模型元数据 `additionalSpeedTiers.includes("fast")`。
+3. 例如 `gpt-5.4-mini` 不支持 fast 时，`set_config_option` 仍可能 OK，但 prompt 阶段会传 `serviceTier=null`，远端后台会显示 standard。
+4. code-lite 不能用 `set_config_option` 成功作为 2x 计费依据；应检查设置返回的最新 `configOptions` 是否仍包含 `fast-mode`，或等待未来 runtime 暴露本轮 service tier。
 
 ## 5. Claude Code ACP Fast Mode
 
@@ -235,6 +243,13 @@ session.query.applyFlagSettings({ fastMode: enabled })
 3. wrapper 更新 `session.fastModeEnabled` 并刷新 `session.configOptions`。
 4. 初始化和 prompt result 中的 `fast_mode_state` 会反向同步回 config option。
 
+失败与回传：
+
+1. 当前模型不支持 fast 时，Claude Code ACP 不会暴露 `fast` config option；强行传 `configId="fast"` 会出现 `Unknown config option` 或 SDK 侧错误。
+2. `applyFlagSettings({ fastMode: true })` 会先调用 SDK；如果 Haiku 等模型不支持 fast，或组织管理策略关闭 fast，会抛错。code-lite 日志中可见 `set_config_option(fast=on) failed: Internal error`。
+3. Claude Code CLI 中 `/fast` 提示无法开启时，ACP 路线通常也会在 `set_config_option(fast=on)` 阶段失败，或者在后续 `fast_mode_state=off` 的 config update 中回落。
+4. `fast_mode_state="cooldown"` 表示 fast 临时暂停，wrapper 保留用户开关意图，不把 UI 直接切成 off。
+
 ### 5.3 底层 Claude API 语义
 
 Anthropic 官方 Fast mode 文档说明，Claude API 层 fast mode 使用：
@@ -264,6 +279,7 @@ anthropic-beta: fast-mode-2026-02-01
 1. ACP 路线下不要直接传 `speed: "fast"` 或 beta header。
 2. 只需要对 Claude Code ACP 发送 `session/set_config_option(configId="fast", value="on")`。
 3. 具体是否支持、是否因 rate limit cooldown 暂停，由 Claude Code / Claude Agent SDK 决定。
+4. Claude API usage 层有 `speed` 这类实际速度信号，但当前 Claude Code ACP 没有把它映射到 code-lite 的 `usage`。在 ACP 事件流没有本轮实际 speed/service tier 前，code-lite 只能按 runtime config option 与 `fast_mode_state` 做保守估算。
 
 ## 6. code-lite 现状影响
 
@@ -480,7 +496,12 @@ async def _apply_fast_mode(self, *, conn, session_id, request):
 ```json
 {
   "fastMode": {
+    "requested": true,
     "enabled": true,
+    "configApplied": true,
+    "applied": true,
+    "effective": true,
+    "effectiveSource": "runtime_config_options",
     "speedMode": "fast",
     "displayRate": "1.5x",
     "runtimeConfigId": "fast-mode",
@@ -495,6 +516,7 @@ async def _apply_fast_mode(self, *, conn, session_id, request):
 1. 不要把 fast mode 写进 assistant `usage.totalTokens`。
 2. usage 是 runtime 实测 token，应该保持原样。
 3. fast mode 是计费倍率和展示配置，不是 token 分项。
+4. `configApplied=true` 表示 ACP 配置调用成功；`effective=true` 才表示 code-lite 认为本轮可以按 fast 估算。
 
 ### 7.4 Daily billing
 
@@ -512,7 +534,10 @@ async def _apply_fast_mode(self, *, conn, session_id, request):
 ```json
 {
   "fastMode": {
+    "requested": true,
     "enabled": true,
+    "configApplied": true,
+    "effective": true,
     "speedMode": "fast",
     "displayRate": "1.5x",
     "billingMultiplier": 2,
@@ -527,6 +552,13 @@ async def _apply_fast_mode(self, *, conn, session_id, request):
 rawCost = inputCost + outputCost + cachedReadCost + cachedWriteCost + thoughtCost
 estimatedCostUsd = rawCost * billingMultiplier
 ```
+
+倍率口径：
+
+1. `effective === true`：按 `billingMultiplier=2` 估算。
+2. `configApplied === false`：按 `billingMultiplier=1`，并记录错误。
+3. `configApplied === true` 但 `effective === false`：按 `billingMultiplier=1`。典型场景是 Codex `gpt-5.4-mini` 接受了 fast 开关请求，但当前模型不暴露 `fast-mode`，底层仍走 standard。
+4. `effectiveUnknown === true`：按 `billingMultiplier=1`，并在调试信息中说明 runtime 没有返回可确认信号。
 
 同时可保留：
 
@@ -585,6 +617,7 @@ estimatedCostUsd = rawCost * billingMultiplier
 4. fast mode 可能进入 `cooldown`。Claude wrapper 会保留用户意图，code-lite 不应把 cooldown 当成用户关闭。
 5. daily billing 乘以 `2` 是产品统计口径，不等同于供应商真实账单。UI 应继续使用“估算费用”文案。
 6. 当前 code-lite 没有声明 ACP boolean config option 能力。MVP 传 `on` / `off` 即可；未来若声明 boolean，后端也应兼容布尔值。
+7. 不要写死 Codex/Claude 模型 fast 支持表。Codex 以 wrapper 返回的 `additionalSpeedTiers`/`configOptions` 为准；Claude 以 `supportsFastMode`/`fast_mode_state` 为准。
 
 ## 10. 验收建议
 
@@ -593,8 +626,10 @@ estimatedCostUsd = rawCost * billingMultiplier
 1. Codex 选高速时，日志出现 `set_config_option(fast-mode=on) OK`。
 2. Claude Code 选高速时，日志出现 `set_config_option(fast=on) OK`。
 3. 不支持 fast mode 的模型不会阻断 turn。
-4. `messages.json` assistant message 的 `model.fastMode.enabled` 与本轮选择一致。
-5. `data/billing/daily/<date>.json` entry 含 `fastMode`，且 `cost.estimatedCostUsd = baseEstimatedCostUsd * 2`。
+4. `messages.json` assistant message 的 `model.fastMode.requested` 与本轮选择一致。
+5. 支持并确认生效时，`model.fastMode.effective=true` 且 `billingMultiplier=2`。
+6. 不支持或组织策略拒绝时，`model.fastMode.effective=false`、`billingMultiplier=1`，并有 `effectiveReason` 或 `error`。
+7. `data/billing/daily/<date>.json` entry 含 `fastMode`；只有 `effective=true` 时 `cost.estimatedCostUsd = baseEstimatedCostUsd * 2`。
 
 前端：
 
@@ -628,7 +663,10 @@ code-lite 统一速率 UI
 ```json
 {
   "fastMode": {
+    "requested": true,
     "enabled": true,
+    "configApplied": true,
+    "effective": true,
     "speedMode": "fast",
     "displayRate": "1.5x",
     "billingMultiplier": 2

@@ -541,22 +541,35 @@ def _billing_multiplier(fast_mode: dict[str, Any]) -> int | float:
 def _normalize_fast_mode_metadata(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    enabled = bool(value.get("enabled"))
+    requested = value.get("requested")
+    config_applied = value.get("configApplied")
+    effective = value.get("effective")
     applied = value.get("applied")
-    if applied is False:
-        enabled = False
+    enabled = bool(value.get("enabled")) and effective is True
     multiplier = _billing_multiplier(value)
     if not enabled:
         multiplier = 1
-    return {
+    result = {
+        "requested": requested if isinstance(requested, bool) else bool(value.get("enabled")),
         "enabled": enabled,
+        "configApplied": config_applied if isinstance(config_applied, bool) else None,
         "applied": applied if isinstance(applied, bool) else None,
+        "effective": effective if isinstance(effective, bool) else None,
+        "effectiveSource": str(value.get("effectiveSource") or "") or None,
+        "effectiveUnknown": value.get("effectiveUnknown") if isinstance(value.get("effectiveUnknown"), bool) else None,
+        "effectiveReason": str(value.get("effectiveReason") or "") or None,
         "speedMode": str(value.get("speedMode") or ("fast" if enabled else "normal")),
         "displayRate": str(value.get("displayRate") or ("1.5x" if enabled else "1x")),
         "runtimeConfigId": value.get("runtimeConfigId"),
         "runtimeValue": str(value.get("runtimeValue") or ("on" if enabled else "off")),
+        "runtimeOptionPresent": (
+            value.get("runtimeOptionPresent")
+            if isinstance(value.get("runtimeOptionPresent"), bool)
+            else None
+        ),
         "billingMultiplier": multiplier,
     }
+    return {key: item for key, item in result.items() if item is not None}
 
 
 def _model_value(value: Any) -> str:

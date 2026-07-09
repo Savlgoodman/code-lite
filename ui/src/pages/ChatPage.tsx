@@ -259,6 +259,69 @@ function mergeRuntimeCommands(current: SessionCapabilities | undefined, commands
   };
 }
 
+function normalizeRuntimeConfigOptions(options: unknown[]): SessionConfigOption[] {
+  return options
+    .filter(isRecord)
+    .map((option): SessionConfigOption | null => {
+      const rawId = String(option.id ?? "").trim();
+      if (!rawId || rawId === "mode" || rawId === "model") {
+        return null;
+      }
+      const id = rawId === "fast-mode" || rawId === "fast"
+        ? "fast_mode"
+        : rawId === "effort"
+          ? "reasoning_effort"
+          : rawId;
+      const values: string[] = [];
+      const valueLabels: Record<string, string> = {};
+      const rawOptions = Array.isArray(option.options) ? option.options : [];
+      for (const item of rawOptions) {
+        if (!isRecord(item)) {
+          continue;
+        }
+        const value = String(item.value ?? "").trim();
+        if (!value) {
+          continue;
+        }
+        values.push(value);
+        valueLabels[value] = String(item.name ?? value);
+      }
+      const rawType = String(option.type ?? "enum");
+      const type: SessionConfigOption["type"] = rawType === "boolean"
+        ? "boolean"
+        : rawType === "number"
+          ? "number"
+          : "enum";
+      return {
+        id,
+        label: id === "fast_mode"
+          ? "速率"
+          : id === "reasoning_effort"
+            ? "思考强度"
+            : String(option.name ?? id),
+        type,
+        values: values.length > 0 ? values : null,
+        currentValue: isConfigValue(option.currentValue) ? option.currentValue : null,
+        valueLabels: Object.keys(valueLabels).length > 0 ? valueLabels : null,
+      };
+    })
+    .filter((option): option is SessionConfigOption => option !== null);
+}
+
+function mergeRuntimeConfigOptions(
+  current: SessionCapabilities | undefined,
+  options: unknown[],
+): SessionCapabilities | undefined {
+  if (!current) {
+    return current;
+  }
+  const incoming = normalizeRuntimeConfigOptions(options);
+  return {
+    ...current,
+    configOptions: incoming,
+  };
+}
+
 function mergeMessagePlan(
   message: ChatMessage,
   sessionMessages: ChatMessage[] | undefined,
@@ -1255,9 +1318,53 @@ export function ChatPage() {
       setPendingInput((current) => current?.inputRequestId === event.inputRequestId ? null : current);
     }
 
+    if (event.type === "agent.config.updated") {
+      const nextConfigOptions = normalizeRuntimeConfigOptions(event.configOptions);
+      const hasFastOption = nextConfigOptions.some((option) => option.id === "fast_mode");
+      setCapabilitiesBySession((prev) => ({
+        ...prev,
+        [targetSessionId]: mergeRuntimeConfigOptions(prev[targetSessionId], event.configOptions) ?? prev[targetSessionId],
+      }));
+      setConfigBySession((prev) => {
+        const current = prev[targetSessionId];
+        if (!current) {
+          return prev;
+        }
+        const nextSelectedConfig = { ...current.selectedConfig };
+        let nextReasoningEffort = current.reasoningEffort;
+        for (const option of nextConfigOptions) {
+          if (option.currentValue != null) {
+            nextSelectedConfig[option.id] = option.currentValue;
+            if (option.id === "reasoning_effort") {
+              nextReasoningEffort = String(option.currentValue);
+            }
+          }
+        }
+        if (!hasFastOption) {
+          nextSelectedConfig.fast_mode = "off";
+        }
+        const result = {
+          ...prev,
+          [targetSessionId]: {
+            ...current,
+            reasoningEffort: nextReasoningEffort,
+            selectedConfig: nextSelectedConfig,
+          },
+        };
+        configBySessionRef.current = result;
+        return result;
+      });
+      setMessages((current) =>
+        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
+          ...message,
+          runtimeEvents: appendRuntimeEvent(message.runtimeEvents, event),
+        }))
+      );
+      return;
+    }
+
     if (
-      event.type === "agent.config.updated"
-      || event.type === "agent.input.completed"
+      event.type === "agent.input.completed"
       || event.type === "agent.raw.rpc"
       || event.type === "agent.raw.update"
     ) {

@@ -320,11 +320,23 @@ class AcpAgentAdapter:
                     request.conversation_id[:12], binding.native_session_id[:12],
                 )
 
-                await self._profile.apply_turn_config(
+                config_result = await self._profile.apply_turn_config(
                     conn=connection_sdk,
                     session_id=binding.native_session_id,
                     request=request,
                 )
+                if config_result and isinstance(config_result.get("configOptions"), list):
+                    await output_queue.put({
+                        "type": "agent.config.updated",
+                        "conversationId": request.conversation_id,
+                        "turnId": request.turn_id,
+                        "configOptions": to_jsonable(config_result["configOptions"]),
+                        "metadata": {
+                            "runtime": self.descriptor.id,
+                            "nativeSessionId": binding.native_session_id,
+                            "source": "code_lite.configure.fast_mode",
+                        },
+                    })
 
                 # 发送 prompt
                 logger.info("Sending prompt to session %s", binding.native_session_id[:12])

@@ -107,6 +107,60 @@ def _capability_config_ids(services: AppServices, conversation_id: str) -> set[s
     return ids
 
 
+def _config_option_id(option: object) -> str:
+    if isinstance(option, dict):
+        return str(option.get("id") or "").strip()
+    return ""
+
+
+def _config_option_current_value(option: object) -> object:
+    if isinstance(option, dict):
+        return option.get("currentValue")
+    return None
+
+
+def _sync_fast_mode_from_config_update(model_metadata: dict[str, object], config_options: object) -> None:
+    fast_mode = model_metadata.get("fastMode")
+    if not isinstance(fast_mode, dict) or not isinstance(config_options, list):
+        return
+    runtime_config_id = str(fast_mode.get("runtimeConfigId") or "").strip()
+    fast_ids = {item for item in (runtime_config_id, "fast_mode", "fast-mode", "fast") if item}
+    option = next((item for item in config_options if _config_option_id(item) in fast_ids), None)
+    requested = fast_mode.get("requested") is True or fast_mode.get("enabled") is True
+    fast_mode["runtimeOptionPresent"] = option is not None
+    fast_mode["effectiveSource"] = "runtime_config_update"
+    if option is None:
+        fast_mode["enabled"] = False
+        fast_mode["applied"] = False
+        fast_mode["effective"] = False
+        fast_mode["billingMultiplier"] = 1
+        if requested:
+            fast_mode["effectiveReason"] = f"runtime option {runtime_config_id or 'fast'} is unavailable"
+        return
+    value = _normalize_fast_mode(_config_option_current_value(option))
+    if value == "on":
+        fast_mode["enabled"] = True
+        fast_mode["configApplied"] = True
+        fast_mode["applied"] = True
+        fast_mode["effective"] = True
+        fast_mode["runtimeValue"] = "on"
+        fast_mode["speedMode"] = "fast"
+        fast_mode["displayRate"] = "1.5x"
+        fast_mode["billingMultiplier"] = 2
+        fast_mode.pop("effectiveReason", None)
+    elif value == "off":
+        fast_mode["enabled"] = False
+        fast_mode["configApplied"] = True
+        fast_mode["applied"] = False
+        fast_mode["effective"] = False
+        fast_mode["runtimeValue"] = "off"
+        fast_mode["speedMode"] = "normal"
+        fast_mode["displayRate"] = "1x"
+        fast_mode["billingMultiplier"] = 1
+        if requested:
+            fast_mode["effectiveReason"] = "runtime reported fast mode off"
+
+
 def _supports_runtime_fast_mode(services: AppServices, conversation_id: str, runtime_config_id: str | None) -> bool:
     if not runtime_config_id:
         return False
@@ -119,12 +173,40 @@ def _fast_mode_metadata(fast_mode: str | None, *, runtime_config_id: str | None)
         return None
     enabled = fast_mode == "on"
     return {
+        "requested": enabled,
         "enabled": enabled,
+        "configApplied": None,
+        "applied": False,
+        "effective": False,
+        "effectiveSource": "pending_runtime_config",
         "speedMode": "fast" if enabled else "normal",
         "displayRate": "1.5x" if enabled else "1x",
         "runtimeConfigId": runtime_config_id,
         "runtimeValue": fast_mode,
-        "billingMultiplier": 2 if enabled else 1,
+        "billingMultiplier": 1,
+    }
+
+
+def _fast_mode_unavailable_metadata(
+    fast_mode: str,
+    *,
+    runtime_config_id: str | None,
+    reason: str,
+) -> dict[str, object]:
+    requested = fast_mode == "on"
+    return {
+        "requested": requested,
+        "enabled": False,
+        "configApplied": False,
+        "applied": False,
+        "effective": False,
+        "effectiveSource": "runtime_capabilities",
+        "effectiveReason": reason,
+        "speedMode": "normal",
+        "displayRate": "1x",
+        "runtimeConfigId": runtime_config_id,
+        "runtimeValue": fast_mode,
+        "billingMultiplier": 1,
     }
 
 
@@ -345,6 +427,7 @@ async def stream_turn(
                 conversation_id,
                 runtime_fast_config_id,
             ):
+                reason = f"runtime capabilities do not expose config id {runtime_fast_config_id}"
                 logger.info(
                     "Ignoring fast_mode=%s for agent=%s model=%s because runtime capabilities do not expose config id %s",
                     requested_fast_mode,
@@ -363,6 +446,11 @@ async def stream_turn(
                             "supported": False,
                         },
                     },
+                )
+                model_metadata["fastMode"] = _fast_mode_unavailable_metadata(
+                    requested_fast_mode,
+                    runtime_config_id=runtime_fast_config_id,
+                    reason=reason,
                 )
                 effective_fast_mode = None
             fast_mode_info = _fast_mode_metadata(
@@ -516,6 +604,8 @@ async def stream_turn(
         completed = False
         try:
             async for event in services.agent_adapter.stream_turn(run_request):
+                if event.get("type") == "agent.config.updated":
+                    _sync_fast_mode_from_config_update(model_metadata, event.get("configOptions"))
                 # 从 metadata 中提取 nativeSessionId
                 metadata = event.get("metadata")
                 if isinstance(metadata, dict) and metadata.get("nativeSessionId"):

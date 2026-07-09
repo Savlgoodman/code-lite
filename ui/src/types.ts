@@ -304,9 +304,16 @@ export interface BillingUsageEntry {
   fastMode?: {
     applied?: boolean | null;
     billingMultiplier?: number;
+    configApplied?: boolean | null;
     displayRate?: string;
     enabled?: boolean;
+    effective?: boolean | null;
+    effectiveReason?: string | null;
+    effectiveSource?: string | null;
+    effectiveUnknown?: boolean | null;
+    requested?: boolean;
     runtimeConfigId?: unknown;
+    runtimeOptionPresent?: boolean | null;
     runtimeValue?: string;
     speedMode?: string;
   };

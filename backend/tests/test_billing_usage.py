@@ -94,6 +94,10 @@ class BillingUsageRecorderTest(unittest.IsolatedAsyncioTestCase):
                     "runtimeModel": "gpt-5.5[xhigh]",
                     "fastMode": {
                         "enabled": True,
+                        "requested": True,
+                        "configApplied": True,
+                        "applied": True,
+                        "effective": True,
                         "speedMode": "fast",
                         "displayRate": "1.5x",
                         "runtimeConfigId": "fast-mode",
@@ -121,9 +125,59 @@ class BillingUsageRecorderTest(unittest.IsolatedAsyncioTestCase):
             self.assertAlmostEqual(daily["totals"]["estimatedCostUsd"], 0.058)
             entry = daily["entries"][0]
             self.assertEqual(entry["fastMode"]["enabled"], True)
+            self.assertEqual(entry["fastMode"]["effective"], True)
             self.assertEqual(entry["fastMode"]["billingMultiplier"], 2)
             self.assertAlmostEqual(entry["cost"]["baseEstimatedCostUsd"], 0.029)
             self.assertAlmostEqual(entry["cost"]["estimatedCostUsd"], 0.058)
+
+    async def test_fast_mode_requested_but_not_effective_uses_normal_cost(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            recorder = BillingUsageRecorder(Path(tmp) / "billing", FakePriceStore())
+            await recorder.start()
+            recorder.enqueue_turn_usage(
+                conversation_id="conv-fast-fallback",
+                turn_id="turn-fast-fallback",
+                assistant_message_id="assistant-fast-fallback",
+                workspace=Path(tmp) / "workspace",
+                agent_id="codex",
+                agent_label="Codex",
+                model_metadata={
+                    "runtimeModel": "gpt-5.5[xhigh]",
+                    "fastMode": {
+                        "enabled": True,
+                        "requested": True,
+                        "configApplied": True,
+                        "applied": False,
+                        "effective": False,
+                        "effectiveReason": "runtime option fast-mode is unavailable for the selected model",
+                        "runtimeConfigId": "fast-mode",
+                        "runtimeValue": "on",
+                        "billingMultiplier": 1,
+                    },
+                },
+                usage={
+                    "inputTokens": 10,
+                    "outputTokens": 5,
+                    "cachedReadTokens": 20,
+                    "cachedWriteTokens": 2,
+                    "thoughtTokens": 3,
+                    "totalTokens": 40,
+                    "source": "acp.prompt_response.usage",
+                },
+                created_at_ms=timestamp_ms("2026-07-06T10:20:00+08:00"),
+            )
+            await recorder.stop()
+
+            files = list((Path(tmp) / "billing" / "daily").glob("*.json"))
+            daily = json.loads(files[0].read_text(encoding="utf-8"))
+            entry = daily["entries"][0]
+
+            self.assertEqual(entry["fastMode"]["requested"], True)
+            self.assertEqual(entry["fastMode"]["enabled"], False)
+            self.assertEqual(entry["fastMode"]["effective"], False)
+            self.assertEqual(entry["fastMode"]["billingMultiplier"], 1)
+            self.assertAlmostEqual(entry["cost"]["baseEstimatedCostUsd"], 0.029)
+            self.assertAlmostEqual(entry["cost"]["estimatedCostUsd"], 0.029)
 
     async def test_duplicate_turn_is_upserted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

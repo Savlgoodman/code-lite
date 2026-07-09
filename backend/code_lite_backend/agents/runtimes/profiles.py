@@ -22,6 +22,18 @@ from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigSt
 logger = logging.getLogger(__name__)
 
 
+def _config_option_id(option: Any) -> str:
+    if isinstance(option, dict):
+        return str(option.get("id") or "").strip()
+    return str(getattr(option, "id", "") or "").strip()
+
+
+def _config_option_present(options: list[Any] | None, config_id: str) -> bool | None:
+    if not config_id or options is None:
+        return None
+    return any(_config_option_id(option) == config_id for option in options)
+
+
 class RuntimeProfile(Protocol):
     descriptor: RuntimeDescriptor
 
@@ -40,7 +52,7 @@ class RuntimeProfile(Protocol):
         conn: Any,
         session_id: str,
         request: AgentRunRequest,
-    ) -> None:
+    ) -> dict[str, Any]:
         ...
 
 
@@ -87,11 +99,11 @@ class BaseRuntimeProfile:
         conn: Any,
         session_id: str,
         request: AgentRunRequest,
-    ) -> None:
+    ) -> dict[str, Any]:
         await self._apply_mode(conn=conn, session_id=session_id, request=request)
         await self._apply_model(conn=conn, session_id=session_id, request=request)
         await self._apply_reasoning_effort(conn=conn, session_id=session_id, request=request)
-        await self._apply_fast_mode(conn=conn, session_id=session_id, request=request)
+        return await self._apply_fast_mode(conn=conn, session_id=session_id, request=request)
 
     async def _apply_mode(self, *, conn: Any, session_id: str, request: AgentRunRequest) -> None:
         mode = self.resolve_mode(request.access_mode)
@@ -255,13 +267,13 @@ class BaseRuntimeProfile:
                 },
             )
 
-    async def _apply_fast_mode(self, *, conn: Any, session_id: str, request: AgentRunRequest) -> None:
+    async def _apply_fast_mode(self, *, conn: Any, session_id: str, request: AgentRunRequest) -> dict[str, Any]:
         fast_mode = str(request.fast_mode or "").strip().lower()
         if fast_mode not in {"on", "off"}:
-            return
+            return {}
         config_id = self.fast_mode_config_id()
         if not config_id:
-            return
+            return {}
         logger.info(
             "[configure] turn=%s conversation=%s fast_mode=%s config_id=%s runtime=%s",
             request.turn_id,
@@ -280,13 +292,14 @@ class BaseRuntimeProfile:
             },
         )
         try:
-            await asyncio.wait_for(
+            response = await asyncio.wait_for(
                 conn.set_config_option(session_id=session_id, config_id=config_id, value=fast_mode),
                 timeout=10,
             )
             self._mark_fast_mode_applied(
                 request,
                 applied=True,
+                config_options=self._response_config_options(response),
                 error=None,
             )
             logger.info(
@@ -303,10 +316,12 @@ class BaseRuntimeProfile:
                     "fields": {"configId": config_id, "fastMode": fast_mode},
                 },
             )
+            return {"configOptions": self._response_config_options(response)}
         except Exception as exc:
             self._mark_fast_mode_applied(
                 request,
                 applied=False,
+                config_options=None,
                 error=f"{type(exc).__name__}: {exc}",
             )
             logger.warning(
@@ -324,17 +339,56 @@ class BaseRuntimeProfile:
                     "fields": {"configId": config_id, "fastMode": fast_mode, "errorType": type(exc).__name__},
                 },
             )
+            return {}
 
-    def _mark_fast_mode_applied(self, request: AgentRunRequest, *, applied: bool, error: str | None) -> None:
+    def _mark_fast_mode_applied(
+        self,
+        request: AgentRunRequest,
+        *,
+        applied: bool,
+        config_options: list[Any] | None,
+        error: str | None,
+    ) -> None:
         fast_mode = request.model_metadata.get("fastMode")
         if not isinstance(fast_mode, dict):
             return
-        fast_mode["applied"] = applied
+        enabled = fast_mode.get("enabled") is True
+        config_id = str(fast_mode.get("runtimeConfigId") or "").strip()
+        option_present = _config_option_present(config_options, config_id) if config_options is not None else None
+        effective = bool(applied and enabled and option_present is True)
+        fast_mode["configApplied"] = applied
+        fast_mode["applied"] = effective
+        fast_mode["effective"] = effective
+        fast_mode["effectiveSource"] = (
+            "runtime_config_options" if option_present is not None else "runtime_config_rpc"
+        )
+        if option_present is not None:
+            fast_mode["runtimeOptionPresent"] = option_present
+        elif enabled and applied:
+            fast_mode["effectiveUnknown"] = True
+            fast_mode["effectiveReason"] = "runtime did not return configOptions after setting fast mode"
+        if enabled and option_present is False:
+            fast_mode["effectiveReason"] = f"runtime option {config_id} is unavailable for the selected model"
+        elif not enabled:
+            fast_mode.pop("effectiveReason", None)
+        fast_mode["billingMultiplier"] = 2 if effective else 1
         if error:
             fast_mode["error"] = error
-            fast_mode["billingMultiplier"] = 1
         else:
             fast_mode.pop("error", None)
+
+    @staticmethod
+    def _response_config_options(response: Any) -> list[Any] | None:
+        if response is None:
+            return None
+        options = getattr(response, "config_options", None)
+        if options is not None:
+            return list(options) if isinstance(options, list | tuple) else options
+        if isinstance(response, dict):
+            options = response.get("configOptions") or response.get("config_options")
+            if isinstance(options, list):
+                return options
+        return None
 
 
 @dataclass(frozen=True)
