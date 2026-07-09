@@ -61,6 +61,7 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 | `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` | Agent adapter 归位、结构化日志、诊断错误和设置页日志查看重构方案 |
 | `docs/refactor/0709-ACP-RUNTIME-FORCE-DISCONNECT.md` | ACP Runtime 强制断开、进程树清理、设置变更联动断开和升级占用修复方案 |
 | `docs/design/0702-REMOTE-SYNC.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
+| `docs/design/0709-REMOTE-CONTROL-DUAL-SYNC.md` | 远程控制与双端对等同步设计，记录事件总线、附着快照、单会话互锁、中继盲转发和落地顺序 |
 | `docs/design/0703-RUNTIME-MODEL-PROVIDER.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
 | `docs/guides/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
 | `demo/acp-demo/README.md` | ACP mock、Python SDK probe 和 Codex ACP smoke 使用说明 |

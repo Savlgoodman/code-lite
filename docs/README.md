@@ -61,6 +61,7 @@ docs/
 | `design/0706-AGENT-SPECIAL-EVENTS-PLAN-UI.md` | 设计 | ACP 特殊事件、raw 记录、Codex / Claude 计划事件和计划面板展示说明 |
 | `design/0707-AGENT-MULTIMODAL-COMPOSER.md` | 设计 | 多模态输入框、草稿图片生命周期、图片压缩限制和 AttachmentStore 落盘策略 |
 | `design/0702-REMOTE-SYNC.md` | 设计 | 远程只读观看、事件补偿、权限和审计 |
+| `design/0709-REMOTE-CONTROL-DUAL-SYNC.md` | 设计 | 远程控制与双端对等同步：事件总线、附着快照、单会话互锁、中继盲转发和落地顺序 |
 | `refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` | 重构 | Agent adapter 归位、结构化日志、诊断错误和设置页日志查看 |
 | `refactor/0709-ACP-RUNTIME-FORCE-DISCONNECT.md` | 重构 | ACP 释放假关闭、底层 runtime 进程树清理、设置变更联动断开和升级占用修复方案 |
 | `refactor/0703-RUNTIME-DATA-CHAT-UI.md` | 重构 | 运行时数据目录、会话事件存储和聊天 UI 优化 |
