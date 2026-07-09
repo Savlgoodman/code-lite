@@ -253,13 +253,13 @@ async def relay_endpoint(ws: WebSocket) -> None:
             t.cancel()
             try:
                 await t
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 pass
 
     except WebSocketDisconnect:
         pass
-    except Exception:
-        logger.exception("relay endpoint error")
+    except (Exception, asyncio.CancelledError):
+        pass
     finally:
         # ── 清理 ──
         if room and role == Role.HOST:
