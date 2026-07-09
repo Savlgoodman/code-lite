@@ -26,9 +26,12 @@ interface ChatMessage {
 const LS_RELAY_URL = "code-lite-relay-url";
 const LS_PAIR_KEY = "code-lite-pair-key";
 
-function computeRoomId(pairKey: string): string {
-  // 简化：实际应使用 SHA256，这里用 btoa 模拟
-  return btoa(pairKey).replace(/[^a-zA-Z0-9]/g, "").slice(0, 32);
+async function computeRoomId(pairKey: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(pairKey);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export function App() {
@@ -54,7 +57,7 @@ export function App() {
     if (!pairKey.trim()) return;
     localStorage.setItem(LS_RELAY_URL, relayUrl);
     localStorage.setItem(LS_PAIR_KEY, pairKey);
-    const roomId = computeRoomId(pairKey.trim());
+    const roomId = await computeRoomId(pairKey.trim());
     const t = new RelayTransport({
       relayUrl,
       roomId,
