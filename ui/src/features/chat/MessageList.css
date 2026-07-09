@@ -2,7 +2,7 @@
   flex: 1;
   min-height: 0;
   overflow: overlay;
-  padding: 28px 24px calc(var(--chat-composer-bottom) + var(--chat-composer-current-height) + 58px);
+  padding: 28px 24px calc(var(--chat-composer-bottom) + var(--chat-composer-current-height) + var(--chat-scroll-bottom-gap));
   scrollbar-gutter: auto;
   scrollbar-width: none;
   transition: padding-bottom 0.24s cubic-bezier(0.2, 0, 0, 1);

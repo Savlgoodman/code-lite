@@ -7,7 +7,8 @@
   --chat-plan-expanded-height: 136px;
   --chat-plan-panel-height: var(--chat-plan-collapsed-height);
   --chat-scroll-button-plan-gap: 24px;
-  --chat-scroll-plan-padding-extra: 52px;
+  --chat-scroll-bottom-gap: 28px;
+  --chat-scroll-plan-padding-extra: 30px;
   position: relative;
   flex: 1;
   min-width: 0;
