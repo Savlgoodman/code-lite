@@ -93,7 +93,14 @@ async def create_conversation(
     body: { "agentId": "codex", "title": "...", "preview": "..." }
     agentId 必填，后续该会话的所有 turn 都使用绑定的 agent。
     """
-    return JSONResponse(create_conversation_record(services, payload))
+    result = create_conversation_record(services, payload)
+    # 广播会话创建事件到全局频道（0709 阶段二）：供其他前端订阅者实时更新列表。
+    if services.event_bus is not None:
+        services.event_bus.publish(
+            "*",
+            {"type": "conversation.created", "session": result["session"]},
+        )
+    return JSONResponse(result)
 
 
 @router.get("/conversations/{conversation_id}")
@@ -161,6 +168,12 @@ async def update_conversation_archive_state(
             delete_binding=False,
             close_empty_connection=True,
         )
+    # 广播会话归档事件到全局频道（0709 阶段二）
+    if services.event_bus is not None and bool(payload.get("archived")):
+        services.event_bus.publish(
+            "*",
+            {"type": "conversation.archived", "session": session},
+        )
     return JSONResponse({"session": session})
 
 
@@ -217,4 +230,10 @@ async def delete_conversation(
             close_empty_connection=True,
         )
     services.attachment_store.delete_conversation(conversation_id)
+    # 广播会话删除事件到全局频道（0709 阶段二）
+    if services.event_bus is not None:
+        services.event_bus.publish(
+            "*",
+            {"type": "conversation.deleted", "session": {"id": conversation_id}},
+        )
     return JSONResponse({"deleted": True})
