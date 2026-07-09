@@ -564,56 +564,62 @@ async def stream_turn(
         len(prompt), prompt_preview,
     )
 
-    async def event_stream():
-        assistant_message_id = ""
-        event_store = services.event_store
-        event_bus = services.event_bus
-        runtime_id = agent_id  # runtime identifier for events
-        native_session_id: str | None = None
+    event_store = services.event_store
+    event_bus = services.event_bus
+    turn_registry = services.turn_registry
+    runtime_id = agent_id  # runtime identifier for events
 
-        def publish(event: dict[str, object]) -> None:
-            # 会话事件总线（0709 阶段一）：与 NDJSON 出口并行 fan-out，
-            # 让本地/远程订阅者收到与流式客户端相同的事件。发布失败不影响主流程。
-            if event_bus is None:
-                return
-            try:
-                event_bus.publish(conversation_id, event)
-            except Exception:
-                logger.exception("event_stream: bus publish failed for turn %s", turn_id)
+    def publish(event: dict[str, object]) -> None:
+        # 会话事件总线（0709）：turn 的所有事件都经此 fan-out 给本地/远程订阅者。
+        # 发布失败不影响 turn 执行与持久化。
+        if event_bus is None:
+            return
+        try:
+            event_bus.publish(conversation_id, event)
+        except Exception:
+            logger.exception("turn %s: bus publish failed", turn_id)
+
+    async def run_turn_task() -> None:
+        """会话拥有的后台 turn 执行体（0709 设计 5.1.1）。
+
+        与发起它的连接无关：连接断开只影响 NDJSON/WS 中继，不取消本 task。
+        adapter.stream_turn 在所有退出路径（正常/取消/错误）都会发出终止事件，
+        因此本 task 总能干净收尾并持久化。
+        """
+        assistant_message_id = ""
+        native_session_id: str | None = None
+        completed = False
 
         has_user_input = bool(prompt or user_attachments)
         if not has_user_input:
-            logger.warning("event_stream: empty prompt, nothing to do")
+            logger.warning("run_turn_task: empty prompt, nothing to do")
+            return
 
-        if has_user_input:
-            logger.info("event_stream: start_turn for conversation=%s", conversation_id)
-            turn_record = services.conversation_recorder.start_turn(
-                conversation_id=conversation_id,
-                prompt=prompt,
-                attachments=user_attachments,
-                agent_metadata=agent_metadata,
-                model_metadata=model_metadata,
+        logger.info("run_turn_task: start_turn for conversation=%s", conversation_id)
+        turn_record = services.conversation_recorder.start_turn(
+            conversation_id=conversation_id,
+            prompt=prompt,
+            attachments=user_attachments,
+            agent_metadata=agent_metadata,
+            model_metadata=model_metadata,
+        )
+        if resolved_model:
+            services.model_config_store.mark_last_used(resolved_model.model_id)
+        assistant_message_id = str(turn_record.assistant_message["id"])
+        started_event = {
+            "type": "conversation.turn.started",
+            "conversationId": conversation_id,
+            "turnId": turn_id,
+            "session": turn_record.session,
+            "userMessage": turn_record.user_message,
+            "assistantMessage": turn_record.assistant_message,
+        }
+        if event_store:
+            await event_store.append_event(
+                conversation_id, started_event, runtime=runtime_id,
             )
-            if resolved_model:
-                services.model_config_store.mark_last_used(resolved_model.model_id)
-            assistant_message_id = str(turn_record.assistant_message["id"])
-            started_event = {
-                "type": "conversation.turn.started",
-                "conversationId": conversation_id,
-                "turnId": turn_id,
-                "session": turn_record.session,
-                "userMessage": turn_record.user_message,
-                "assistantMessage": turn_record.assistant_message,
-            }
-            if event_store:
-                await event_store.append_event(
-                    conversation_id, started_event, runtime=runtime_id,
-                )
-            logger.info("event_stream: yielding conversation.turn.started")
-            publish(started_event)
-            yield encode_ndjson_event(started_event)
+        publish(started_event)
 
-        completed = False
         try:
             async for event in services.agent_adapter.stream_turn(run_request):
                 if event.get("type") == "agent.config.updated":
@@ -623,28 +629,27 @@ async def stream_turn(
                 if isinstance(metadata, dict) and metadata.get("nativeSessionId"):
                     native_session_id = str(metadata["nativeSessionId"])
 
-                if assistant_message_id:
-                    session = services.conversation_recorder.apply_agent_event(
+                session = services.conversation_recorder.apply_agent_event(
+                    conversation_id=conversation_id,
+                    assistant_message_id=assistant_message_id,
+                    event=event,
+                )
+                if event.get("type") == "agent.run.completed" and isinstance(event.get("usage"), dict):
+                    services.billing_usage_recorder.enqueue_turn_usage(
                         conversation_id=conversation_id,
+                        turn_id=turn_id,
                         assistant_message_id=assistant_message_id,
-                        event=event,
+                        workspace=workspace,
+                        agent_id=agent_id,
+                        agent_label=str(agent_metadata.get("label") or agent_id),
+                        model_metadata=model_metadata,
+                        usage=event.get("usage"),
                     )
-                    if event.get("type") == "agent.run.completed" and isinstance(event.get("usage"), dict):
-                        services.billing_usage_recorder.enqueue_turn_usage(
-                            conversation_id=conversation_id,
-                            turn_id=turn_id,
-                            assistant_message_id=assistant_message_id,
-                            workspace=workspace,
-                            agent_id=agent_id,
-                            agent_label=str(agent_metadata.get("label") or agent_id),
-                            model_metadata=model_metadata,
-                            usage=event.get("usage"),
-                        )
-                    if session is not None:
-                        event = {
-                            **event,
-                            "session": session,
-                        }
+                if session is not None:
+                    event = {
+                        **event,
+                        "session": session,
+                    }
 
                 # 持久化到 events.ndjson（跳过高频 text.delta 以减少 IO）
                 if event_store:
@@ -665,42 +670,89 @@ async def stream_turn(
                     event=event,
                 )
                 publish(ui_event)
-                yield encode_ndjson_event(ui_event)
                 if event.get("type") in {"agent.run.completed", "agent.run.failed"}:
                     completed = True
-                    logger.info("event_stream: turn %s finished with %s", turn_id, event.get("type"))
+                    logger.info("run_turn_task: turn %s finished with %s", turn_id, event.get("type"))
         except asyncio.CancelledError:
-            logger.info("event_stream: turn %s cancelled by client", turn_id)
+            # task 被显式取消（后端关停等）。cancel_turn 走 adapter 内部取消并
+            # 由 stream_turn 发出终止事件，通常不会到这里。
+            logger.info("run_turn_task: turn %s task cancelled", turn_id)
             cancel_event = {
                 "type": "agent.run.failed",
                 "conversationId": conversation_id,
                 "turnId": turn_id,
                 "error": "用户取消了当前任务。",
             }
-            if assistant_message_id:
-                services.conversation_recorder.apply_agent_event(
-                    conversation_id=conversation_id,
-                    assistant_message_id=assistant_message_id,
-                    event=cancel_event,
+            services.conversation_recorder.apply_agent_event(
+                conversation_id=conversation_id,
+                assistant_message_id=assistant_message_id,
+                event=cancel_event,
+            )
+            if event_store:
+                await event_store.append_event(
+                    conversation_id, cancel_event,
+                    runtime=runtime_id,
+                    native_session_id=native_session_id,
                 )
-                if event_store:
-                    await event_store.append_event(
-                        conversation_id, cancel_event,
-                        runtime=runtime_id,
-                        native_session_id=native_session_id,
-                    )
-                publish(cancel_event)
-                completed = True
+            publish(cancel_event)
+            completed = True
             raise
         except Exception:
-            logger.exception("event_stream: unexpected error in turn %s", turn_id)
+            logger.exception("run_turn_task: unexpected error in turn %s", turn_id)
             raise
         finally:
-            if assistant_message_id and not completed:
-                logger.warning("event_stream: turn %s discarded (not completed)", turn_id)
+            if not completed:
+                logger.warning("run_turn_task: turn %s discarded (not completed)", turn_id)
                 services.conversation_recorder.discard_turn(conversation_id)
 
+    # 会话级串行互锁 + 订阅 + 启动后台 turn，全部在处理器内同步完成（0709 第 6 节、5.1.1）。
+    # 必须同步：StreamingResponse 的 body 生成器是惰性的，若把这些放进生成器，
+    # 返回响应到客户端开始消费之间会出现 is_running=False 的窗口，导致互锁失效。
+    if turn_registry is not None and turn_registry.is_running(conversation_id):
+        async def busy_stream():
+            yield encode_ndjson_event(
+                {
+                    "type": "agent.run.failed",
+                    "conversationId": conversation_id,
+                    "turnId": turn_id,
+                    "error": "当前会话已有正在运行的任务。",
+                }
+            )
+
+        return StreamingResponse(busy_stream(), media_type="application/x-ndjson; charset=utf-8")
+
+    # 先订阅（早于 task 启动，保证不漏事件），再登记启动后台 turn。
+    subscription = event_bus.subscribe(conversation_id) if event_bus else None
+    try:
+        if turn_registry is not None:
+            turn_registry.start(conversation_id, run_turn_task)
+        else:
+            asyncio.ensure_future(run_turn_task())
+    except Exception:
+        if subscription is not None:
+            subscription.close()
+        raise
+
+    async def relay_stream():
+        """NDJSON 中继：转发本 turn 的事件。
+
+        客户端断开只结束本中继（订阅关闭），不影响后台 turn 继续运行、持久化和向
+        其他订阅者广播。这就是 turn 与连接解耦的关键（0709 设计 5.1.1）。
+        """
+        if subscription is None:
+            return
+        try:
+            async for event in subscription:
+                # 只转发本 turn 的事件（本 turn 的所有事件都带 turnId==turn_id）
+                if event.get("turnId") != turn_id:
+                    continue
+                yield encode_ndjson_event(event)
+                if event.get("type") in {"agent.run.completed", "agent.run.failed"}:
+                    break
+        finally:
+            subscription.close()
+
     return StreamingResponse(
-        event_stream(),
+        relay_stream(),
         media_type="application/x-ndjson; charset=utf-8",
     )

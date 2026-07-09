@@ -14,6 +14,7 @@ from code_lite_backend.services.conversation_recorder import ConversationRecorde
 from code_lite_backend.services.event_bus import SessionEventBus
 from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
+from code_lite_backend.services.turn_registry import ActiveTurnRegistry
 from code_lite_backend.storage.attachments import AttachmentStore
 from code_lite_backend.storage.conversations import ConversationStore
 from code_lite_backend.storage.diff_artifacts import DiffArtifactStore
@@ -38,3 +39,4 @@ class AppServices:
     runtime_manager: AcpRuntimeManager | None = None
     event_store: ConversationEventStore | None = None
     event_bus: SessionEventBus | None = None
+    turn_registry: ActiveTurnRegistry | None = None
