@@ -37,6 +37,7 @@ export function App() {
   const [relayUrl, setRelayUrl] = useState(localStorage.getItem(LS_RELAY_URL) || "ws://localhost:18766/ws");
   const [pairKey, setPairKey] = useState(localStorage.getItem(LS_PAIR_KEY) || "");
   const [connected, setConnected] = useState(false);
+  const [hostOnline, setHostOnline] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Record<string, ChatMessage[]>>({});
@@ -53,15 +54,30 @@ export function App() {
     localStorage.setItem(LS_RELAY_URL, relayUrl);
     localStorage.setItem(LS_PAIR_KEY, pairKey);
     const roomId = computeRoomId(pairKey.trim());
-    const t = new RelayTransport({ relayUrl, roomId });
-    t.onStatus((s) => setConnected(s === "connected"));
+    const t = new RelayTransport({
+      relayUrl,
+      roomId,
+      onHostStatusChange: (online) => setHostOnline(online),
+    });
+    t.onStatus((s) => setConnected(s !== "idle" && s !== "closed"));
     try {
       await t.connect();
       setTransport(t);
-      setPage("projects");
-      // 订阅全局频道获取会话列表
-      const listResult = await t.request<{ sessions: Session[] }>("conversation.list", {});
-      setSessions(listResult.sessions);
+      // 订阅全局频道以接收会话列表事件
+      await t.subscribe("*");
+      // 等待 host 上线后再拉取列表（最多等 10s）
+      let waited = 0;
+      while (!hostOnline && waited < 100) {
+        await new Promise((r) => setTimeout(r, 100));
+        waited++;
+      }
+      if (hostOnline) {
+        setPage("projects");
+        const listResult = await t.request<{ sessions: Session[] }>("conversation.list", {});
+        setSessions(listResult.sessions);
+      } else {
+        setPage("projects");
+      }
     } catch (e) {
       console.error("connect failed", e);
     }
@@ -167,7 +183,9 @@ export function App() {
           <button onClick={connect} disabled={!pairKey.trim()}>
             连接
           </button>
-          {connected && <p className="status">已连接</p>}
+          {connected && !hostOnline && <p className="status">已连接中继，等待宿主上线...</p>}
+          {connected && hostOnline && <p className="status" style={{ color: "var(--green)" }}>已连接宿主</p>}
+          {!connected && <p className="status">未连接</p>}
         </div>
       </div>
     );
@@ -223,7 +241,12 @@ export function App() {
   return (
     <div className="app-shell">
       <div className="page">
-        <h2 style={{ marginBottom: 16, fontSize: 20 }}>项目</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 20 }}>项目</h2>
+          <span style={{ fontSize: 12, color: hostOnline ? "var(--green)" : "var(--orange)" }}>
+            {hostOnline ? "● 宿主在线" : "○ 宿主离线"}
+          </span>
+        </div>
         {Object.entries(projectGroups).map(([key, group]) => (
           <div key={key} style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>

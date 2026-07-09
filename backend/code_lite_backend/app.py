@@ -73,10 +73,10 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
         event_store=event_store,
         event_bus=event_bus,
         turn_registry=turn_registry,
-        remote_bridge=RemoteBridge(
-            config_path=runtime_config.data_dir / "remote_bridge.json",
-            event_bus=event_bus,
-        ),
+    )
+    services.remote_bridge = RemoteBridge(
+        config_path=runtime_config.data_dir / "remote_bridge.json",
+        services=services,
     )
     app = FastAPI(title="Code Lite Backend", version=BACKEND_VERSION)
     app.state.services = services

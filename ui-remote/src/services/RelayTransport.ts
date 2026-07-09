@@ -24,6 +24,7 @@ export interface RelayTransportOptions {
   roomId: string;
   peerId?: string;
   onStatusChange?: (status: TransportStatus) => void;
+  onHostStatusChange?: (online: boolean) => void;
 }
 
 export class RelayTransport implements Transport {
@@ -108,7 +109,11 @@ export class RelayTransport implements Transport {
       return;
     }
     if (msg.type === "host.offline") {
-      // host 断开，保持连接但标记
+      this.options.onHostStatusChange?.(false);
+      return;
+    }
+    if (msg.type === "host.online") {
+      this.options.onHostStatusChange?.(true);
       return;
     }
     if (msg.type === "ping") {

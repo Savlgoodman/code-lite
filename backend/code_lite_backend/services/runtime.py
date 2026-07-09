@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from code_lite_backend.agents.acp.runtime_manager import AcpRuntimeManager
 from code_lite_backend.core.config import RuntimeConfig
@@ -14,12 +15,14 @@ from code_lite_backend.services.conversation_recorder import ConversationRecorde
 from code_lite_backend.services.event_bus import SessionEventBus
 from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
-from code_lite_backend.services.remote_bridge import RemoteBridge
 from code_lite_backend.services.turn_registry import ActiveTurnRegistry
 from code_lite_backend.storage.attachments import AttachmentStore
 from code_lite_backend.storage.conversations import ConversationStore
 from code_lite_backend.storage.diff_artifacts import DiffArtifactStore
 from code_lite_backend.storage.event_store import ConversationEventStore
+
+if TYPE_CHECKING:
+    from code_lite_backend.services.remote_bridge import RemoteBridge  # noqa: F401
 
 
 @dataclass
