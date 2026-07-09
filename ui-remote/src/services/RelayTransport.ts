@@ -135,6 +135,15 @@ export class RelayTransport implements Transport {
       } else if (kind === "snapshot" && payload.payload) {
         const channel = payload.channel ?? "";
         for (const h of this.snapshotHandlers) h(channel, payload.payload);
+        // subscribe 的响应也是 snapshot 类型，带 requestId，需要 resolve pending RPC
+        if (payload.requestId) {
+          const p = this.pending.get(payload.requestId);
+          if (p) {
+            clearTimeout(p.timer);
+            this.pending.delete(payload.requestId);
+            p.resolve(payload.payload);
+          }
+        }
       } else if ((kind === "result" || kind === "error") && payload.requestId) {
         const p = this.pending.get(payload.requestId);
         if (p) {
