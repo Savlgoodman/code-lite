@@ -195,16 +195,7 @@ const MessageItem = memo(function MessageItem({
   return (
     <article className={`message ${message.role}`}>
       <div className="message-body">
-        {message.role === "assistant" ? (
-          <AssistantMessageContent isCompactTurn={isCompactTurn} message={message} sessionId={sessionId} />
-        ) : (
-          <div className="user-message-stack">
-            <UserMessageAttachments message={message} onPreviewImage={onPreviewImage} sessionId={sessionId} />
-            {message.content ? <p className="user-message-text">{message.content}</p> : null}
-          </div>
-        )}
-
-        {message.reasoning ? (
+        {message.role === "assistant" && message.reasoning ? (
           <details className="reasoning-block">
             <summary className="reasoning-summary">
               <span>思考过程</span>
@@ -215,6 +206,15 @@ const MessageItem = memo(function MessageItem({
             </div>
           </details>
         ) : null}
+
+        {message.role === "assistant" ? (
+          <AssistantMessageContent isCompactTurn={isCompactTurn} message={message} sessionId={sessionId} />
+        ) : (
+          <div className="user-message-stack">
+            <UserMessageAttachments message={message} onPreviewImage={onPreviewImage} sessionId={sessionId} />
+            {message.content ? <p className="user-message-text">{message.content}</p> : null}
+          </div>
+        )}
 
         {message.error ? <p className="message-error">{message.error}</p> : null}
 
