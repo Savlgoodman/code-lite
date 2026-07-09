@@ -76,16 +76,27 @@ class RemoteBridgeConfig:
     room_id: str = ""   # SHA256(pair_key) hex
 
 
-class _FakeWebSocket:
-    """伪装 WebSocket 对象，让 WS RPC handler 能通过它发送响应到中继。"""
+class _PeerSession:
+    """每个远端 peer 的连接会话（0710 第 4.1 节）。
+
+    - 冒充 WebSocket，让 ws.py 的 RPC handler 通过 send_json 把响应回给该 peer。
+    - 持有 peer 独立的 pump_tasks（按 channel），避免多设备订阅同一会话时串台（1.4）。
+    - 发送时路由字段只放外层中继信封 to/from（3.1），业务 payload 为黑盒。
+    """
 
     def __init__(self, real_ws: websockets.ClientConnection, peer_id: str) -> None:
         self._real_ws = real_ws
-        self._peer_id = peer_id
+        self.peer_id = peer_id
+        self.pump_tasks: dict[str, asyncio.Task] = {}
 
     async def send_json(self, data: dict) -> None:
-        envelope = {"type": "msg", "payload": data, "peerId": self._peer_id}
+        envelope = {"type": "msg", "to": self.peer_id, "from": "host", "payload": data}
         await self._real_ws.send(json.dumps(envelope, ensure_ascii=False))
+
+    def cancel_pumps(self) -> None:
+        for task in self.pump_tasks.values():
+            task.cancel()
+        self.pump_tasks.clear()
 
 
 class RemoteBridge:
@@ -98,8 +109,7 @@ class RemoteBridge:
         self._ws: websockets.ClientConnection | None = None
         self._task: asyncio.Task | None = None
         self._running = False
-        self._remote_peers: dict[str, _FakeWebSocket] = {}  # peerId -> fake WS
-        self._pump_tasks: dict[str, asyncio.Task] = {}  # channel -> pump task
+        self._remote_peers: dict[str, _PeerSession] = {}  # peerId -> peer session
 
     @property
     def config(self) -> RemoteBridgeConfig:
@@ -150,9 +160,8 @@ class RemoteBridge:
 
     async def stop(self) -> None:
         self._running = False
-        for t in self._pump_tasks.values():
-            t.cancel()
-        self._pump_tasks.clear()
+        for peer in self._remote_peers.values():
+            peer.cancel_pumps()
         self._remote_peers.clear()
         if self._task:
             self._task.cancel()
@@ -188,10 +197,7 @@ class RemoteBridge:
             if resp.get("type") != "ready":
                 logger.error("relay rejected: %s", resp)
                 return
-            logger.info("connected to relay, starting event pump")
-
-            # 启动事件泵：把本地事件总线的事件转发到中继
-            self._start_event_pumps()
+            logger.info("connected to relay")
 
             try:
                 async for raw in ws:
@@ -207,25 +213,30 @@ class RemoteBridge:
                     elif msg_type == "peer.joined":
                         peer_id = msg.get("peerId", "")
                         logger.info("remote peer joined: %s", peer_id)
-                        self._remote_peers[peer_id] = _FakeWebSocket(ws, peer_id)
+                        # 每个 peer 一个独立会话（含独立 pump_tasks），互不串台（0710 第 4.1 节）。
+                        self._remote_peers[peer_id] = _PeerSession(ws, peer_id)
                     elif msg_type == "peer.left":
                         peer_id = msg.get("peerId", "")
                         logger.info("remote peer left: %s", peer_id)
-                        self._remote_peers.pop(peer_id, None)
+                        peer = self._remote_peers.pop(peer_id, None)
+                        if peer is not None:
+                            peer.cancel_pumps()
                     elif msg_type == "msg":
                         payload = msg.get("payload", {})
-                        peer_id = msg.get("peerId", "")
-                        logger.info("msg from peer %s: method=%s", peer_id, payload.get("method", "?"))
-                        await self._handle_rpc(payload, peer_id)
+                        # 路由来源取自外层 from（中继强制覆盖为真实 peerId，防伪造）。
+                        peer_id = msg.get("from", "")
+                        if isinstance(payload, dict):
+                            await self._handle_rpc(payload, peer_id)
                     elif msg_type == "host.offline":
                         pass  # 不应该收到
             finally:
                 self._ws = None
-                self._stop_event_pumps()
+                for peer in self._remote_peers.values():
+                    peer.cancel_pumps()
                 self._remote_peers.clear()
 
     async def _handle_rpc(self, payload: dict, peer_id: str) -> None:
-        """将中继收到的 RPC 路由到本地 WS handler"""
+        """将中继收到的 RPC 路由到本地 WS handler（每 peer 独立订阅状态）。"""
         kind = payload.get("kind", "")
         if kind != "req":
             return
@@ -233,8 +244,8 @@ class RemoteBridge:
         request_id = payload.get("requestId")
         rpc_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
 
-        fake_ws = self._remote_peers.get(peer_id)
-        if not fake_ws:
+        peer = self._remote_peers.get(peer_id)
+        if peer is None:
             logger.warning("rpc from unknown peer %s: %s", peer_id, method)
             return
 
@@ -244,81 +255,33 @@ class RemoteBridge:
             handlers = _get_rpc_handlers()
             if method == "unsubscribe":
                 channel = str(rpc_payload.get("channel") or "")
-                task = self._pump_tasks.pop(channel, None)
+                task = peer.pump_tasks.pop(channel, None)
                 if task is not None:
                     task.cancel()
-                await fake_ws.send_json(_envelope("result", requestId=request_id, payload={"ok": True}))
+                await peer.send_json(_envelope("result", requestId=request_id, payload={"ok": True}))
             elif method in handlers:
                 handler = handlers[method]
                 # subscribe 与 turn.start 需要 tasks 参数（订阅状态）；其余 handler 只需 4 参。
                 # 见 docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md 第 1.1 节。
+                # tasks 用 peer 独立的 pump_tasks，保证多设备互不串台（第 4.3 节）。
                 if method in _HANDLERS_NEEDING_TASKS:
-                    await handler(fake_ws, services, request_id, rpc_payload, self._pump_tasks)
+                    await handler(peer, services, request_id, rpc_payload, peer.pump_tasks)
                 else:
-                    await handler(fake_ws, services, request_id, rpc_payload)
+                    await handler(peer, services, request_id, rpc_payload)
             else:
-                await fake_ws.send_json(_envelope(
+                await peer.send_json(_envelope(
                     "error", requestId=request_id,
                     payload={"code": "method_not_implemented", "method": method},
                 ))
         except Exception:
             logger.exception("rpc dispatch failed: method=%s peer=%s", method, peer_id)
             try:
-                await fake_ws.send_json(_envelope(
+                await peer.send_json(_envelope(
                     "error", requestId=request_id,
                     payload={"code": "internal_error"},
                 ))
             except Exception:
                 pass
-
-    # ── 事件泵：本地 bus → 中继 → remote ──
-
-    def _start_event_pumps(self) -> None:
-        bus = self._services.event_bus
-        if bus is None:
-            return
-        # 订阅全局频道（会话列表事件）
-        self._subscribe_pump("*")
-
-    def _subscribe_pump(self, channel: str) -> None:
-        bus = self._services.event_bus
-        if bus is None:
-            return
-        subscription = bus.subscribe(channel)
-        ws = self._ws
-        if ws is None:
-            return
-
-        async def pump() -> None:
-            try:
-                async for event in subscription:
-                    if not self._running or self._ws is None:
-                        break
-                    envelope = {
-                        "type": "msg",
-                        "payload": {
-                            "v": 1,
-                            "kind": "event",
-                            "channel": channel,
-                            "seq": event.get("sequence"),
-                            "payload": event,
-                        },
-                        "peerId": "*",  # 广播给所有 remote
-                    }
-                    await self._ws.send(json.dumps(envelope, ensure_ascii=False))
-            except (ConnectionClosed, asyncio.CancelledError):
-                pass
-            except Exception:
-                logger.exception("event pump failed for channel=%s", channel)
-            finally:
-                subscription.close()
-
-        self._pump_tasks[channel] = asyncio.create_task(pump())
-
-    def _stop_event_pumps(self) -> None:
-        for t in self._pump_tasks.values():
-            t.cancel()
-        self._pump_tasks.clear()
 
     def update_config(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():

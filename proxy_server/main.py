@@ -149,19 +149,23 @@ async def handle_hello(ws: WebSocket, payload: dict, room: Room) -> dict | None:
 # ─── 消息转发 ───
 
 async def handle_msg_from_remote(room: Room, peer_id: str, payload: dict) -> None:
-    """remote → host：强制覆盖 peerId 防伪造，包中继信封。"""
+    """remote -> host：路由字段只放外层（0710 第 3.1 节）。
+
+    中继强制用连接真实 peer_id 覆盖外层 from，防止一台设备冒充另一台。
+    业务 payload 是黑盒，原样透传，绝不写入 payload 内部。
+    """
     if room.host is None:
         return
-    # 强制使用真实 peerId
-    payload["peerId"] = peer_id
-    envelope = {"type": "msg", "payload": payload, "peerId": peer_id}
+    envelope = {"type": "msg", "from": peer_id, "to": "host", "payload": payload}
     await safe_send_text(room.host, json.dumps(envelope, ensure_ascii=False))
 
 
-async def handle_msg_from_host(room: Room, payload: dict) -> None:
-    """host → remote：按 peerId 路由，* 表示广播。包中继信封。"""
-    target = payload.get("peerId")
-    envelope = {"type": "msg", "payload": payload}
+async def handle_msg_from_host(room: Room, target: str | None, payload: dict) -> None:
+    """host -> remote：按外层 to 路由，"*"/None 表示广播（0710 第 3.1 节）。
+
+    target 来自外层中继信封的 to 字段，中继不解析业务 payload。
+    """
+    envelope = {"type": "msg", "from": "host", "payload": payload}
     text = json.dumps(envelope, ensure_ascii=False)
     if target == "*" or target is None:
         for remote in list(room.remotes.values()):
@@ -230,11 +234,11 @@ async def relay_endpoint(ws: WebSocket) -> None:
                     payload = msg.get("payload")
                     if isinstance(payload, dict):
                         if role == Role.REMOTE and peer_id:
-                            logger.debug("remote %s → host: %s", peer_id, payload.get("method", "?"))
                             await handle_msg_from_remote(room, peer_id, payload)
                         elif role == Role.HOST:
-                            logger.debug("host → remote(peer=%s): %s", payload.get("peerId", "*"), payload.get("method", "?"))
-                            await handle_msg_from_host(room, payload)
+                            # 路由目标取自外层 to（中继不解析业务 payload）
+                            target = msg.get("to")
+                            await handle_msg_from_host(room, target, payload)
 
         async def heartbeat_loop() -> None:
             while True:

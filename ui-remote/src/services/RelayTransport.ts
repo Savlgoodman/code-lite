@@ -16,6 +16,10 @@ interface RelayEnvelope {
   peerId?: string;
   roomId?: string;
   error?: string;
+  // 路由字段只放外层（见 docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md 第 3.1 节）：
+  // remote 发送时无需填 to（中继固定转发给 host 并覆盖 from）；接收 host 帧时外层带 from。
+  to?: string;
+  from?: string;
   payload?: unknown;
 }
 

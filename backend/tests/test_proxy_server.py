@@ -46,8 +46,12 @@ async def _send_hello(ws, role: str, room_id: str) -> dict:
         # 跳过 host.online 等中间消息
 
 
-async def _send_msg(ws, payload: dict) -> None:
-    await ws.send(json.dumps({"type": "msg", "payload": payload}))
+async def _send_msg(ws, payload: dict, to: str | None = None) -> None:
+    # 路由目标只放外层 to（0710 第 3.1 节）；业务 payload 为黑盒。
+    envelope: dict = {"type": "msg", "payload": payload}
+    if to is not None:
+        envelope["to"] = to
+    await ws.send(json.dumps(envelope))
 
 
 async def _recv_json(ws):
@@ -113,12 +117,13 @@ class RelayHandshakeTest(unittest.IsolatedAsyncioTestCase):
                 peer_id = resp["peerId"]
                 joined = await _recv_json(ws1)
                 self.assertEqual(joined["type"], "peer.joined")
-                await _send_msg(ws2, {"peerId": "fake-id", "body": "hello"})
-                # 中继包了一层 {"type":"msg","payload":{...}}
+                # remote 试图伪造 from（塞进外层无效，中继强制覆盖为真实 peerId）
+                await ws2.send(json.dumps({"type": "msg", "from": "fake-id", "payload": {"body": "hello"}}))
+                # 中继包一层 {"type":"msg","from":<真实 peerId>,"to":"host","payload":{...}}
                 raw = await _recv_json(ws1)
-                payload = raw.get("payload", raw)
-                self.assertEqual(payload["peerId"], peer_id)
-                self.assertEqual(payload["body"], "hello")
+                self.assertEqual(raw["from"], peer_id)
+                self.assertEqual(raw["to"], "host")
+                self.assertEqual(raw["payload"]["body"], "hello")
 
     async def test_msg_forwarding_host_to_remote(self) -> None:
         async with websockets.connect(RELAY_URI) as ws1:
@@ -126,10 +131,13 @@ class RelayHandshakeTest(unittest.IsolatedAsyncioTestCase):
             async with websockets.connect(RELAY_URI) as ws2:
                 resp = await _send_hello(ws2, "remote", "room-msg2")
                 peer_id = resp["peerId"]
-                await _send_msg(ws1, {"peerId": peer_id, "body": "hi-remote"})
+                # 消耗 peer.joined
+                await _recv_json(ws1)
+                # host 用外层 to 定向到该 peer
+                await _send_msg(ws1, {"body": "hi-remote"}, to=peer_id)
                 raw = await _recv_json(ws2)
-                payload = raw.get("payload", raw)
-                self.assertEqual(payload["body"], "hi-remote")
+                self.assertEqual(raw["from"], "host")
+                self.assertEqual(raw["payload"]["body"], "hi-remote")
 
     async def test_broadcast_to_all_remotes(self) -> None:
         async with websockets.connect(RELAY_URI) as ws1:
@@ -138,11 +146,33 @@ class RelayHandshakeTest(unittest.IsolatedAsyncioTestCase):
                 await _send_hello(ws2, "remote", "room-bc")
                 async with websockets.connect(RELAY_URI) as ws3:
                     await _send_hello(ws3, "remote", "room-bc")
-                    await _send_msg(ws1, {"peerId": "*", "body": "broadcast"})
+                    # 消耗两条 peer.joined
+                    await _recv_json(ws1)
+                    await _recv_json(ws1)
+                    await _send_msg(ws1, {"body": "broadcast"}, to="*")
                     raw2 = await _recv_json(ws2)
                     raw3 = await _recv_json(ws3)
-                    self.assertEqual(raw2.get("payload", {}).get("body") or raw2.get("body"), "broadcast")
-                    self.assertEqual(raw3.get("payload", {}).get("body") or raw3.get("body"), "broadcast")
+                    self.assertEqual(raw2["payload"]["body"], "broadcast")
+                    self.assertEqual(raw3["payload"]["body"], "broadcast")
+
+    async def test_directed_msg_no_crosstalk(self) -> None:
+        """host 定向到某 peer 时，另一 peer 不应收到（0710 第 1.2 节回归）。"""
+        async with websockets.connect(RELAY_URI) as host:
+            await _send_hello(host, "host", "room-direct")
+            async with websockets.connect(RELAY_URI) as r1:
+                resp1 = await _send_hello(r1, "remote", "room-direct")
+                peer1 = resp1["peerId"]
+                await _recv_json(host)  # peer.joined for r1
+                async with websockets.connect(RELAY_URI) as r2:
+                    await _send_hello(r2, "remote", "room-direct")
+                    await _recv_json(host)  # peer.joined for r2
+                    # 只定向给 peer1
+                    await _send_msg(host, {"body": "for-r1-only"}, to=peer1)
+                    raw1 = await _recv_json(r1)
+                    self.assertEqual(raw1["payload"]["body"], "for-r1-only")
+                    # r2 不应收到：用超时确认无消息
+                    with self.assertRaises(asyncio.TimeoutError):
+                        await asyncio.wait_for(r2.recv(), timeout=0.5)
 
     async def test_cleanup_on_host_disconnect(self) -> None:
         ws1 = await websockets.connect(RELAY_URI)
