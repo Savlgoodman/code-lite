@@ -681,6 +681,26 @@ export function ChatPage() {
           setSessionRunning(channel, eventType2 === "turn.lock");
           return;
         }
+        // 配置同步（0709 设计 5.3）：另一端改模型/模式后选择器跟随
+        if (eventType2 === "conversation.config.updated") {
+          if (!channel) return;
+          const configPayload = (event as unknown as { config?: Partial<SessionConfig> }).config;
+          if (configPayload) {
+            setConfigBySession((prev) => {
+              const existing = prev[channel];
+              const next: SessionConfig = {
+                modelFamily: configPayload.modelFamily ?? existing?.modelFamily ?? "",
+                accessMode: configPayload.accessMode ?? existing?.accessMode ?? "",
+                reasoningEffort: configPayload.reasoningEffort ?? existing?.reasoningEffort ?? "medium",
+                selectedConfig: configPayload.selectedConfig ?? existing?.selectedConfig ?? {},
+              };
+              const result = { ...prev, [channel]: next };
+              configBySessionRef.current = result;
+              return result;
+            });
+          }
+          return;
+        }
         if (channel && channel !== "*") {
           handleAgentEventRef.current(channel, event);
         }

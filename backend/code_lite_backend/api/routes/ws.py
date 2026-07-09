@@ -251,6 +251,39 @@ async def _handle_conversation_create(
         )
 
 
+async def _handle_conversation_config_update(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    if not conversation_id:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_conversation_id"}))
+        return
+    config = payload.get("config")
+    if not isinstance(config, dict):
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_config"}))
+        return
+    # 复用 HTTP 路由的保存 + 广播逻辑（设计 5.3）
+    try:
+        session = services.conversation_store._read_session(conversation_id)
+    except ValueError:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "invalid_conversation_id"}))
+        return
+    if session is None:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_found"}))
+        return
+    updates = {**session, "config": config}
+    updated = services.conversation_store.save_session(conversation_id, updates)
+    if services.event_bus is not None:
+        services.event_bus.publish(
+            conversation_id,
+            {"type": "conversation.config.updated", "conversationId": conversation_id, "config": config},
+        )
+    await _send(ws, _envelope("result", requestId=request_id, payload={"session": updated}))
+
+
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     """本地/远程订阅入口（0709 阶段一）。
@@ -295,6 +328,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 await _handle_conversation_get(ws, services, request_id, payload)
             elif method == "conversation.create":
                 await _handle_conversation_create(ws, services, request_id, payload)
+            elif method == "conversation.config.update":
+                await _handle_conversation_config_update(ws, services, request_id, payload)
             else:
                 await _send(
                     ws,

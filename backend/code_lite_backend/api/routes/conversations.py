@@ -208,6 +208,16 @@ async def update_conversation_config(
         updates["contextUsage"] = context_usage
 
     updated = services.conversation_store.save_session(conversation_id, updates)
+    # 广播配置变更事件到会话频道（0709 设计 5.3）：其他订阅者选择器实时跟随
+    if services.event_bus is not None and isinstance(config, dict):
+        services.event_bus.publish(
+            conversation_id,
+            {
+                "type": "conversation.config.updated",
+                "conversationId": conversation_id,
+                "config": config,
+            },
+        )
     return JSONResponse({"session": updated})
 
 
