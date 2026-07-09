@@ -122,13 +122,14 @@ class TurnLifecycleTest(unittest.TestCase):
                     "v": 1, "kind": "req", "method": "turn.start", "requestId": "t1",
                     "payload": {"conversationId": conversation_id, "input": "hi", "turnId": "turn-1"},
                 })
-                # 读取消息直到收到一个 event（跳过可能的 result ack），然后断开
+                # 读取消息直到收到一个 event（跳过可能的 result ack / turn.lock），然后断开
                 got_event = False
                 for _ in range(10):
                     msg = ws.receive_json()
                     if msg["kind"] == "event":
                         event = msg["payload"]
-                        self.assertEqual(event["type"], "conversation.turn.started")
+                        # 第一个 event 可能是 turn.lock 或 conversation.turn.started
+                        self.assertIn(event["type"], {"turn.lock", "conversation.turn.started"})
                         got_event = True
                         break
                 self.assertTrue(got_event, "expected conversation.turn.started event before disconnect")

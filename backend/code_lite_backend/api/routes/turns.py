@@ -712,6 +712,15 @@ async def prepare_and_start_turn(
     except Exception:
         raise
 
+    # 广播 turn.lock：所有订阅者据此禁用输入框、显示"另一端正在运行"（0709 设计 6.1）。
+    # turn.unlock 由 terminal 事件（agent.run.completed/failed）隐式表达，无需单独广播。
+    if event_bus is not None:
+        event_bus.publish(conversation_id, {
+            "type": "turn.lock",
+            "conversationId": conversation_id,
+            "turnId": turn_id,
+        })
+
     return TurnStartOutcome(
         conversation_id=conversation_id,
         turn_id=turn_id,

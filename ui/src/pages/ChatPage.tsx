@@ -674,6 +674,13 @@ export function ChatPage() {
         }
         // 会话级事件：路由到 handleAgentEvent（观察者与发起方共用 reducer）。
         const channel = (event as { conversationId?: string }).conversationId;
+        const eventType2 = (event as unknown as { type: string }).type;
+        // turn.lock/turn.unlock 是互锁控制事件（0709 设计 6.1），不走 handleAgentEvent
+        if (eventType2 === "turn.lock" || eventType2 === "turn.unlock") {
+          if (!channel) return;
+          setSessionRunning(channel, eventType2 === "turn.lock");
+          return;
+        }
         if (channel && channel !== "*") {
           handleAgentEventRef.current(channel, event);
         }
