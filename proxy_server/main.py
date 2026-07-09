@@ -149,18 +149,20 @@ async def handle_hello(ws: WebSocket, payload: dict, room: Room) -> dict | None:
 # ─── 消息转发 ───
 
 async def handle_msg_from_remote(room: Room, peer_id: str, payload: dict) -> None:
-    """remote → host：强制覆盖 peerId 防伪造。"""
+    """remote → host：强制覆盖 peerId 防伪造，包中继信封。"""
     if room.host is None:
         return
     # 强制使用真实 peerId
     payload["peerId"] = peer_id
-    await safe_send_text(room.host, json.dumps(payload, ensure_ascii=False))
+    envelope = {"type": "msg", "payload": payload, "peerId": peer_id}
+    await safe_send_text(room.host, json.dumps(envelope, ensure_ascii=False))
 
 
 async def handle_msg_from_host(room: Room, payload: dict) -> None:
-    """host → remote：按 peerId 路由，* 表示广播。"""
+    """host → remote：按 peerId 路由，* 表示广播。包中继信封。"""
     target = payload.get("peerId")
-    text = json.dumps(payload, ensure_ascii=False)
+    envelope = {"type": "msg", "payload": payload}
+    text = json.dumps(envelope, ensure_ascii=False)
     if target == "*" or target is None:
         for remote in list(room.remotes.values()):
             await safe_send_text(remote.ws, text)

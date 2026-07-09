@@ -111,13 +111,14 @@ class RelayHandshakeTest(unittest.IsolatedAsyncioTestCase):
             async with websockets.connect(RELAY_URI) as ws2:
                 resp = await _send_hello(ws2, "remote", "room-msg")
                 peer_id = resp["peerId"]
-                # host 先收到 peer.joined，消耗掉
                 joined = await _recv_json(ws1)
                 self.assertEqual(joined["type"], "peer.joined")
                 await _send_msg(ws2, {"peerId": "fake-id", "body": "hello"})
-                msg = await _recv_json(ws1)
-                self.assertEqual(msg["peerId"], peer_id)
-                self.assertEqual(msg["body"], "hello")
+                # 中继包了一层 {"type":"msg","payload":{...}}
+                raw = await _recv_json(ws1)
+                payload = raw.get("payload", raw)
+                self.assertEqual(payload["peerId"], peer_id)
+                self.assertEqual(payload["body"], "hello")
 
     async def test_msg_forwarding_host_to_remote(self) -> None:
         async with websockets.connect(RELAY_URI) as ws1:
@@ -126,8 +127,9 @@ class RelayHandshakeTest(unittest.IsolatedAsyncioTestCase):
                 resp = await _send_hello(ws2, "remote", "room-msg2")
                 peer_id = resp["peerId"]
                 await _send_msg(ws1, {"peerId": peer_id, "body": "hi-remote"})
-                msg = await _recv_json(ws2)
-                self.assertEqual(msg["body"], "hi-remote")
+                raw = await _recv_json(ws2)
+                payload = raw.get("payload", raw)
+                self.assertEqual(payload["body"], "hi-remote")
 
     async def test_broadcast_to_all_remotes(self) -> None:
         async with websockets.connect(RELAY_URI) as ws1:
@@ -137,10 +139,10 @@ class RelayHandshakeTest(unittest.IsolatedAsyncioTestCase):
                 async with websockets.connect(RELAY_URI) as ws3:
                     await _send_hello(ws3, "remote", "room-bc")
                     await _send_msg(ws1, {"peerId": "*", "body": "broadcast"})
-                    m2 = await _recv_json(ws2)
-                    m3 = await _recv_json(ws3)
-                    self.assertEqual(m2["body"], "broadcast")
-                    self.assertEqual(m3["body"], "broadcast")
+                    raw2 = await _recv_json(ws2)
+                    raw3 = await _recv_json(ws3)
+                    self.assertEqual(raw2.get("payload", {}).get("body") or raw2.get("body"), "broadcast")
+                    self.assertEqual(raw3.get("payload", {}).get("body") or raw3.get("body"), "broadcast")
 
     async def test_cleanup_on_host_disconnect(self) -> None:
         ws1 = await websockets.connect(RELAY_URI)
