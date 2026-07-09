@@ -24,6 +24,7 @@ from code_lite_backend.storage.conversations import ConversationStore
 from code_lite_backend.storage.diff_artifacts import DiffArtifactStore
 from code_lite_backend.services.event_bus import SessionEventBus
 from code_lite_backend.services.turn_registry import ActiveTurnRegistry
+from code_lite_backend.services.remote_bridge import RemoteBridge
 from code_lite_backend.storage.event_store import ConversationEventStore
 from code_lite_backend.version import BACKEND_VERSION
 
@@ -72,6 +73,10 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
         event_store=event_store,
         event_bus=event_bus,
         turn_registry=turn_registry,
+        remote_bridge=RemoteBridge(
+            config_path=runtime_config.data_dir / "remote_bridge.json",
+            event_bus=event_bus,
+        ),
     )
     app = FastAPI(title="Code Lite Backend", version=BACKEND_VERSION)
     app.state.services = services
@@ -79,9 +84,13 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     @app.on_event("startup")
     async def _startup() -> None:
         await billing_usage_recorder.start()
+        # 启动远程桥接（如果已启用）
+        await services.remote_bridge.start()
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
+        logger.info("Shutting down remote bridge...")
+        await services.remote_bridge.stop()
         logger.info("Shutting down billing usage recorder...")
         await billing_usage_recorder.stop()
         logger.info("Shutting down ACP runtime manager...")
