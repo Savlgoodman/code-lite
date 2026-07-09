@@ -203,6 +203,41 @@ class WsTurnRpcTest(unittest.TestCase):
                 self.assertEqual(text, "hello world")
                 self.assertEqual(types[-1], "agent.run.completed")
 
+    def test_ws_turn_start_without_prior_subscribe_draft(self) -> None:
+        """draft 场景：不先 subscribe、不带 conversationId，turn.start 后端自动订阅，
+        仍能收到从 turn.started 起的完整事件（无早期事件竞态）。"""
+        app = _make_app()
+        with TestClient(app) as client:
+            with client.websocket_connect("/api/ws") as ws:
+                ws.send_json({
+                    "v": 1, "kind": "req", "method": "turn.start", "requestId": "t1",
+                    "payload": {"input": "hi", "turnId": "turn-1", "agentId": "codex"},
+                })
+                text = ""
+                types: list[str] = []
+                conversation_id = ""
+                got_result = False
+                completed = False
+                for _ in range(60):
+                    msg = ws.receive_json()
+                    if msg["kind"] == "result" and msg.get("requestId") == "t1":
+                        got_result = True
+                        conversation_id = msg["payload"]["conversationId"]
+                    elif msg["kind"] == "event":
+                        event = msg["payload"]
+                        types.append(event["type"])
+                        if event["type"] == "agent.text.delta":
+                            text += event["delta"]
+                        if event["type"] == "agent.run.completed":
+                            completed = True
+                    if got_result and completed:
+                        break
+
+                self.assertTrue(got_result)
+                self.assertTrue(conversation_id)
+                self.assertIn("conversation.turn.started", types)
+                self.assertEqual(text, "hello world")
+
 
 if __name__ == "__main__":
     unittest.main()

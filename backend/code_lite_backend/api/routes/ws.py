@@ -28,6 +28,43 @@ async def _send(ws: WebSocket, message: dict[str, Any]) -> None:
     await ws.send_json(message)
 
 
+def _ensure_channel_pump(
+    ws: WebSocket,
+    services: AppServices,
+    channel: str,
+    tasks: dict[str, asyncio.Task[None]],
+) -> bool:
+    """确保本连接已订阅某频道并在后台把事件泵给客户端。
+
+    幂等：已订阅则直接返回 False（未新建）。新建订阅返回 True。
+    订阅在返回前同步完成（bus.subscribe 无 await），供 turn.start 在启动 turn 前
+    先订阅，杜绝 draft 会话的早期事件竞态。
+    """
+    if channel in tasks and not tasks[channel].done():
+        return False
+    bus = services.event_bus
+    if bus is None:
+        return False
+    subscription = bus.subscribe(channel)  # 无 await
+
+    async def pump() -> None:
+        try:
+            async for event in subscription:
+                await _send(
+                    ws,
+                    _envelope("event", channel=channel, seq=event.get("sequence"), payload=event),
+                )
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        except Exception:
+            logger.exception("ws pump failed for channel=%s", channel)
+        finally:
+            subscription.close()
+
+    tasks[channel] = asyncio.create_task(pump())
+    return True
+
+
 async def _handle_subscribe(
     ws: WebSocket,
     services: AppServices,
@@ -50,12 +87,12 @@ async def _handle_subscribe(
         await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_channel"}))
         return
 
-    # 已订阅同频道则先撤销旧订阅
+    # 已订阅同频道则先撤销旧订阅，保证快照与增量对齐
     existing = tasks.pop(channel, None)
     if existing is not None:
         existing.cancel()
 
-    subscription = bus.subscribe(channel)  # 无 await
+    _ensure_channel_pump(ws, services, channel, tasks)  # 订阅同步建立
     snapshot: dict[str, Any] | None = None
     latest_sequence = 0
     if channel != GLOBAL_CHANNEL:
@@ -76,34 +113,26 @@ async def _handle_subscribe(
         ),
     )
 
-    async def pump() -> None:
-        try:
-            async for event in subscription:
-                await _send(
-                    ws,
-                    _envelope("event", channel=channel, seq=event.get("sequence"), payload=event),
-                )
-        except (WebSocketDisconnect, RuntimeError):
-            pass
-        except Exception:
-            logger.exception("ws pump failed for channel=%s", channel)
-        finally:
-            subscription.close()
-
-    tasks[channel] = asyncio.create_task(pump())
-
 
 async def _handle_turn_start(
     ws: WebSocket,
     services: AppServices,
     request_id: str | None,
     payload: dict[str, Any],
+    tasks: dict[str, asyncio.Task[None]],
 ) -> None:
-    """启动一个 turn。事件不经本 RPC 返回，而是通过已订阅的会话频道 event 回流。
+    """启动一个 turn。事件通过会话频道 event 回流，result 仅回带受理信息。
 
-    result 仅回带受理信息（真实 conversationId/turnId，支持 draft->real）。
-    调用方应先 subscribe 目标会话频道再发 turn.start，以免漏掉早期事件。
+    关键：在启动 turn 前先解析出 conversationId 并订阅该频道，杜绝 draft 会话
+    (无 conversationId) 的早期事件竞态——由后端保证订阅早于 turn 任务启动。
     """
+    # 预解析 conversationId（draft 场景后端生成），注入 payload 后再订阅，保证频道一致
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    if not conversation_id:
+        conversation_id = services.conversation_recorder.create_conversation_id()
+        payload = {**payload, "conversationId": conversation_id}
+    _ensure_channel_pump(ws, services, conversation_id, tasks)  # 订阅早于 turn 启动
+
     outcome = await prepare_and_start_turn(services, payload, subscribe_for_relay=False)
     if outcome.busy:
         await _send(
@@ -253,7 +282,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     task.cancel()
                 await _send(ws, _envelope("result", requestId=request_id, payload={"ok": True}))
             elif method == "turn.start":
-                await _handle_turn_start(ws, services, request_id, payload)
+                await _handle_turn_start(ws, services, request_id, payload, tasks)
             elif method == "turn.cancel":
                 await _handle_turn_cancel(ws, services, request_id, payload)
             elif method == "approval.decision":

@@ -1,6 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { AgentEvent, MessageAttachment, Session, SessionCapabilities, UserContentBlock } from "../types";
+import { LocalTransport } from "./localTransport";
+
+// 共享 WS 传输：本地桌面前端的事件源与命令通道（0709 阶段二）。
+let sharedTransport: LocalTransport | null = null;
+
+export function getLocalTransport(): LocalTransport {
+  if (!sharedTransport) {
+    sharedTransport = new LocalTransport();
+  }
+  return sharedTransport;
+}
 
 interface BackendStatus {
   base_url?: string;
@@ -154,64 +165,91 @@ export async function getConversationEvents(
   return response.json() as Promise<ConversationEventsResult>;
 }
 
+/**
+ * 通过 WS 发起一个 turn 并把本 turn 的事件驱动给 onEvent。
+ *
+ * 契约与旧 NDJSON 版本一致：为本 turn 的每个事件调用 onEvent，turn 到达
+ * 终止事件（run.completed/failed）时 resolve；signal.abort 时提前结束。
+ * 事件按 turnId 过滤——turnId 由前端生成且稳定，draft 会话也可靠。
+ * 后端在启动 turn 前已自动订阅该会话频道，故不会漏早期事件（0709 阶段二）。
+ */
 export async function streamAgentTurn(options: StartTurnOptions): Promise<void> {
-  const baseUrl = await ensureBackend();
-  const response = await fetch(`${baseUrl}/api/turns/stream`, {
-    body: JSON.stringify({
-      ...(options.conversationId ? { conversationId: options.conversationId } : {}),
-      ...(options.accessMode ? { accessMode: options.accessMode } : {}),
-      input: options.input,
-      ...(options.contentBlocks ? { contentBlocks: options.contentBlocks } : {}),
-      ...(options.modelId ? { modelId: options.modelId } : {}),
-      ...(options.modelLabel ? { modelLabel: options.modelLabel } : {}),
-      ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-      ...(options.selectedConfig ? { selectedConfig: options.selectedConfig } : {}),
-      turnId: options.turnId
-    }),
-    headers: {
-      "Content-Type": "application/json"
-    },
-    method: "POST",
-    signal: options.signal
-  });
+  const transport = getLocalTransport();
+  await transport.connect();
 
-  if (!response.ok) {
-    throw new Error(`Backend returned ${response.status}`);
-  }
+  const turnId = options.turnId;
 
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("Backend did not return a readable stream.");
-  }
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let unsubscribeEvents: (() => void) | null = null;
 
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-    let newline = buffer.indexOf("\n");
-    while (newline >= 0) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      newline = buffer.indexOf("\n");
-
-      if (!line) {
-        continue;
+    const cleanup = () => {
+      if (unsubscribeEvents) {
+        unsubscribeEvents();
+        unsubscribeEvents = null;
       }
+      if (options.signal) {
+        options.signal.removeEventListener("abort", onAbort);
+      }
+    };
 
-      options.onEvent(JSON.parse(line) as AgentEvent);
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve();
+    };
+
+    const fail = (error: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    function onAbort() {
+      // 中止：停止转发事件并 resolve；实际取消由 cancelTurn 走 turn.cancel RPC。
+      finish();
     }
-  }
 
-  const tail = buffer.trim();
-  if (tail) {
-    options.onEvent(JSON.parse(tail) as AgentEvent);
-  }
+    unsubscribeEvents = transport.onEvent((event) => {
+      if ((event as { turnId?: string }).turnId !== turnId) {
+        return;
+      }
+      options.onEvent(event);
+      if (event.type === "agent.run.completed" || event.type === "agent.run.failed") {
+        finish();
+      }
+    });
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        onAbort();
+        return;
+      }
+      options.signal.addEventListener("abort", onAbort);
+    }
+
+    transport
+      .request("turn.start", {
+        ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+        ...(options.accessMode ? { accessMode: options.accessMode } : {}),
+        input: options.input,
+        ...(options.contentBlocks ? { contentBlocks: options.contentBlocks } : {}),
+        ...(options.modelId ? { modelId: options.modelId } : {}),
+        ...(options.modelLabel ? { modelLabel: options.modelLabel } : {}),
+        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        ...(options.selectedConfig ? { selectedConfig: options.selectedConfig } : {}),
+        turnId
+      })
+      .catch((error: unknown) => {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      });
+  });
 }
 
 export async function sendApprovalDecision(
