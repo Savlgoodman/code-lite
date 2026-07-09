@@ -101,7 +101,7 @@ class WsEndpointTest(unittest.TestCase):
             ws.send_json({
                 "v": 1,
                 "kind": "req",
-                "method": "turn.start",
+                "method": "does.not.exist",
                 "requestId": "r9",
                 "payload": {},
             })

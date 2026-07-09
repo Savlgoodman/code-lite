@@ -46,15 +46,10 @@ async def list_conversations(services: AppServices = Depends(get_services)) -> d
     return {"sessions": services.conversation_store.list_sessions()}
 
 
-@router.post("/conversations")
-async def create_conversation(
-    payload: dict[str, Any],
-    services: AppServices = Depends(get_services),
-) -> JSONResponse:
-    """创建新会话并绑定 agent。
+def create_conversation_record(services: AppServices, payload: dict[str, Any]) -> dict[str, Any]:
+    """创建新会话并绑定 agent，返回 {session, messages}。
 
-    body: { "agentId": "codex", "title": "...", "preview": "..." }
-    agentId 必填，后续该会话的所有 turn 都使用绑定的 agent。
+    供 HTTP POST /conversations 与 WS conversation.create 复用。
     """
     agent_id = str(payload.get("agentId") or "").strip()
     if not agent_id:
@@ -82,10 +77,23 @@ async def create_conversation(
         },
     )
 
-    return JSONResponse({
+    return {
         "session": session_with_agent,
         "messages": [],
-    })
+    }
+
+
+@router.post("/conversations")
+async def create_conversation(
+    payload: dict[str, Any],
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    """创建新会话并绑定 agent。
+
+    body: { "agentId": "codex", "title": "...", "preview": "..." }
+    agentId 必填，后续该会话的所有 turn 都使用绑定的 agent。
+    """
+    return JSONResponse(create_conversation_record(services, payload))
 
 
 @router.get("/conversations/{conversation_id}")

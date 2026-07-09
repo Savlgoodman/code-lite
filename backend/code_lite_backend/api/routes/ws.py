@@ -6,6 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from code_lite_backend.api.routes.conversations import create_conversation_record
+from code_lite_backend.api.routes.turns import prepare_and_start_turn
 from code_lite_backend.services.event_bus import GLOBAL_CHANNEL
 from code_lite_backend.services.runtime import AppServices
 
@@ -91,6 +93,135 @@ async def _handle_subscribe(
     tasks[channel] = asyncio.create_task(pump())
 
 
+async def _handle_turn_start(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """启动一个 turn。事件不经本 RPC 返回，而是通过已订阅的会话频道 event 回流。
+
+    result 仅回带受理信息（真实 conversationId/turnId，支持 draft->real）。
+    调用方应先 subscribe 目标会话频道再发 turn.start，以免漏掉早期事件。
+    """
+    outcome = await prepare_and_start_turn(services, payload, subscribe_for_relay=False)
+    if outcome.busy:
+        await _send(
+            ws,
+            _envelope("error", requestId=request_id, payload={"code": "busy", "conversationId": outcome.conversation_id}),
+        )
+        return
+    if outcome.error is not None:
+        await _send(
+            ws,
+            _envelope(
+                "error",
+                requestId=request_id,
+                payload={"code": "turn_start_failed", "error": outcome.error, "conversationId": outcome.conversation_id},
+            ),
+        )
+        return
+    await _send(
+        ws,
+        _envelope(
+            "result",
+            requestId=request_id,
+            payload={"conversationId": outcome.conversation_id, "turnId": outcome.turn_id},
+        ),
+    )
+
+
+async def _handle_turn_cancel(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    turn_id = str(payload.get("turnId") or "").strip()
+    if turn_id:
+        await services.agent_adapter.cancel_turn(turn_id)
+        await services.approvals.reject_all()
+        await services.inputs.cancel_all()
+    await _send(ws, _envelope("result", requestId=request_id, payload={"ok": True}))
+
+
+async def _handle_approval_decision(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    approval_id = str(payload.get("approvalId") or "").strip()
+    decision = str(payload.get("decision") or "").strip()
+    resolved = await services.approvals.resolve(approval_id, decision == "allow")
+    await _send(ws, _envelope("result", requestId=request_id, payload={"ok": resolved is not None}))
+
+
+async def _handle_input_response(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    input_request_id = str(payload.get("inputRequestId") or "").strip()
+    action = str(payload.get("action") or "").lower()
+    if action not in {"accept", "decline", "cancel"}:
+        action = "cancel"
+    content = payload.get("content")
+    pending = await services.inputs.resolve(
+        input_request_id,
+        action=action,  # type: ignore[arg-type]
+        content=content if isinstance(content, dict) else None,
+    )
+    if pending is not None:
+        services.conversation_recorder.update_session(
+            pending.conversation_id,
+            {"status": "running" if action in {"accept", "decline"} else "error"},
+        )
+    await _send(ws, _envelope("result", requestId=request_id, payload={"ok": pending is not None}))
+
+
+async def _handle_conversation_list(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    sessions = services.conversation_store.list_sessions()
+    await _send(ws, _envelope("result", requestId=request_id, payload={"sessions": sessions}))
+
+
+async def _handle_conversation_get(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    # 活动态优先（含运行中 turn 的累积文本），回退落盘
+    snapshot = services.conversation_recorder.snapshot(conversation_id)
+    if snapshot is None:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_found"}))
+        return
+    await _send(ws, _envelope("result", requestId=request_id, payload=snapshot))
+
+
+async def _handle_conversation_create(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    result = create_conversation_record(services, payload)
+    await _send(ws, _envelope("result", requestId=request_id, payload=result))
+    # 会话列表变更广播到全局频道，供其他端实时更新列表
+    if services.event_bus is not None:
+        services.event_bus.publish(
+            GLOBAL_CHANNEL,
+            {"type": "conversation.created", "session": result["session"]},
+        )
+
+
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     """本地/远程订阅入口（0709 阶段一）。
@@ -121,8 +252,21 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 if task is not None:
                     task.cancel()
                 await _send(ws, _envelope("result", requestId=request_id, payload={"ok": True}))
+            elif method == "turn.start":
+                await _handle_turn_start(ws, services, request_id, payload)
+            elif method == "turn.cancel":
+                await _handle_turn_cancel(ws, services, request_id, payload)
+            elif method == "approval.decision":
+                await _handle_approval_decision(ws, services, request_id, payload)
+            elif method == "input.response":
+                await _handle_input_response(ws, services, request_id, payload)
+            elif method == "conversation.list":
+                await _handle_conversation_list(ws, services, request_id, payload)
+            elif method == "conversation.get":
+                await _handle_conversation_get(ws, services, request_id, payload)
+            elif method == "conversation.create":
+                await _handle_conversation_create(ws, services, request_id, payload)
             else:
-                # 其余 RPC 方法在阶段二接入
                 await _send(
                     ws,
                     _envelope("error", requestId=request_id, payload={"code": "method_not_implemented", "method": method}),

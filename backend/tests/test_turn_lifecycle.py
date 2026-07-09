@@ -157,5 +157,52 @@ class TurnLifecycleTest(unittest.TestCase):
         asyncio.run(scenario())
 
 
+class WsTurnRpcTest(unittest.TestCase):
+    def test_ws_turn_start_flows_events_over_channel(self) -> None:
+        """WS turn.start：先订阅会话频道，turn.start 后事件经 event 回流。"""
+        app = _make_app()
+        with TestClient(app) as client:
+            conversation_id = _create_conversation(client)
+            with client.websocket_connect("/api/ws") as ws:
+                # 先订阅该会话频道
+                ws.send_json({
+                    "v": 1, "kind": "req", "method": "subscribe",
+                    "requestId": "s1", "payload": {"channel": conversation_id},
+                })
+                snapshot = ws.receive_json()
+                self.assertEqual(snapshot["kind"], "snapshot")
+
+                # 发起 turn
+                ws.send_json({
+                    "v": 1, "kind": "req", "method": "turn.start", "requestId": "t1",
+                    "payload": {"conversationId": conversation_id, "input": "hi", "turnId": "turn-1"},
+                })
+
+                # 收集事件直到 result 与 run.completed 都到达
+                text = ""
+                types: list[str] = []
+                got_result = False
+                completed = False
+                for _ in range(50):
+                    msg = ws.receive_json()
+                    if msg["kind"] == "result" and msg.get("requestId") == "t1":
+                        got_result = True
+                        self.assertEqual(msg["payload"]["conversationId"], conversation_id)
+                    elif msg["kind"] == "event":
+                        event = msg["payload"]
+                        types.append(event["type"])
+                        if event["type"] == "agent.text.delta":
+                            text += event["delta"]
+                        if event["type"] == "agent.run.completed":
+                            completed = True
+                    if got_result and completed:
+                        break
+
+                self.assertTrue(got_result)
+                self.assertIn("conversation.turn.started", types)
+                self.assertEqual(text, "hello world")
+                self.assertEqual(types[-1], "agent.run.completed")
+
+
 if __name__ == "__main__":
     unittest.main()
