@@ -567,8 +567,19 @@ async def stream_turn(
     async def event_stream():
         assistant_message_id = ""
         event_store = services.event_store
+        event_bus = services.event_bus
         runtime_id = agent_id  # runtime identifier for events
         native_session_id: str | None = None
+
+        def publish(event: dict[str, object]) -> None:
+            # 会话事件总线（0709 阶段一）：与 NDJSON 出口并行 fan-out，
+            # 让本地/远程订阅者收到与流式客户端相同的事件。发布失败不影响主流程。
+            if event_bus is None:
+                return
+            try:
+                event_bus.publish(conversation_id, event)
+            except Exception:
+                logger.exception("event_stream: bus publish failed for turn %s", turn_id)
 
         has_user_input = bool(prompt or user_attachments)
         if not has_user_input:
@@ -599,6 +610,7 @@ async def stream_turn(
                     conversation_id, started_event, runtime=runtime_id,
                 )
             logger.info("event_stream: yielding conversation.turn.started")
+            publish(started_event)
             yield encode_ndjson_event(started_event)
 
         completed = False
@@ -652,6 +664,7 @@ async def stream_turn(
                     conversation_id=conversation_id,
                     event=event,
                 )
+                publish(ui_event)
                 yield encode_ndjson_event(ui_event)
                 if event.get("type") in {"agent.run.completed", "agent.run.failed"}:
                     completed = True
@@ -676,6 +689,7 @@ async def stream_turn(
                         runtime=runtime_id,
                         native_session_id=native_session_id,
                     )
+                publish(cancel_event)
                 completed = True
             raise
         except Exception:
