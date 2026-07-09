@@ -22,6 +22,9 @@ from code_lite_backend.services.runtime import AppServices
 from code_lite_backend.storage.attachments import AttachmentStore
 from code_lite_backend.storage.conversations import ConversationStore
 from code_lite_backend.storage.diff_artifacts import DiffArtifactStore
+from code_lite_backend.services.event_bus import SessionEventBus
+from code_lite_backend.services.turn_registry import ActiveTurnRegistry
+from code_lite_backend.services.remote_bridge import RemoteBridge
 from code_lite_backend.storage.event_store import ConversationEventStore
 from code_lite_backend.version import BACKEND_VERSION
 
@@ -35,6 +38,8 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     conversation_store = ConversationStore(runtime_config.record_dir)
     diff_artifact_store = DiffArtifactStore(runtime_config.record_dir)
     event_store = ConversationEventStore(runtime_config.record_dir)
+    event_bus = SessionEventBus()
+    turn_registry = ActiveTurnRegistry()
     billing_price_store = BillingPriceStore(runtime_config.cache_dir)
     billing_usage_recorder = BillingUsageRecorder(runtime_config.billing_dir, billing_price_store)
     model_config_store = ModelConfigStore(runtime_config)
@@ -66,6 +71,12 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
         ),
         runtime_manager=runtime_manager,
         event_store=event_store,
+        event_bus=event_bus,
+        turn_registry=turn_registry,
+    )
+    services.remote_bridge = RemoteBridge(
+        config_path=runtime_config.data_dir / "remote_bridge.json",
+        services=services,
     )
     app = FastAPI(title="Code Lite Backend", version=BACKEND_VERSION)
     app.state.services = services
@@ -73,9 +84,13 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     @app.on_event("startup")
     async def _startup() -> None:
         await billing_usage_recorder.start()
+        # 启动远程桥接（如果已启用）
+        await services.remote_bridge.start()
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
+        logger.info("Shutting down remote bridge...")
+        await services.remote_bridge.stop()
         logger.info("Shutting down billing usage recorder...")
         await billing_usage_recorder.stop()
         logger.info("Shutting down ACP runtime manager...")

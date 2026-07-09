@@ -6,6 +6,7 @@ import { AgentRuntimeSettings } from "./AgentRuntimeSettings";
 import { ArchivedSessionsSettings } from "./ArchivedSessionsSettings";
 import { LogsSettings } from "./LogsSettings";
 import { ModelProvidersSettings } from "./ModelProvidersSettings";
+import { RemoteControlSettings } from "./RemoteControlSettings";
 import { SettingsLayout } from "./SettingsLayout";
 import type { SettingsPageProps, SettingsSection } from "./types";
 import "./SettingsPage.css";
@@ -31,6 +32,7 @@ export function SettingsPage({
           onRestoreArchivedSession={onRestoreArchivedSession}
         />
       ) : null}
+      {activeSection === "remote" ? <RemoteControlSettings /> : null}
       {activeSection === "about" ? <AboutSettings /> : null}
     </SettingsLayout>
   );

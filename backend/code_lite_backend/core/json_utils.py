@@ -21,7 +21,3 @@ def to_jsonable(value: Any) -> Any:
     if hasattr(value, "__dict__"):
         return to_jsonable(vars(value))
     return repr(value)
-
-
-def encode_ndjson_event(event: dict[str, Any]) -> bytes:
-    return (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")

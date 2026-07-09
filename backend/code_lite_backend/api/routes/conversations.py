@@ -46,15 +46,10 @@ async def list_conversations(services: AppServices = Depends(get_services)) -> d
     return {"sessions": services.conversation_store.list_sessions()}
 
 
-@router.post("/conversations")
-async def create_conversation(
-    payload: dict[str, Any],
-    services: AppServices = Depends(get_services),
-) -> JSONResponse:
-    """创建新会话并绑定 agent。
+def create_conversation_record(services: AppServices, payload: dict[str, Any]) -> dict[str, Any]:
+    """创建新会话并绑定 agent，返回 {session, messages}。
 
-    body: { "agentId": "codex", "title": "...", "preview": "..." }
-    agentId 必填，后续该会话的所有 turn 都使用绑定的 agent。
+    供 HTTP POST /conversations 与 WS conversation.create 复用。
     """
     agent_id = str(payload.get("agentId") or "").strip()
     if not agent_id:
@@ -82,10 +77,30 @@ async def create_conversation(
         },
     )
 
-    return JSONResponse({
+    return {
         "session": session_with_agent,
         "messages": [],
-    })
+    }
+
+
+@router.post("/conversations")
+async def create_conversation(
+    payload: dict[str, Any],
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    """创建新会话并绑定 agent。
+
+    body: { "agentId": "codex", "title": "...", "preview": "..." }
+    agentId 必填，后续该会话的所有 turn 都使用绑定的 agent。
+    """
+    result = create_conversation_record(services, payload)
+    # 广播会话创建事件到全局频道（0709 阶段二）：供其他前端订阅者实时更新列表。
+    if services.event_bus is not None:
+        services.event_bus.publish(
+            "*",
+            {"type": "conversation.created", "session": result["session"]},
+        )
+    return JSONResponse(result)
 
 
 @router.get("/conversations/{conversation_id}")
@@ -153,6 +168,12 @@ async def update_conversation_archive_state(
             delete_binding=False,
             close_empty_connection=True,
         )
+    # 广播会话归档事件到全局频道（0709 阶段二）
+    if services.event_bus is not None and bool(payload.get("archived")):
+        services.event_bus.publish(
+            "*",
+            {"type": "conversation.archived", "session": session},
+        )
     return JSONResponse({"session": session})
 
 
@@ -187,6 +208,16 @@ async def update_conversation_config(
         updates["contextUsage"] = context_usage
 
     updated = services.conversation_store.save_session(conversation_id, updates)
+    # 广播配置变更事件到会话频道（0709 设计 5.3）：其他订阅者选择器实时跟随
+    if services.event_bus is not None and isinstance(config, dict):
+        services.event_bus.publish(
+            conversation_id,
+            {
+                "type": "conversation.config.updated",
+                "conversationId": conversation_id,
+                "config": config,
+            },
+        )
     return JSONResponse({"session": updated})
 
 
@@ -209,4 +240,10 @@ async def delete_conversation(
             close_empty_connection=True,
         )
     services.attachment_store.delete_conversation(conversation_id)
+    # 广播会话删除事件到全局频道（0709 阶段二）
+    if services.event_bus is not None:
+        services.event_bus.publish(
+            "*",
+            {"type": "conversation.deleted", "session": {"id": conversation_id}},
+        )
     return JSONResponse({"deleted": True})

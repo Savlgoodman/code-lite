@@ -1,9 +1,5 @@
-import { ensureBackend } from "./agentClient";
+import { ensureBackend, getLocalTransport } from "./agentClient";
 import type { ChatMessage, FileDiffArtifact, Session } from "../types";
-
-interface ListConversationsResponse {
-  sessions: Session[];
-}
 
 interface LoadConversationResponse {
   session: Session;
@@ -27,17 +23,25 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** 列出会话（0709 阶段二：走 WS RPC，观察者也能收到后端活动态）。 */
 export async function listConversations(): Promise<Session[]> {
-  const response = await requestJson<ListConversationsResponse>("/api/conversations");
-  return response.sessions;
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<{ sessions: Session[] }>("conversation.list", {});
+  return result.sessions;
 }
 
+/** 读取单个会话（0709 阶段二：走 WS RPC，优先返回活动态快照）。 */
 export async function loadConversation(sessionId: string): Promise<{
   messages: ChatMessage[];
   session: Session;
 }> {
-  const response = await requestJson<LoadConversationResponse>(`/api/conversations/${sessionId}`);
-  return response;
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<LoadConversationResponse>("conversation.get", {
+    conversationId: sessionId,
+  });
+  return { session: result.session, messages: result.messages };
 }
 
 export async function deleteConversation(sessionId: string): Promise<void> {

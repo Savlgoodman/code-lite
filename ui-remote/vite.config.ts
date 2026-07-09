@@ -12,12 +12,12 @@ export default defineConfig({
     alias: {
       "@code-lite/protocol": protocolSrc,
       "@code-lite/transport": transportSrc,
-      "@code-lite/chat-core": chatCoreSrc
-    }
+      "@code-lite/chat-core": chatCoreSrc,
+    },
   },
   server: {
-    port: 5173,
-    strictPort: false
+    port: 5174,
+    strictPort: false,
   },
-  clearScreen: false
+  clearScreen: false,
 });

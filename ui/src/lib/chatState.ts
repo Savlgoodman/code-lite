@@ -91,16 +91,5 @@ export function createAssistantMessage(id: string): ChatMessage {
   };
 }
 
-export function updateMessage(
-  messages: Record<string, ChatMessage[]>,
-  sessionId: string,
-  messageId: string,
-  updater: (message: ChatMessage) => ChatMessage,
-) {
-  return {
-    ...messages,
-    [sessionId]: (messages[sessionId] ?? []).map((message) =>
-      message.id === messageId ? updater(message) : message
-    )
-  };
-}
+// updateMessage 已迁移到 packages/chat-core，此处 re-export 保持兼容。
+export { updateMessage } from "@code-lite/chat-core";

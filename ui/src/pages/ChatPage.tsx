@@ -3,20 +3,29 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentSelectionPanel } from "../features/chat/AgentSelectionPanel";
 import { ChatWorkspace } from "../features/chat/ChatWorkspace";
 import type { ChatConfigValue, SessionConfig } from "../features/chat/chatTypes";
-import { hasVisiblePlan, latestMergedPlanFromMessages, mergePlanSnapshot } from "../features/chat/planSnapshots";
+import {
+  appendRuntimeEvent,
+  hasVisiblePlan,
+  isRecord,
+  latestMergedPlanFromMessages,
+  mergeMessagePlan,
+  mergePlanSnapshot,
+  updateMessage,
+  upsertToolCall
+} from "@code-lite/chat-core";
 import {
   createEmptySession,
   createId,
   normalizeStoredState,
   type PendingMessageDelta,
-  type StoredState,
-  updateMessage
+  type StoredState
 } from "../lib/chatState";
 import { formatJson } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
-import { cancelTurn, createConversation, initializeSession, sendApprovalDecision, sendInputResponse, streamAgentTurn, uploadTurnAttachments } from "../services/agentClient";
+import { cancelTurn, createConversation, getLocalTransport, initializeSession, notifyTurnEvent, sendApprovalDecision, sendInputResponse, streamAgentTurn, uploadTurnAttachments } from "../services/agentClient";
+import type { SnapshotListener } from "../services/localTransport";
 import {
   deleteConversation,
   listConversations,
@@ -207,10 +216,6 @@ function isDraftSessionId(sessionId: string) {
   return sessionId === DRAFT_SESSION_ID;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
 function isConfigValue(value: unknown): value is ChatConfigValue {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
@@ -244,111 +249,6 @@ function fastModeFromModelInfo(modelInfo: Record<string, unknown>): "off" | "on"
     return "off";
   }
   return null;
-}
-
-function mergeRecords(previous: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
-  return Object.entries(incoming).reduce<Record<string, unknown>>((merged, [key, value]) => {
-    const current = merged[key];
-    if (isRecord(current) && isRecord(value)) {
-      merged[key] = mergeRecords(current, value);
-    } else {
-      merged[key] = value;
-    }
-    return merged;
-  }, { ...previous });
-}
-
-function mergeFileDiffs(previous: unknown, incoming: unknown): unknown {
-  if (!Array.isArray(previous) && !Array.isArray(incoming)) {
-    return incoming ?? previous;
-  }
-
-  const merged: Record<string, unknown>[] = [];
-  const seen = new Map<string, number>();
-  for (const source of [previous, incoming]) {
-    if (!Array.isArray(source)) {
-      continue;
-    }
-    for (const item of source) {
-      if (!isRecord(item) || typeof item.diffId !== "string") {
-        continue;
-      }
-      const index = seen.get(item.diffId);
-      if (index == null) {
-        seen.set(item.diffId, merged.length);
-        merged.push({ ...item });
-      } else {
-        merged[index] = { ...merged[index], ...item };
-      }
-    }
-  }
-  return merged;
-}
-
-function mergeToolMetadata(
-  previous: ToolCallItem["metadata"],
-  incoming: ToolCallItem["metadata"],
-): ToolCallItem["metadata"] {
-  if (isRecord(previous) && isRecord(incoming)) {
-    const merged = mergeRecords(previous, incoming);
-    merged.fileDiffs = mergeFileDiffs(previous.fileDiffs, incoming.fileDiffs);
-    return merged;
-  }
-  return incoming ?? previous;
-}
-
-function mergeToolName(previous: string | undefined, incoming: string | undefined) {
-  if (previous && (!incoming || incoming === "tool")) {
-    return previous;
-  }
-  return incoming ?? previous ?? "";
-}
-
-function upsertToolCall(
-  toolCalls: ToolCallItem[],
-  item: Partial<ToolCallItem> & Pick<ToolCallItem, "id" | "name">,
-) {
-  const now = Date.now();
-  const index = toolCalls.findIndex((tool) => tool.id === item.id);
-  if (index < 0) {
-    return [
-      ...toolCalls,
-      {
-        argumentsText: "{}",
-        createdAt: now,
-        status: "running",
-        updatedAt: now,
-        ...item
-      } as ToolCallItem
-    ];
-  }
-
-  return toolCalls.map((tool, currentIndex) =>
-    currentIndex === index
-      ? {
-          ...tool,
-          ...item,
-          anchorOffset: item.anchorOffset ?? tool.anchorOffset,
-          metadata: mergeToolMetadata(tool.metadata, item.metadata),
-          name: mergeToolName(tool.name, item.name),
-          updatedAt: now
-        }
-      : tool
-  );
-}
-
-function appendRuntimeEvent(events: RuntimeEventRecord[] | undefined, event: AgentEvent): RuntimeEventRecord[] {
-  const base: RuntimeEventRecord = {
-    type: event.type,
-    createdAt: Date.now(),
-  };
-  const rawEvent = event as Record<string, unknown>;
-  for (const key of ["direction", "method", "modeId", "raw", "rpcKind", "updateKind"] as const) {
-    if (rawEvent[key] != null) {
-      (base as unknown as Record<string, unknown>)[key] = rawEvent[key];
-    }
-  }
-  return [...(events ?? []), base].slice(-200);
 }
 
 function mergeRuntimeCommands(current: SessionCapabilities | undefined, commands: SlashCommand[]): SessionCapabilities | undefined {
@@ -434,20 +334,6 @@ function mergeRuntimeConfigOptions(
     modelFastSupport,
   };
   return prepareRuntimeCapabilities(merged, config);
-}
-
-function mergeMessagePlan(
-  message: ChatMessage,
-  sessionMessages: ChatMessage[] | undefined,
-  nextPlan: PlanSnapshot | undefined | null,
-): PlanSnapshot | null | undefined {
-  if (nextPlan?.source === "acp.plan") {
-    return mergePlanSnapshot(null, nextPlan);
-  }
-  if (!hasVisiblePlan(nextPlan)) {
-    return message.plan;
-  }
-  return mergePlanSnapshot(message.plan ?? latestMergedPlanFromMessages(sessionMessages, message.id), nextPlan);
 }
 
 function mergeLoadedMessages(loadedMessages: ChatMessage[], cachedMessages: ChatMessage[] | undefined) {
@@ -585,6 +471,11 @@ export function ChatPage() {
     draftImagesRef.current = draftImages;
   }, [draftImages]);
 
+  // ─── 同步 state 到 ref（供全局 WS 事件监听器使用）───
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { activeSessionIdRef.current = activeSessionId; }, [activeSessionId]);
+
   // ─── 向后兼容：draft session 时仍用全局 activeAgent ───
   // draft session 的 capabilities 通过 __probe__ 获取，存储到 draft id 下
   // 一旦 draft → real id，会把 draft 的 caps/config 迁移到 real id
@@ -596,6 +487,17 @@ export function ChatPage() {
   // per-session stream state
   const activeAssistantMessageIdBySessionRef = useRef<Record<string, string>>({});
   const activeStreamSessionIdByTurnRef = useRef<Record<string, string>>({});
+  // 全局 WS 事件路由需要最新的 state 与 handler（0709 阶段二：附着即快照 + 增量事件）
+  const handleAgentEventRef = useRef<(sessionId: string, event: AgentEvent) => void>(() => undefined);
+  const sessionsRef = useRef(sessions);
+  const messagesRef = useRef(messages);
+  const activeSessionIdRef = useRef(activeSessionId);
+  // 当前已订阅的会话频道（切换会话时先退订旧的）
+  const subscribedChannelRef = useRef<string | null>(null);
+  // 发送方：本窗口正在发起 turn 的 draft 会话 id（供 conversation.turn.started 路由到 draft→real 迁移）
+  const pendingDraftIdForTurnRef = useRef<string | null>(null);
+  // 全局 WS 监听器是否已就绪（异步 setup 完成后标记；会话频道订阅需等待）
+  const globalListenerReadyRef = useRef<Promise<void> | null>(null);
   // 使用 ref 存储最新的 config，确保 sendMessage 读取到最新值（避免闭包捕获旧值）
   const configBySessionRef = useRef<Record<string, SessionConfig>>({});
   const draftImagesRef = useRef<DraftImage[]>([]);
@@ -719,6 +621,181 @@ export function ChatPage() {
       cancelled = true;
     };
   }, []);
+
+  // ─── 全局 WS 事件监听（0709 阶段二）───
+  // 订阅全局频道 "*"，接收 conversation.created / conversation.archived / conversation.deleted，
+  // 实时更新本地会话列表；同时作为所有会话频道路由的中枢。
+  useEffect(() => {
+    const transport = getLocalTransport();
+    let globalUnsub: (() => void) | null = null;
+    let cancelled = false;
+    // 让会话频道订阅等待全局监听器就绪
+    let resolveReady: (() => void) | null = null;
+    globalListenerReadyRef.current = new Promise<void>((resolve) => { resolveReady = resolve; });
+
+    async function setup() {
+      await transport.connect();
+      if (cancelled) return;
+      // 全局事件分发：路由到 handleAgentEvent 并通知 turn resolvers
+      const unsubEvent = transport.onEvent((event) => {
+        // turn resolver（供 streamAgentTurn 的 Promise 收尾）
+        notifyTurnEvent(event);
+
+        // 会话列表级事件走全局频道（channel="*"）。
+        // conversation.created/archived/deleted 不在 AgentEvent union 里（后端通过事件总线发布），
+        // 这里用 string 比较做路由判断，再按类型缩窄。
+        const eventType = (event as unknown as { type: string }).type;
+        if (eventType === "conversation.created" || eventType === "conversation.archived" || eventType === "conversation.deleted") {
+          const session = (event as unknown as { session?: Session }).session;
+          if (!session) return;
+          setSessions((current) => {
+            if (eventType === "conversation.created") {
+              if (current.some((s) => s.id === session.id)) {
+                return current;
+              }
+              return [session, ...current];
+            }
+            if (eventType === "conversation.deleted") {
+              return current.filter((s) => s.id !== session.id);
+            }
+            if (eventType === "conversation.archived") {
+              return current.map((s) => s.id === session.id ? { ...s, archived: true } : s);
+            }
+            return current;
+          });
+          if (eventType === "conversation.archived") {
+            setArchivedSessionIds((current) => {
+              const next = new Set(current);
+              next.add(session.id);
+              return next;
+            });
+          }
+          return;
+        }
+        // 会话级事件：路由到 handleAgentEvent（观察者与发起方共用 reducer）。
+        const channel = (event as { conversationId?: string }).conversationId;
+        const eventType2 = (event as unknown as { type: string }).type;
+        // turn.lock/turn.unlock 是互锁控制事件（0709 设计 6.1），不走 handleAgentEvent
+        if (eventType2 === "turn.lock" || eventType2 === "turn.unlock") {
+          if (!channel) return;
+          setSessionRunning(channel, eventType2 === "turn.lock");
+          return;
+        }
+        // 配置同步（0709 设计 5.3）：另一端改模型/模式后选择器跟随
+        if (eventType2 === "conversation.config.updated") {
+          if (!channel) return;
+          const configPayload = (event as unknown as { config?: Partial<SessionConfig> }).config;
+          if (configPayload) {
+            setConfigBySession((prev) => {
+              const existing = prev[channel];
+              const next: SessionConfig = {
+                modelFamily: configPayload.modelFamily ?? existing?.modelFamily ?? "",
+                accessMode: configPayload.accessMode ?? existing?.accessMode ?? "",
+                reasoningEffort: configPayload.reasoningEffort ?? existing?.reasoningEffort ?? "medium",
+                selectedConfig: configPayload.selectedConfig ?? existing?.selectedConfig ?? {},
+              };
+              const result = { ...prev, [channel]: next };
+              configBySessionRef.current = result;
+              return result;
+            });
+          }
+          return;
+        }
+        if (channel && channel !== "*") {
+          handleAgentEventRef.current(channel, event);
+        }
+      });
+
+      // 快照监听：切换会话时 subscribe 触发 snapshot，回填消息与会话状态
+      const unsubSnapshot: SnapshotListener = (channel, payload) => {
+        if (!payload.snapshot) return;
+        const session = payload.snapshot.session as Session | null;
+        const msgs = payload.snapshot.messages as ChatMessage[] | undefined;
+        if (session) {
+          // 合并/更新会话：保留已有的 archived/本地字段
+          setSessions((current) => {
+            const existing = current.find((s) => s.id === session.id);
+            if (existing) {
+              return current.map((s) => s.id === session.id ? { ...s, ...session } : s);
+            }
+            return [session, ...current];
+          });
+          // 从快照恢复时，若会话正在运行，标记 running（供观察者）
+          if (session.status === "running") {
+            setSessionRunning(session.id, true);
+          }
+        }
+        if (msgs) {
+          setMessages((current) => ({ ...current, [channel]: msgs }));
+          // 找出最新 streaming assistant 的 id 供后续事件路由
+          for (let i = msgs.length - 1; i >= 0; i -= 1) {
+            if (msgs[i].role === "assistant" && msgs[i].streaming) {
+              activeAssistantMessageIdBySessionRef.current[channel] = msgs[i].id;
+              break;
+            }
+          }
+        }
+      };
+      const unsubSnapshotListener = transport.onSnapshot(unsubSnapshot);
+
+      // 订阅全局频道
+      void transport.subscribe("*");
+      globalUnsub = () => {
+        unsubEvent();
+        unsubSnapshotListener();
+      };
+      // 标记就绪，允许会话频道订阅开始
+      if (resolveReady) resolveReady();
+    }
+
+    void setup();
+    return () => {
+      cancelled = true;
+      if (globalUnsub) globalUnsub();
+      transport.unsubscribe("*");
+    };
+    // setSessionRunning 是稳定引用（内部 useState setter），handleAgentEventRef 是 ref
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── 会话频道订阅（0709 阶段二）───
+  // 每次切换到真实会话（非 draft）时，订阅其频道：后端先发 snapshot（走 onSnapshot），
+  // 再发增量事件（走 onEvent）。切换到其他会话或离开时退订。
+  useEffect(() => {
+    if (!activeSessionId || isDraftSessionId(activeSessionId) || activeView !== "chat") {
+      return;
+    }
+    const myChannel = activeSessionId;
+    const transport = getLocalTransport();
+    let cancelled = false;
+
+    async function subscribe() {
+      // 等待全局监听器就绪（否则 snapshot 到达时还没有 listener 接收）
+      if (globalListenerReadyRef.current) {
+        await globalListenerReadyRef.current;
+      }
+      if (cancelled) return;
+      // 退订前一个频道（仅在 ref 仍指向前一个频道时；快速切换时可能已被后续 effect 的 cleanup 清理）
+      const prev = subscribedChannelRef.current;
+      if (prev && prev !== myChannel) {
+        transport.unsubscribe(prev);
+      }
+      subscribedChannelRef.current = myChannel;
+      void transport.subscribe(myChannel);
+    }
+
+    void subscribe();
+    return () => {
+      cancelled = true;
+      if (subscribedChannelRef.current === myChannel) {
+        subscribedChannelRef.current = null;
+      }
+      transport.unsubscribe(myChannel);
+    };
+  }, [activeSessionId, activeView]);
+
+  // ─── handleAgentEventRef：让全局 WS 监听器始终调用最新的 handleAgentEvent ───
+  // handleAgentEvent 定义在后面（依赖众多 state），这里用 useLayoutEffect 同步。
 
   useEffect(() => {
     // draft session 也通过 __probe__ 探测 capabilities
@@ -1287,22 +1364,26 @@ export function ChatPage() {
   function handleAgentEvent(sessionId: string, event: AgentEvent) {
     if (event.type === "conversation.turn.started") {
       const nextSessionId = event.conversationId;
+      // 发起方（draft 会话）场景：本窗口发起 turn 时 draft→real 转换，
+      // sessionId 可能是 draft id；迁移 caps/config。
+      // 观察方（直接订阅 real channel）场景：sessionId === nextSessionId，无需迁移。
+      const draftSessionId = isDraftSessionId(sessionId) ? sessionId : pendingDraftIdForTurnRef.current;
       activeAssistantMessageIdBySessionRef.current[nextSessionId] = event.assistantMessage.id;
       activeStreamSessionIdByTurnRef.current[nextSessionId] = nextSessionId;
 
       // draft → real id 转换时，迁移 capabilities 和 config
-      if (nextSessionId !== sessionId && isDraftSessionId(sessionId)) {
-        const draftCaps = capabilitiesBySession[sessionId];
+      if (draftSessionId && nextSessionId !== draftSessionId && isDraftSessionId(draftSessionId)) {
+        const draftCaps = capabilitiesBySession[draftSessionId];
         if (draftCaps) {
           setCapabilitiesBySession((prev) => {
             // 如果目标 session 已有 capabilities，不覆盖
             if (prev[nextSessionId]) {
               return prev;
             }
-            return { ...prev, [nextSessionId]: prepareRuntimeCapabilities(draftCaps, configBySessionRef.current[sessionId]) };
+            return { ...prev, [nextSessionId]: prepareRuntimeCapabilities(draftCaps, configBySessionRef.current[draftSessionId]) };
           });
         }
-        const draftCfg = configBySession[sessionId];
+        const draftCfg = configBySession[draftSessionId];
         if (draftCfg) {
           setConfigBySession((prev) => {
             // 如果目标 session 已有 config，不覆盖（保留用户的选择）
@@ -1315,25 +1396,56 @@ export function ChatPage() {
             return result;
           });
         }
+        // 清除 pending draft 映射（已消费）
+        pendingDraftIdForTurnRef.current = null;
       }
 
-      if (nextSessionId !== sessionId) {
-        setSessionRunning(sessionId, false);
+      // 区分发起方与观察方：
+      // - 发起方：sessionId 是 draft（draftSessionId 已设置）或等于 nextSessionId 且本窗口有活动 turn。
+      // - 观察方：sessionId 是不相关的真实会话 id。
+      //   观察方只更新 running 与 messages，不切换 activeSessionId、不清除其他会话的 running 态。
+      const hasActiveTurnForSession = Boolean(activeTurnIdBySession[nextSessionId]);
+      const isInitiator = (draftSessionId && sessionId === draftSessionId)
+        || (sessionId === nextSessionId && hasActiveTurnForSession);
+
+      if (isInitiator) {
+        if (nextSessionId !== sessionId && !isDraftSessionId(sessionId)) {
+          setSessionRunning(sessionId, false);
+        }
+        setSessionRunning(nextSessionId, true);
+        // 总是切换到真实会话 id（draft -> real id 转换必须切换）
+        setActiveSessionId(nextSessionId);
+      } else {
+        // 观察方：只标记该会话在运行
+        setSessionRunning(nextSessionId, true);
       }
-      setSessionRunning(nextSessionId, true);
-      // 总是切换到真实会话 id（draft -> real id 转换必须切换）
-      setActiveSessionId(nextSessionId);
       setSessions((current) => {
-        // 移除 draft 和同 id 的旧会话，用事件中的真实 session 替换
-        const cleaned = current.filter(
-          (session) => !isDraftSessionId(session.id) && session.id !== nextSessionId,
-        );
-        return [event.session, ...cleaned];
+        if (isInitiator) {
+          // 发起方：移除 draft 和同 id 的旧会话，用事件中的真实 session 替换
+          const cleaned = current.filter(
+            (session) => !isDraftSessionId(session.id) && session.id !== nextSessionId,
+          );
+          return [event.session, ...cleaned];
+        }
+        // 观察方：更新会话字段（如 status、title），保留列表位置
+        return current.map((s) => s.id === nextSessionId ? { ...s, ...event.session } : s);
       });
-      setMessages((current) => ({
-        ...current,
-        [nextSessionId]: [...(current[nextSessionId] ?? []), event.userMessage, event.assistantMessage],
-      }));
+      setMessages((current) => {
+        const existing = current[nextSessionId] ?? [];
+        // 观察者场景：snapshot 已携带 user+assistant 消息，不要重复添加。
+        const hasUser = existing.some((m) => m.id === event.userMessage.id);
+        const hasAssistant = existing.some((m) => m.id === event.assistantMessage.id);
+        if (hasUser && hasAssistant) {
+          return current;
+        }
+        const toAdd: ChatMessage[] = [];
+        if (!hasUser) toAdd.push(event.userMessage);
+        if (!hasAssistant) toAdd.push(event.assistantMessage);
+        return {
+          ...current,
+          [nextSessionId]: [...existing, ...toAdd],
+        };
+      });
       return;
     }
 
@@ -1342,12 +1454,17 @@ export function ChatPage() {
     const assistantMessageId = activeAssistantMessageIdBySessionRef.current[targetSessionId]
       ?? activeAssistantMessageIdBySessionRef.current[sessionId];
     if (!assistantMessageId) {
-      if (event.type === "agent.run.failed") {
+      // assistantMessageId 丢失时，run 的终端事件仍需清除 running 态，
+      // 否则 UI 会永远卡在"运行中"。常见场景：snapshot 回填消息后 ref 没同步，
+      // 或 finally 块先于 run.completed 路由执行清了 ref。
+      if (event.type === "agent.run.completed" || event.type === "agent.run.failed") {
         setSessionRunning(targetSessionId, false);
-        if (draftImagesRef.current.length > 0) {
-          setDraftImageError(event.error ?? "Agent 运行失败");
+        if (event.type === "agent.run.failed") {
+          if (draftImagesRef.current.length > 0) {
+            setDraftImageError(event.error ?? "Agent 运行失败");
+          }
+          updateSession(targetSessionId, (session) => ({ ...session, status: "error", updatedAt: Date.now() }));
         }
-        updateSession(targetSessionId, (session) => ({ ...session, status: "error", updatedAt: Date.now() }));
       }
       return;
     }
@@ -1675,6 +1792,8 @@ export function ChatPage() {
       updateSession(targetSessionId, (session) => event.session ?? { ...session, status: "error", updatedAt: failedAt });
     }
   }
+  // 保持 handleAgentEventRef 指向最新版本，供全局 WS 事件监听器调用
+  handleAgentEventRef.current = handleAgentEvent;
 
   async function sendMessage() {
     const text = draft.trim();
@@ -1696,6 +1815,11 @@ export function ChatPage() {
     delete activeStreamSessionIdByTurnRef.current[sessionId];
     setPendingApproval(null);
     setPendingInput(null);
+
+    // 记录发起方 draft 会话（供全局 WS 监听在 conversation.turn.started 时迁移 caps/config）
+    if (isDraftSessionId(sessionId)) {
+      pendingDraftIdForTurnRef.current = sessionId;
+    }
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -1769,12 +1893,23 @@ export function ChatPage() {
         modelId: fullModelId,
         modelLabel,
         onEvent: (event) => {
+          // 事件路由已交给全局 WS 监听（0709 阶段二）；这里只处理发起方 UI 副作用。
           if (event.type === "conversation.turn.started") {
             turnStarted = true;
             setDraft("");
             clearDraftImages();
+            // 发起方：turn 已确认启动，订阅真实会话频道（后端生成的 conversationId）。
+            // 全局监听会收到后续事件并路由到 handleAgentEvent。
+            const realId = event.conversationId;
+            if (realId && !isDraftSessionId(realId) && subscribedChannelRef.current !== realId) {
+              const transport = getLocalTransport();
+              if (subscribedChannelRef.current) {
+                transport.unsubscribe(subscribedChannelRef.current);
+              }
+              subscribedChannelRef.current = realId;
+              void transport.subscribe(realId);
+            }
           }
-          handleAgentEvent(sessionId, event);
         },
         signal: abortController.signal,
         reasoningEffort: cfg?.reasoningEffort,
@@ -1818,6 +1953,7 @@ export function ChatPage() {
         delete activeStreamSessionIdByTurnRef.current[streamSessionId];
       }
       abortControllerRef.current = null;
+      pendingDraftIdForTurnRef.current = null;
     }
   }
 
@@ -1830,6 +1966,21 @@ export function ChatPage() {
     const turnId = activeTurnId;
     abortControllerRef.current?.abort();
     flushQueuedMessageDeltas();
+
+    // 立即清掉"正在思考"与流式光标：停止是显式用户操作，UI 应即时反馈，
+    // 不依赖后端 run.failed 的到达时机（后端事件仍是最终 status/error 的真相源）。
+    setSessionRunning(sessionId, false);
+    const streamingAssistantId = activeAssistantMessageIdBySessionRef.current[sessionId];
+    if (streamingAssistantId) {
+      setMessages((current) =>
+        updateMessage(current, sessionId, streamingAssistantId, (message) => ({
+          ...message,
+          streaming: false,
+          updatedAt: Date.now(),
+        }))
+      );
+    }
+
     await cancelTurn(turnId).catch(() => undefined);
     setActiveTurnIdBySession((prev) => {
       const next = { ...prev };

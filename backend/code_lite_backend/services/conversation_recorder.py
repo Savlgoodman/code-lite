@@ -592,6 +592,27 @@ class ConversationRecorder:
         self._active_messages.pop(conversation_id, None)
         self._active_sessions.pop(conversation_id, None)
 
+    def snapshot(self, conversation_id: str) -> dict[str, Any] | None:
+        """会话快照（0709 设计 5.2）：内存活动态优先，回退落盘。
+
+        turn 运行时返回带部分累积文本的活动态；否则返回持久化的会话。
+        返回 {session, messages} 或 None（会话不存在）。
+        """
+        active_messages = self._active_messages.get(conversation_id)
+        active_session = self._active_sessions.get(conversation_id)
+        if active_messages is not None and active_session is not None:
+            return {
+                "session": dict(active_session),
+                "messages": [dict(message) for message in active_messages],
+            }
+        persisted = self._store.get_conversation(conversation_id)
+        if persisted is None:
+            return None
+        return {
+            "session": persisted.get("session"),
+            "messages": persisted.get("messages") or [],
+        }
+
     def _update_active_session(self, conversation_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         session = self._active_sessions.get(conversation_id)
         if session is None:
