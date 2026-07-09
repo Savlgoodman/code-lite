@@ -330,6 +330,56 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 await _handle_conversation_create(ws, services, request_id, payload)
             elif method == "conversation.config.update":
                 await _handle_conversation_config_update(ws, services, request_id, payload)
+            elif method == "remote.config.get":
+                bridge = services.remote_bridge
+                cfg = bridge.config if bridge else None
+                await _send(ws, _envelope("result", requestId=request_id, payload={
+                    "enabled": cfg.enabled if cfg else False,
+                    "relayUrl": cfg.relay_url if cfg else "",
+                    "pairKey": cfg.pair_key if cfg else "",
+                    "roomId": cfg.room_id if cfg else "",
+                }))
+            elif method == "remote.config.update":
+                bridge = services.remote_bridge
+                if not bridge:
+                    await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_available"}))
+                else:
+                    changes = {}
+                    if "enabled" in payload:
+                        changes["enabled"] = bool(payload["enabled"])
+                    if "relayUrl" in payload:
+                        changes["relay_url"] = str(payload["relayUrl"])
+                    if "pairKey" in payload:
+                        key = str(payload["pairKey"]).strip()
+                        if key:
+                            import hashlib
+                            changes["pair_key"] = key
+                            changes["room_id"] = hashlib.sha256(key.encode()).hexdigest()
+                    bridge.update_config(**changes)
+                    if changes.get("enabled") and bridge.config.pair_key:
+                        await bridge.stop()
+                        await bridge.start()
+                    elif changes.get("enabled") is False:
+                        await bridge.stop()
+                    await _send(ws, _envelope("result", requestId=request_id, payload={
+                        "enabled": bridge.config.enabled,
+                        "relayUrl": bridge.config.relay_url,
+                        "pairKey": bridge.config.pair_key,
+                        "roomId": bridge.config.room_id,
+                    }))
+            elif method == "remote.config.generate_key":
+                bridge = services.remote_bridge
+                if not bridge:
+                    await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_available"}))
+                else:
+                    key = bridge.generate_pair_key()
+                    bridge.update_config(enabled=True)
+                    await bridge.stop()
+                    await bridge.start()
+                    await _send(ws, _envelope("result", requestId=request_id, payload={
+                        "pairKey": key,
+                        "roomId": bridge.config.room_id,
+                    }))
             else:
                 await _send(
                     ws,

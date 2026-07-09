@@ -1,4 +1,4 @@
-import { ArchiveRestore, ArrowLeft, Bot, Database, FileText, Info, Package } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Bot, Database, FileText, Info, Package, Radio } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -10,6 +10,7 @@ const settingsMenu = [
   { id: "providers", icon: Bot, label: "模型提供商配置" },
   { id: "logs", icon: FileText, label: "日志" },
   { id: "archive", icon: ArchiveRestore, label: "归档会话" },
+  { id: "remote", icon: Radio, label: "远程控制" },
   { id: "about", icon: Info, label: "关于" }
 ] satisfies Array<{ id: SettingsSection; icon: LucideIcon; label: string }>;
 
