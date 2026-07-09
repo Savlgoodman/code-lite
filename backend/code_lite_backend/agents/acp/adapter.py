@@ -63,6 +63,8 @@ class AcpAgentAdapter:
         self._attachment_store = attachment_store
         self._agent_runtime_config_store = agent_runtime_config_store
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
+        # turn_id -> conversation_id，供 cancel_turn 定位 native session 发送 ACP 取消通知
+        self._active_conversations: dict[str, str] = {}
         self._runtime_manager = runtime_manager or AcpRuntimeManager(
             runtime_config=runtime_config,
         )
@@ -103,6 +105,7 @@ class AcpAgentAdapter:
         )
         producer = asyncio.create_task(self._run_turn(request, client, output_queue))
         self._active_tasks[request.turn_id] = producer
+        self._active_conversations[request.turn_id] = request.conversation_id
         try:
             while True:
                 event = await output_queue.get()
@@ -111,6 +114,7 @@ class AcpAgentAdapter:
                 yield event
         finally:
             self._active_tasks.pop(request.turn_id, None)
+            self._active_conversations.pop(request.turn_id, None)
             if not producer.done():
                 producer.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -120,6 +124,27 @@ class AcpAgentAdapter:
         task = self._active_tasks.get(turn_id)
         if task is None or task.done():
             return False
+
+        # 关键（0709 取消修复）：先给 agent 子进程发 ACP session/cancel 通知，
+        # 真正让 codex/claude 停止本轮工具执行——仅取消本地 producer task 不会
+        # 传导到子进程，子进程会继续执行（比如删文件）。
+        conversation_id = self._active_conversations.get(turn_id)
+        if conversation_id:
+            connection = self._runtime_manager.get_connection_for_conversation(conversation_id)
+            native_session_id = (
+                connection.sessions.get(conversation_id) if connection is not None else None
+            )
+            if connection is not None and native_session_id:
+                try:
+                    await connection.sdk_connection.cancel(session_id=native_session_id)
+                except Exception:
+                    logger.exception(
+                        "cancel_turn: ACP session/cancel failed for turn %s (conversation=%s)",
+                        turn_id,
+                        conversation_id,
+                    )
+
+        # 再取消本地 producer（会经 CancelledError 分支发出 run.failed 并放入哨兵）
         task.cancel()
         await self._approvals.reject_all()
         await self._inputs.cancel_all()

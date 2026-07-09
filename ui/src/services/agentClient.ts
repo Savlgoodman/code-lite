@@ -182,11 +182,16 @@ export async function streamAgentTurn(options: StartTurnOptions): Promise<void> 
   return new Promise<void>((resolve, reject) => {
     let settled = false;
     let unsubscribeEvents: (() => void) | null = null;
+    let abortTimer: number | null = null;
 
     const cleanup = () => {
       if (unsubscribeEvents) {
         unsubscribeEvents();
         unsubscribeEvents = null;
+      }
+      if (abortTimer !== null) {
+        window.clearTimeout(abortTimer);
+        abortTimer = null;
       }
       if (options.signal) {
         options.signal.removeEventListener("abort", onAbort);
@@ -212,8 +217,24 @@ export async function streamAgentTurn(options: StartTurnOptions): Promise<void> 
     };
 
     function onAbort() {
-      // 中止：停止转发事件并 resolve；实际取消由 cancelTurn 走 turn.cancel RPC。
-      finish();
+      // 中止：不立即退订。实际取消由 cancelTurn 走 turn.cancel，后端会发出
+      // agent.run.failed 终止事件，仍需它到达才能清掉 streaming 状态（否则一直"正在思考"）。
+      // 兜底：若 3s 内没等到终止事件（异常场景），本地合成一条 run.failed 收尾。
+      if (settled || abortTimer !== null) {
+        return;
+      }
+      abortTimer = window.setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        options.onEvent({
+          type: "agent.run.failed",
+          conversationId: options.conversationId ?? "",
+          turnId,
+          error: "用户取消了当前任务。"
+        } as AgentEvent);
+        finish();
+      }, 3000);
     }
 
     unsubscribeEvents = transport.onEvent((event) => {
@@ -229,9 +250,9 @@ export async function streamAgentTurn(options: StartTurnOptions): Promise<void> 
     if (options.signal) {
       if (options.signal.aborted) {
         onAbort();
-        return;
+      } else {
+        options.signal.addEventListener("abort", onAbort);
       }
-      options.signal.addEventListener("abort", onAbort);
     }
 
     transport
