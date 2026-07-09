@@ -163,7 +163,7 @@ export function App() {
     });
   };
 
-  if (!connected || page === "settings") {
+  if (!connected && page === "settings") {
     return (
       <div className="app-shell">
         <div className="page pairing-page">
