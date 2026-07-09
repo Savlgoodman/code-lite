@@ -542,9 +542,15 @@ def _normalize_fast_mode_metadata(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     enabled = bool(value.get("enabled"))
+    applied = value.get("applied")
+    if applied is False:
+        enabled = False
     multiplier = _billing_multiplier(value)
+    if not enabled:
+        multiplier = 1
     return {
         "enabled": enabled,
+        "applied": applied if isinstance(applied, bool) else None,
         "speedMode": str(value.get("speedMode") or ("fast" if enabled else "normal")),
         "displayRate": str(value.get("displayRate") or ("1.5x" if enabled else "1x")),
         "runtimeConfigId": value.get("runtimeConfigId"),

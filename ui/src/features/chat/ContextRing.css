@@ -11,15 +11,16 @@
   flex: 0 0 18px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  background: #fff7d8;
-  color: #b7791f;
+  background: transparent;
+  color: #20242b;
 }
 
 .fast-mode-indicator svg {
   width: 14px;
   height: 14px;
-  stroke-width: 2.2;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
 }
 
 .context-ring {

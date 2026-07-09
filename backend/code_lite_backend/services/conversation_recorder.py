@@ -434,6 +434,8 @@ class ConversationRecorder:
         elif event_type == "agent.run.completed":
             assistant["streaming"] = False
             assistant["updatedAt"] = now_ms()
+            if isinstance(event.get("model"), dict):
+                assistant["model"] = event["model"]
             if isinstance(event.get("usage"), dict):
                 assistant["usage"] = event["usage"]
             session_patch = {"status": "idle"}

@@ -91,6 +91,29 @@ def _fast_mode_from_config(selected_config: dict[str, object] | None) -> str | N
     return None
 
 
+def _capability_config_ids(services: AppServices, conversation_id: str) -> set[str]:
+    binding = services.conversation_store.load_native_session(conversation_id)
+    capabilities = binding.get("capabilities") if isinstance(binding, dict) else None
+    config_options = capabilities.get("configOptions") if isinstance(capabilities, dict) else None
+    ids: set[str] = set()
+    if isinstance(config_options, list):
+        for item in config_options:
+            if isinstance(item, dict):
+                config_id = str(item.get("id") or "").strip()
+                if config_id:
+                    ids.add(config_id)
+    elif isinstance(config_options, dict):
+        ids.update(str(key).strip() for key in config_options if str(key).strip())
+    return ids
+
+
+def _supports_runtime_fast_mode(services: AppServices, conversation_id: str, runtime_config_id: str | None) -> bool:
+    if not runtime_config_id:
+        return False
+    capability_ids = _capability_config_ids(services, conversation_id)
+    return not capability_ids or runtime_config_id in capability_ids
+
+
 def _fast_mode_metadata(fast_mode: str | None, *, runtime_config_id: str | None) -> dict[str, object] | None:
     if fast_mode not in {"on", "off"}:
         return None
@@ -289,6 +312,7 @@ async def stream_turn(
     resolved_model = None
     runtime_model = None
     model_metadata: dict[str, object] = {}
+    effective_fast_mode = requested_fast_mode
 
     if agent_id in _ACP_RUNTIME_IDS:
         # ACP runtime：使用 runtime 原生模型（不查产品级 model_config）
@@ -315,9 +339,35 @@ async def stream_turn(
                 "source": f"{agent_id}-acp",
                 "reasoningEffort": requested_reasoning_effort or "none",
             }
+            runtime_fast_config_id = _runtime_fast_config_id(agent_id)
+            if requested_fast_mode and not _supports_runtime_fast_mode(
+                services,
+                conversation_id,
+                runtime_fast_config_id,
+            ):
+                logger.info(
+                    "Ignoring fast_mode=%s for agent=%s model=%s because runtime capabilities do not expose config id %s",
+                    requested_fast_mode,
+                    agent_id,
+                    runtime_model,
+                    runtime_fast_config_id,
+                    extra={
+                        "category": "acp",
+                        "runtime": agent_id,
+                        "conversationId": conversation_id,
+                        "turnId": turn_id,
+                        "stage": "configure.fast_mode",
+                        "fields": {
+                            "fastMode": requested_fast_mode,
+                            "configId": runtime_fast_config_id,
+                            "supported": False,
+                        },
+                    },
+                )
+                effective_fast_mode = None
             fast_mode_info = _fast_mode_metadata(
-                requested_fast_mode,
-                runtime_config_id=_runtime_fast_config_id(agent_id),
+                effective_fast_mode,
+                runtime_config_id=runtime_fast_config_id,
             )
             if fast_mode_info:
                 model_metadata["fastMode"] = fast_mode_info
@@ -361,9 +411,7 @@ async def stream_turn(
             if resolved_model is not None
             else {}
         )
-        fast_mode_info = _fast_mode_metadata(requested_fast_mode, runtime_config_id=None)
-        if fast_mode_info and model_metadata:
-            model_metadata["fastMode"] = fast_mode_info
+        effective_fast_mode = None
     input_blocks, user_attachments, content_error = _parse_content_blocks(
         body=body,
         prompt=prompt,
@@ -411,7 +459,7 @@ async def stream_turn(
         access_mode=requested_access_mode,
         model_metadata=model_metadata,
         reasoning_effort=requested_reasoning_effort,
-        fast_mode=requested_fast_mode,
+        fast_mode=effective_fast_mode,
         input_blocks=input_blocks,
     )
 
@@ -422,7 +470,7 @@ async def stream_turn(
         "ACP" if agent_id in _ACP_RUNTIME_IDS else "product",
         conversation_id, turn_id, agent_id, agent_metadata.get("label"),
         requested_model_id, runtime_model,
-        requested_access_mode, requested_reasoning_effort, requested_fast_mode,
+        requested_access_mode, requested_reasoning_effort, effective_fast_mode,
         workspace,
         selected_config,
         len(prompt), prompt_preview,

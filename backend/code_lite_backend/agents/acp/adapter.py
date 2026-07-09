@@ -371,6 +371,7 @@ class AcpAgentAdapter:
                     "type": "agent.run.completed",
                     "conversationId": request.conversation_id,
                     "turnId": request.turn_id,
+                    "model": request.model_metadata or None,
                     "usage": usage_dict,
                     "result": {
                         "stopReason": getattr(prompt_result, "stop_reason", None),

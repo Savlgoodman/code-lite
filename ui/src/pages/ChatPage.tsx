@@ -1415,6 +1415,7 @@ export function ChatPage() {
       setMessages((current) =>
         updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
           ...message,
+          model: typeof event.model === "object" && event.model ? (event.model as ChatMessage["model"]) : message.model,
           streaming: false,
           updatedAt: completedAt,
           usage: typeof event.usage === "object" && event.usage ? (event.usage as ChatMessage["usage"]) : message.usage

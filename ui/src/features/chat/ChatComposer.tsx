@@ -437,7 +437,6 @@ export function ChatComposer({
   const statusLabel = [
     currentFamily?.label,
     hasReasoningPicker ? reasoningEffort : null,
-    hasFastModePicker && isFastModeOn ? "1.5x" : null,
   ].filter(Boolean).join(" ") || (hasFastModePicker ? "速率" : hasReasoningPicker ? "推理" : "模型");
 
   function reasoningOptionLabel(value: string) {

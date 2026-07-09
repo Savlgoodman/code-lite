@@ -125,9 +125,7 @@ function buildModelUsage(messages: ChatMessage[]): ModelUsage[] {
     const modelCandidates = buildModelCandidates([runtimeModel, model, baseModelLabel]);
     const fastMode = readFastModeCostState(modelInfo?.fastMode);
     const usageKey = `${modelId}::fast:${fastMode.billingMultiplier}:${fastMode.displayRate ?? ""}`;
-    const modelLabel = fastMode.enabled && fastMode.displayRate
-      ? `${baseModelLabel} (${fastMode.displayRate})`
-      : baseModelLabel;
+    const modelLabel = baseModelLabel;
 
     if (!map.has(usageKey)) {
       map.set(usageKey, {
@@ -254,7 +252,7 @@ function readFastModeCostState(value: unknown): { billingMultiplier: number; dis
     return { billingMultiplier: 1, enabled: false };
   }
   const fastMode = value as Record<string, unknown>;
-  const enabled = fastMode.enabled === true;
+  const enabled = fastMode.enabled === true && fastMode.applied !== false;
   const rawMultiplier = fastMode.billingMultiplier;
   const multiplier = typeof rawMultiplier === "number" && Number.isFinite(rawMultiplier) && rawMultiplier > 0
     ? rawMultiplier

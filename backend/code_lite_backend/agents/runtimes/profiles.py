@@ -284,6 +284,11 @@ class BaseRuntimeProfile:
                 conn.set_config_option(session_id=session_id, config_id=config_id, value=fast_mode),
                 timeout=10,
             )
+            self._mark_fast_mode_applied(
+                request,
+                applied=True,
+                error=None,
+            )
             logger.info(
                 "[configure] set_config_option(%s=%s) OK",
                 config_id,
@@ -299,6 +304,11 @@ class BaseRuntimeProfile:
                 },
             )
         except Exception as exc:
+            self._mark_fast_mode_applied(
+                request,
+                applied=False,
+                error=f"{type(exc).__name__}: {exc}",
+            )
             logger.warning(
                 "[configure] set_config_option(%s=%s) failed: %s",
                 config_id,
@@ -314,6 +324,17 @@ class BaseRuntimeProfile:
                     "fields": {"configId": config_id, "fastMode": fast_mode, "errorType": type(exc).__name__},
                 },
             )
+
+    def _mark_fast_mode_applied(self, request: AgentRunRequest, *, applied: bool, error: str | None) -> None:
+        fast_mode = request.model_metadata.get("fastMode")
+        if not isinstance(fast_mode, dict):
+            return
+        fast_mode["applied"] = applied
+        if error:
+            fast_mode["error"] = error
+            fast_mode["billingMultiplier"] = 1
+        else:
+            fast_mode.pop("error", None)
 
 
 @dataclass(frozen=True)

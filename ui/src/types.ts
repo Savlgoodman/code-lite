@@ -302,6 +302,7 @@ export interface BillingUsageEntry {
   };
   createdAtIso?: string;
   fastMode?: {
+    applied?: boolean | null;
     billingMultiplier?: number;
     displayRate?: string;
     enabled?: boolean;
@@ -860,6 +861,7 @@ export type AgentEvent =
       type: "agent.run.completed";
       conversationId: string;
       turnId: string;
+      model?: Record<string, unknown>;
       result?: unknown;
       session?: Session;
       usage?: unknown;
