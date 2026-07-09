@@ -6,6 +6,8 @@ import { Check, FolderOpen, Package, RefreshCw, X } from "lucide-react";
 import { AgentIcon } from "../../components/AgentIcon";
 import {
   installAcpPackages,
+  loadAcpRuntimeDetails,
+  loadRuntimeExecutableSettings,
   loadAgentRuntimeSettings,
   loadAcpPackageSettings,
   updateAcpPackageDir,
@@ -45,7 +47,84 @@ function runtimeExecutableOptionLabel(option: RuntimeExecutableOption) {
   if (option.kind === "sdk") {
     return `${source}${version}`;
   }
-  return `${source} · ${option.path}${version}`;
+  return `${source} · ${middleEllipsis(option.path)}${version}`;
+}
+
+function middleEllipsis(value: string, maxLength = 58) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const keep = Math.max(12, Math.floor((maxLength - 3) / 2));
+  return `${value.slice(0, keep)}...${value.slice(-keep)}`;
+}
+
+function isAcpRuntimeId(runtimeId: string) {
+  return runtimeId === "codex" || runtimeId === "claude_code";
+}
+
+function mergeRuntimeItems<T extends { runtimeId: string }>(
+  currentItems: T[] | undefined,
+  nextItems: T[] | undefined
+) {
+  const itemsByRuntime = new Map<string, T>();
+  for (const item of currentItems ?? []) {
+    itemsByRuntime.set(item.runtimeId, item);
+  }
+  for (const item of nextItems ?? []) {
+    itemsByRuntime.set(item.runtimeId, item);
+  }
+  return Array.from(itemsByRuntime.values());
+}
+
+function mergePackageSettings(
+  current: AcpPackageSettingsState | null,
+  next: AcpPackageSettingsState
+): AcpPackageSettingsState {
+  if (!current) {
+    return next;
+  }
+  return {
+    ...current,
+    ...next,
+    packages: mergeRuntimeItems(current.packages, next.packages),
+    runtimeExecutables: mergeRuntimeItems(current.runtimeExecutables, next.runtimeExecutables),
+    runtimeVersions: mergeRuntimeItems(current.runtimeVersions, next.runtimeVersions)
+  };
+}
+
+function runtimeExecutableOptionId(source: string, path = "") {
+  return source === "system" ? `system:${path}` : "sdk";
+}
+
+function runtimeExecutableSummary(runtime: AgentRuntimeConfig | null): RuntimeExecutableInfo | null {
+  if (!runtime || !isAcpRuntimeId(runtime.id)) {
+    return null;
+  }
+  const configured = runtime.runtimeExecutable;
+  const selectedPath = configured?.source === "system" ? configured.selectedPath ?? "" : "";
+  const selectedSource = selectedPath ? "system" : "sdk";
+  const selectedId = runtimeExecutableOptionId(selectedSource, selectedPath);
+  const selectedOption: RuntimeExecutableOption = {
+    detected: Boolean(selectedPath) || selectedSource === "sdk",
+    id: selectedId,
+    kind: selectedSource,
+    label: selectedSource === "sdk" ? "SDK 内置" : "当前配置",
+    path: selectedPath,
+    source: selectedSource === "sdk" ? "SDK 内置" : "当前配置"
+  };
+  return {
+    label: runtime.label,
+    options: [selectedOption],
+    runtimeId: runtime.id,
+    sdkPath: "",
+    selectedId,
+    selectedPath,
+    selectedSource
+  };
+}
+
+function packageSettingsDrafts(settings: AcpPackageSettingsState) {
+  return Object.fromEntries(settings.packages.map((item) => [item.runtimeId, item.packageDir]));
 }
 
 function runtimeStatusLabel(runtime: AgentRuntimeConfig) {
@@ -122,20 +201,30 @@ export function AgentRuntimeSettings() {
   const [selectedRuntimeId, setSelectedRuntimeId] = useState("codex");
   const [packageDirDrafts, setPackageDirDrafts] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingDetailsId, setLoadingDetailsId] = useState<string | null>(null);
+  const [loadingExecutableId, setLoadingExecutableId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function refreshSettings(options: { check?: boolean } = {}) {
+  function mergePackageState(next: AcpPackageSettingsState) {
+    setPackageSettings((current) => mergePackageSettings(current, next));
+    setPackageDirDrafts((drafts) => ({
+      ...drafts,
+      ...packageSettingsDrafts(next)
+    }));
+  }
+
+  async function refreshSettings() {
     setIsLoading(true);
     setError(null);
     try {
       const [nextRuntimes, nextPackages] = await Promise.all([
         loadAgentRuntimeSettings(),
-        loadAcpPackageSettings(options)
+        loadAcpPackageSettings()
       ]);
       setRuntimeSettings(nextRuntimes);
-      setPackageSettings(nextPackages);
-      setPackageDirDrafts(Object.fromEntries(nextPackages.packages.map((item) => [item.runtimeId, item.packageDir])));
+      setPackageSettings((current) => mergePackageSettings(current, nextPackages));
+      setPackageDirDrafts(packageSettingsDrafts(nextPackages));
       const selected = nextRuntimes.runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? nextRuntimes.runtimes[0];
       if (selected) {
         setSelectedRuntimeId(selected.id);
@@ -144,6 +233,46 @@ export function AgentRuntimeSettings() {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadRuntimeDetails(runtimeId: string, options: { check?: boolean } = {}) {
+    if (!isAcpRuntimeId(runtimeId)) {
+      return;
+    }
+    setLoadingDetailsId(runtimeId);
+    setError(null);
+    try {
+      const next = await loadAcpRuntimeDetails(runtimeId, options);
+      mergePackageState(next);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setLoadingDetailsId(null);
+    }
+  }
+
+  async function loadExecutableOptions(runtimeId: string, options: { check?: boolean } = {}) {
+    if (!isAcpRuntimeId(runtimeId) || loadingExecutableId === runtimeId) {
+      return;
+    }
+    setLoadingExecutableId(runtimeId);
+    setError(null);
+    try {
+      const executable = await loadRuntimeExecutableSettings(runtimeId, options);
+      setPackageSettings((current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          runtimeExecutables: mergeRuntimeItems(current.runtimeExecutables, [executable])
+        };
+      });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setLoadingExecutableId(null);
     }
   }
 
@@ -157,9 +286,9 @@ export function AgentRuntimeSettings() {
     setError(null);
     try {
       const next = await updateAcpPackageDir(runtimeId, trimmedDir);
-      setPackageSettings(next);
-      setPackageDirDrafts(Object.fromEntries(next.packages.map((item) => [item.runtimeId, item.packageDir])));
+      mergePackageState(next);
       setRuntimeSettings(await loadAgentRuntimeSettings());
+      await loadRuntimeDetails(runtimeId);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -189,9 +318,9 @@ export function AgentRuntimeSettings() {
       setError(null);
       try {
         const next = await installAcpPackages({ runtimeId });
-        setPackageSettings(next);
-        setPackageDirDrafts(Object.fromEntries(next.packages.map((packageItem) => [packageItem.runtimeId, packageItem.packageDir])));
+        mergePackageState(next);
         setRuntimeSettings(await loadAgentRuntimeSettings());
+        await loadRuntimeDetails(runtimeId);
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : String(requestError));
       } finally {
@@ -199,7 +328,7 @@ export function AgentRuntimeSettings() {
       }
       return;
     }
-    await refreshSettings({ check: true });
+    await loadRuntimeDetails(runtimeId, { check: true });
   }
 
   async function updatePackage(runtimeId: string) {
@@ -207,9 +336,9 @@ export function AgentRuntimeSettings() {
     setError(null);
     try {
       const next = await installAcpPackages({ runtimeId, update: true });
-      setPackageSettings(next);
-      setPackageDirDrafts(Object.fromEntries(next.packages.map((item) => [item.runtimeId, item.packageDir])));
+      mergePackageState(next);
       setRuntimeSettings(await loadAgentRuntimeSettings());
+      await loadRuntimeDetails(runtimeId, { check: true });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -235,11 +364,10 @@ export function AgentRuntimeSettings() {
       });
       const [nextRuntimes, nextPackages] = await Promise.all([
         loadAgentRuntimeSettings(),
-        loadAcpPackageSettings()
+        loadAcpRuntimeDetails(runtimeId)
       ]);
       setRuntimeSettings(nextRuntimes);
-      setPackageSettings(nextPackages);
-      setPackageDirDrafts(Object.fromEntries(nextPackages.packages.map((item) => [item.runtimeId, item.packageDir])));
+      mergePackageState(nextPackages);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -251,6 +379,10 @@ export function AgentRuntimeSettings() {
     void refreshSettings();
   }, []);
 
+  useEffect(() => {
+    void loadRuntimeDetails(selectedRuntimeId);
+  }, [selectedRuntimeId]);
+
   const runtimes = runtimeSettings?.runtimes ?? [];
   const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0] ?? null;
   const selectedPackage = selectedRuntime
@@ -260,10 +392,12 @@ export function AgentRuntimeSettings() {
     ? packageSettings?.runtimeVersions.find((item) => item.runtimeId === selectedRuntime.id) ?? null
     : null;
   const selectedExecutable = selectedRuntime
-    ? packageSettings?.runtimeExecutables?.find((item) => item.runtimeId === selectedRuntime.id) ?? null
+    ? packageSettings?.runtimeExecutables?.find((item) => item.runtimeId === selectedRuntime.id)
+      ?? runtimeExecutableSummary(selectedRuntime)
     : null;
   const executableOptions = selectedExecutable?.options.map((item) => ({
     label: runtimeExecutableOptionLabel(item),
+    title: item.path || item.label,
     value: item.id
   })) ?? [];
   const checks = selectedRuntime
@@ -345,15 +479,15 @@ export function AgentRuntimeSettings() {
             />
             <button
               className="settings-primary-button"
-              disabled={isLoading || busyId !== null}
+              disabled={isLoading || busyId !== null || loadingDetailsId === selectedPackage.runtimeId}
               onClick={() => void primaryPackageAction(selectedPackage.runtimeId)}
               type="button"
             >
-              {primaryIsInstall ? <Package size={14} /> : <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />}
+              {primaryIsInstall ? <Package size={14} /> : <RefreshCw className={loadingDetailsId === selectedPackage.runtimeId ? "spin-icon" : ""} size={14} />}
               <span>
                 {busyId === `${selectedPackage.runtimeId}-install`
                   ? "安装中"
-                  : isLoading && !primaryIsInstall
+                  : loadingDetailsId === selectedPackage.runtimeId && !primaryIsInstall
                     ? "检查中"
                     : primaryIsInstall
                       ? "安装 ACP"
@@ -373,7 +507,7 @@ export function AgentRuntimeSettings() {
             ) : null}
             <button
               className="settings-secondary-button"
-              disabled={busyId !== null || isLoading}
+              disabled={busyId !== null || isLoading || loadingDetailsId === selectedPackage.runtimeId}
               onClick={() => void browsePackageDir(selectedPackage.runtimeId)}
               type="button"
             >
@@ -412,37 +546,43 @@ export function AgentRuntimeSettings() {
           <div className="settings-runtime-section-head">
             <div>
               <span>底层 Runtime 可执行文件</span>
-              <strong>{selectedExecutable.selectedPath || "等待安装 ACP 包后检测 SDK 内置路径"}</strong>
+              <strong title={selectedExecutable.selectedPath || selectedExecutable.sdkPath || undefined}>
+                {middleEllipsis(selectedExecutable.selectedPath || selectedExecutable.sdkPath || "等待安装 ACP 包后检测 SDK 内置路径", 72)}
+              </strong>
             </div>
-            <i className={`acp-package-status ${selectedExecutable.selectedPath ? "pass" : "fail"}`}>
+            <i className={`acp-package-status ${selectedExecutable.selectedPath || selectedExecutable.sdkPath ? "pass" : "fail"}`}>
               {executableSourceLabel(selectedExecutable.selectedSource)}
             </i>
           </div>
           <div className="runtime-executable-row">
             {executableOptions.length > 0 ? (
               <SettingsSelect
-                disabled={busyId !== null || isLoading}
+                disabled={busyId !== null || isLoading || loadingDetailsId === selectedExecutable.runtimeId}
+                isLoading={loadingExecutableId === selectedExecutable.runtimeId}
                 onChange={(value) => void selectRuntimeExecutable(selectedExecutable.runtimeId, value)}
+                onOpen={() => void loadExecutableOptions(selectedExecutable.runtimeId)}
                 options={executableOptions}
                 value={selectedExecutable.selectedId}
               />
             ) : (
-              <div className="runtime-executable-empty">未找到可用 Runtime executable</div>
+              <div className="runtime-executable-empty">
+                {loadingDetailsId === selectedRuntime?.id ? "检测当前 Runtime executable 中" : "未找到可用 Runtime executable"}
+              </div>
             )}
             <button
               className="settings-secondary-button"
-              disabled={isLoading}
-              onClick={() => void refreshSettings({ check: true })}
+              disabled={loadingDetailsId === selectedExecutable.runtimeId || loadingExecutableId === selectedExecutable.runtimeId}
+              onClick={() => void loadRuntimeDetails(selectedExecutable.runtimeId, { check: true })}
               type="button"
             >
-              <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />
+              <RefreshCw className={loadingDetailsId === selectedExecutable.runtimeId ? "spin-icon" : ""} size={14} />
               <span>检查版本</span>
             </button>
           </div>
           <div className="settings-runtime-detail acp-package-detail runtime-executable-detail">
             <div>
               <span>当前版本</span>
-              <strong>{selectedExecutable.selectedVersion ?? "未检测到"}</strong>
+              <strong>{loadingDetailsId === selectedExecutable.runtimeId ? "检测中" : selectedExecutable.selectedVersion ?? "未检测到"}</strong>
             </div>
             <div>
               <span>SDK 版本</span>
@@ -462,8 +602,13 @@ export function AgentRuntimeSettings() {
             <span>预检查</span>
             <strong>{selectedRuntime?.detected.detail ?? "等待检测"}</strong>
           </div>
-          <button className="settings-secondary-button" disabled={isLoading} onClick={() => void refreshSettings({ check: true })} type="button">
-            <RefreshCw className={isLoading ? "spin-icon" : ""} size={14} />
+          <button
+            className="settings-secondary-button"
+            disabled={isLoading || !selectedRuntime || loadingDetailsId === selectedRuntime.id}
+            onClick={() => void loadRuntimeDetails(selectedRuntime.id, { check: true })}
+            type="button"
+          >
+            <RefreshCw className={selectedRuntime && loadingDetailsId === selectedRuntime.id ? "spin-icon" : ""} size={14} />
             <span>立即检查</span>
           </button>
         </div>

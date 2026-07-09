@@ -141,13 +141,34 @@ class AgentRuntimeConfigStore:
             "runtimes": [self._public_runtime(runtimes[runtime_id]) for runtime_id in self._ordered_runtime_ids()],
         }
 
-    def acp_package_settings(self, *, check_latest: bool = False) -> dict[str, Any]:
+    def acp_package_settings(
+        self,
+        *,
+        check_latest: bool = False,
+        runtime_id: str | None = None,
+        include_runtime_versions: bool = False,
+        include_runtime_executables: bool = False,
+        discover_runtime_executables: bool = False,
+    ) -> dict[str, Any]:
         config = self.load()
         package_root = self.runtime_root()
+        runtime_ids = self._acp_runtime_ids(runtime_id)
         packages = [
             self._public_acp_package(config["agentRuntimes"][runtime_id], check_latest=check_latest)
-            for runtime_id in ("codex", "claude_code")
+            for runtime_id in runtime_ids
         ]
+        runtime_versions = [
+            self._selected_runtime_executable_version(runtime_id, config["agentRuntimes"][runtime_id])
+            for runtime_id in runtime_ids
+        ] if include_runtime_versions else []
+        runtime_executables = [
+            self._public_runtime_executable(
+                config["agentRuntimes"][runtime_id],
+                check_latest=check_latest,
+                discover_system=discover_runtime_executables,
+            )
+            for runtime_id in runtime_ids
+        ] if include_runtime_executables else []
         return {
             "packageRoot": str(package_root),
             "packageRootExists": package_root.exists(),
@@ -155,16 +176,20 @@ class AgentRuntimeConfigStore:
             "nodeDetected": self._detect_node(),
             "npmDetected": self._detect_npm(),
             "packages": packages,
-            "runtimeVersions": [
-                self._selected_runtime_executable_version("codex", config["agentRuntimes"]["codex"]),
-                self._selected_runtime_executable_version("claude_code", config["agentRuntimes"]["claude_code"]),
-            ],
-            "runtimeExecutables": [
-                self._public_runtime_executable(config["agentRuntimes"][runtime_id], check_latest=check_latest)
-                for runtime_id in ("codex", "claude_code")
-            ],
+            "runtimeVersions": runtime_versions,
+            "runtimeExecutables": runtime_executables,
             "checkedAt": _now_ms() if check_latest else None,
         }
+
+    def runtime_executable_settings(self, runtime_id: str, *, check_latest: bool = False) -> dict[str, Any]:
+        if runtime_id not in ACP_RUNTIME_IDS:
+            raise AgentRuntimeConfigError("Agent runtime 不支持 Runtime 可执行文件配置")
+        config = self.load()
+        return self._public_runtime_executable(
+            config["agentRuntimes"][runtime_id],
+            check_latest=check_latest,
+            discover_system=True,
+        )
 
     def update_acp_package_root(self, package_root: str) -> dict[str, Any]:
         root = _configured_path(package_root, self._default_runtime_root())
@@ -227,6 +252,14 @@ class AgentRuntimeConfigStore:
 
         self.save(config)
         return self._public_runtime(config["agentRuntimes"][runtime_id])
+
+    def _acp_runtime_ids(self, runtime_id: str | None = None) -> list[str]:
+        if runtime_id is None:
+            return ["codex", "claude_code"]
+        normalized = str(runtime_id or "").strip()
+        if normalized not in ACP_RUNTIME_IDS:
+            raise AgentRuntimeConfigError("Agent runtime 不支持 ACP 包配置")
+        return [normalized]
 
     def active_adapter(self) -> str:
         return str(self.load().get("activeAdapter") or self._runtime_config.agent_adapter or "nanobot")
@@ -773,7 +806,13 @@ class AgentRuntimeConfigStore:
             return "sdk"
         return f"system:{path}"
 
-    def _public_runtime_executable(self, runtime: dict[str, Any], *, check_latest: bool) -> dict[str, Any]:
+    def _public_runtime_executable(
+        self,
+        runtime: dict[str, Any],
+        *,
+        check_latest: bool,
+        discover_system: bool,
+    ) -> dict[str, Any]:
         runtime_id = str(runtime.get("id") or "")
         executable = self._normalize_runtime_executable(runtime_id, runtime)
         sdk_path = self._sdk_runtime_executable_path(runtime_id)
@@ -787,7 +826,7 @@ class AgentRuntimeConfigStore:
             "detected": bool(sdk_path),
             "version": sdk_version,
         }
-        system_options = self._discover_system_runtime_executables(runtime_id)
+        system_options = self._discover_system_runtime_executables(runtime_id) if discover_system else []
         selected_path = str(executable.get("selectedPath") or "").strip()
         selected_id = self._runtime_executable_option_id(
             "system" if executable.get("source") == "system" and selected_path else "sdk",

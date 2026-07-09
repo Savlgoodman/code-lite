@@ -36,7 +36,7 @@ class AgentRuntimeConfigStoreTest(unittest.TestCase):
             self.assertNotEqual(claude_package["packageDir"], str(package_dir.resolve()))
             self.assertEqual(store.managed_package_dir("codex"), package_dir.resolve())
 
-    def test_acp_package_settings_reports_empty_root_and_versions(self) -> None:
+    def test_acp_package_settings_defaults_to_lightweight_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
             AgentRuntimeConfigStore,
             "_detect_command",
@@ -48,7 +48,38 @@ class AgentRuntimeConfigStoreTest(unittest.TestCase):
 
             self.assertTrue(settings["packageRootIsEmpty"])
             self.assertEqual([item["runtimeId"] for item in settings["packages"]], ["codex", "claude_code"])
-            self.assertEqual([item["runtimeId"] for item in settings["runtimeVersions"]], ["codex", "claude_code"])
+            self.assertEqual(settings["runtimeVersions"], [])
+            self.assertEqual(settings["runtimeExecutables"], [])
+
+    def test_acp_package_settings_can_load_single_runtime_details(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            AgentRuntimeConfigStore,
+            "_detect_command",
+            return_value={"ok": False, "version": None},
+        ):
+            store = self.make_store(Path(temp_dir))
+
+            settings = store.acp_package_settings(
+                runtime_id="codex",
+                include_runtime_executables=True,
+                include_runtime_versions=True,
+            )
+
+            self.assertEqual([item["runtimeId"] for item in settings["packages"]], ["codex"])
+            self.assertEqual([item["runtimeId"] for item in settings["runtimeVersions"]], ["codex"])
+            self.assertEqual([item["runtimeId"] for item in settings["runtimeExecutables"]], ["codex"])
+
+    def test_acp_package_settings_does_not_scan_runtime_executable_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            AgentRuntimeConfigStore,
+            "_discover_system_runtime_executables",
+            side_effect=AssertionError("should not scan candidates"),
+        ):
+            store = self.make_store(Path(temp_dir))
+
+            settings = store.acp_package_settings(include_runtime_executables=True)
+
+            self.assertEqual([item["runtimeId"] for item in settings["runtimeExecutables"]], ["codex", "claude_code"])
 
     def test_managed_command_is_rewritten_for_current_package_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -129,8 +160,7 @@ class AgentRuntimeConfigStoreTest(unittest.TestCase):
             runtime_package.parent.mkdir(parents=True)
             runtime_package.write_text('{"version":"0.142.5"}', encoding="utf-8")
 
-            settings = store.acp_package_settings()
-            executable = next(item for item in settings["runtimeExecutables"] if item["runtimeId"] == "codex")
+            executable = store.runtime_executable_settings("codex")
 
             self.assertEqual(executable["selectedSource"], "sdk")
             self.assertEqual(executable["selectedPath"], str(sdk_binary))

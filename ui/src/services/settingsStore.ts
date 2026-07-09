@@ -18,6 +18,7 @@ import type {
   LogTailResult,
   ModelProviderModelsResult,
   ModelSettingsState,
+  RuntimeExecutableInfo,
   SavedModelProviderResult
 } from "../types";
 
@@ -69,9 +70,40 @@ export async function loadAgentRuntimeSettings(): Promise<AgentRuntimeSettingsSt
   return requestJson<AgentRuntimeSettingsState>("/api/settings/agent-runtimes");
 }
 
-export async function loadAcpPackageSettings(options: { check?: boolean } = {}): Promise<AcpPackageSettingsState> {
-  const suffix = options.check ? "?check=true" : "";
+export async function loadAcpPackageSettings(options: {
+  check?: boolean;
+  includeRuntimeExecutables?: boolean;
+  includeRuntimeVersions?: boolean;
+  runtimeId?: string;
+} = {}): Promise<AcpPackageSettingsState> {
+  const params = new URLSearchParams();
+  if (options.check) params.set("check", "true");
+  if (options.includeRuntimeExecutables) params.set("includeRuntimeExecutables", "true");
+  if (options.includeRuntimeVersions) params.set("includeRuntimeVersions", "true");
+  if (options.runtimeId) params.set("runtime", options.runtimeId);
+  const suffix = params.toString() ? `?${params}` : "";
   return requestJson<AcpPackageSettingsState>(`/api/settings/acp-packages${suffix}`);
+}
+
+export async function loadAcpRuntimeDetails(runtimeId: string, options: { check?: boolean } = {}): Promise<AcpPackageSettingsState> {
+  return loadAcpPackageSettings({
+    check: options.check,
+    includeRuntimeExecutables: true,
+    includeRuntimeVersions: true,
+    runtimeId
+  });
+}
+
+export async function loadRuntimeExecutableSettings(
+  runtimeId: string,
+  options: { check?: boolean } = {}
+): Promise<RuntimeExecutableInfo> {
+  const params = new URLSearchParams();
+  if (options.check) params.set("check", "true");
+  const suffix = params.toString() ? `?${params}` : "";
+  return requestJson<RuntimeExecutableInfo>(
+    `/api/settings/agent-runtimes/${runtimeId}/runtime-executable${suffix}`
+  );
 }
 
 export async function updateAcpPackageDir(runtimeId: string, packageDir: string): Promise<AcpPackageSettingsState> {

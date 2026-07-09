@@ -415,6 +415,16 @@
   color: #20242b;
 }
 
+.settings-select-loading {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  padding: 0 8px;
+  color: #697079;
+  font-size: 12px;
+}
+
 .settings-select-menu {
   scrollbar-width: thin;
   scrollbar-color: rgba(105, 112, 121, 0.28) transparent;
@@ -881,6 +891,10 @@
   gap: 10px;
   align-items: center;
   margin-top: 16px;
+}
+
+.runtime-executable-row .settings-select {
+  min-width: 0;
 }
 
 .runtime-executable-empty {

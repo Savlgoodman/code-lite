@@ -338,12 +338,22 @@ async def list_agent_runtimes(services: AppServices = Depends(get_services)) -> 
 @router.get("/settings/acp-packages")
 async def get_acp_package_settings(
     check: bool = False,
+    runtime: str | None = None,
+    includeRuntimeVersions: bool = False,
+    includeRuntimeExecutables: bool = False,
     services: AppServices = Depends(get_services),
-) -> dict[str, Any]:
-    return await asyncio.to_thread(
-        services.agent_runtime_config_store.acp_package_settings,
-        check_latest=check,
-    )
+) -> JSONResponse:
+    try:
+        settings = await asyncio.to_thread(
+            services.agent_runtime_config_store.acp_package_settings,
+            check_latest=check,
+            runtime_id=str(runtime).strip() if runtime else None,
+            include_runtime_versions=includeRuntimeVersions,
+            include_runtime_executables=includeRuntimeExecutables,
+        )
+    except AgentRuntimeConfigError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    return JSONResponse(settings)
 
 
 @router.patch("/settings/acp-packages")
@@ -446,6 +456,23 @@ async def list_agent_runtime_models(
     except Exception as error:
         return JSONResponse({"error": f"获取 Agent 模型失败：{type(error).__name__}: {error}"}, status_code=502)
     return JSONResponse(result)
+
+
+@router.get("/settings/agent-runtimes/{runtime_id}/runtime-executable")
+async def get_runtime_executable_settings(
+    runtime_id: str,
+    check: bool = False,
+    services: AppServices = Depends(get_services),
+) -> JSONResponse:
+    try:
+        settings = await asyncio.to_thread(
+            services.agent_runtime_config_store.runtime_executable_settings,
+            runtime_id,
+            check_latest=check,
+        )
+    except AgentRuntimeConfigError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    return JSONResponse(settings)
 
 
 @router.patch("/settings/agent-runtimes/{runtime_id}")
