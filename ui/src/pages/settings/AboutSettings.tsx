@@ -5,6 +5,10 @@ import { Database, RefreshCw } from "lucide-react";
 import { loadAppAbout } from "../../services/settingsStore";
 import type { AppAboutInfo } from "../../types";
 
+const REPOSITORY_URL = "https://github.com/Savlgoodman/code-lite";
+const AUTHOR_URL = "https://github.com/Savlgoodman";
+const AUTHOR_NAME = "Kevin Roo";
+
 export function AboutSettings() {
   const [about, setAbout] = useState<AppAboutInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +49,27 @@ export function AboutSettings() {
       </div>
 
       {error ? <div className="settings-inline-error">关于信息读取失败：{error}</div> : null}
+
+      <div className="settings-card">
+        <div className="settings-about-product">
+          <div>
+            <span>产品描述</span>
+            <strong>code-lite 是一个桌面端多 Agent 工作台，用于接入 Codex、Claude Code、opencode 等 agent runtime。</strong>
+          </div>
+          <div>
+            <span>根仓库</span>
+            <a href={REPOSITORY_URL} rel="noreferrer" target="_blank">{REPOSITORY_URL}</a>
+          </div>
+          <div>
+            <span>作者</span>
+            <a href={AUTHOR_URL} rel="noreferrer" target="_blank">{AUTHOR_NAME}</a>
+          </div>
+          <div>
+            <span>作者主页</span>
+            <a href={AUTHOR_URL} rel="noreferrer" target="_blank">{AUTHOR_URL}</a>
+          </div>
+        </div>
+      </div>
 
       <div className="settings-card">
         <div className="settings-about-grid">

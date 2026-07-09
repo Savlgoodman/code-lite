@@ -7,6 +7,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ensure_backend,
             minimize_window,
+            open_about_url,
             pick_acp_package_directory,
             pick_workspace_directory,
             shutdown_app,
@@ -57,6 +58,8 @@ const BACKEND_PORT: u16 = 18765;
 const BACKEND_SIDECAR: &str = "code-lite-backend";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const REPOSITORY_URL: &str = "https://github.com/Savlgoodman/code-lite";
+const AUTHOR_URL: &str = "https://github.com/Savlgoodman";
 
 #[derive(Default)]
 struct BackendState {
@@ -192,6 +195,19 @@ fn toggle_maximize_window(window: tauri::Window) -> Result<(), String> {
         window
             .maximize()
             .map_err(|error| format!("failed to maximize window: {error}"))
+    }
+}
+
+#[tauri::command]
+fn open_about_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    match url.as_str() {
+        REPOSITORY_URL | AUTHOR_URL => {
+            #[allow(deprecated)]
+            app.shell()
+                .open(url, None)
+                .map_err(|error| format!("failed to open url: {error}"))
+        }
+        _ => Err("url is not allowed".to_string()),
     }
 }
 

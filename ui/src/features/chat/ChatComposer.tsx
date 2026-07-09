@@ -59,6 +59,9 @@ interface ModelFamily {
   models: SessionModel[];
 }
 
+const STATUS_MENU_ANIMATION_MS = 180;
+const STATUS_SECTION_ANIMATION_MS = 160;
+
 type RuntimeTone = "claude" | "codex" | "default";
 
 type AccessModeTone =
@@ -105,6 +108,22 @@ interface ChatComposerProps {
   selectedModelFamily: string;
 }
 
+function isLogoutCommand(command: SlashCommand) {
+  const id = command.id.trim().toLowerCase();
+  const slashCommand = command.command.trim().toLowerCase();
+  const label = command.label.trim().toLowerCase();
+  const description = command.description.trim().toLowerCase();
+  return (
+    id === "logout"
+    || slashCommand === "/logout"
+    || slashCommand === "logout"
+    || label === "登出"
+    || label === "退出登录"
+    || description === "登出"
+    || description === "退出登录"
+  );
+}
+
 export function ChatComposer({
   accessMode,
   activeTurnId,
@@ -140,8 +159,11 @@ export function ChatComposer({
   selectedModelFamily,
 }: ChatComposerProps) {
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
+  const [isStatusMenuRendered, setIsStatusMenuRendered] = useState(false);
+  const [isStatusMenuClosing, setIsStatusMenuClosing] = useState(false);
   const [isAccessMenuOpen, setIsAccessMenuOpen] = useState(false);
   const [expandedStatusSection, setExpandedStatusSection] = useState<"model" | "speed" | null>(null);
+  const [closingStatusSection, setClosingStatusSection] = useState<"model" | "speed" | null>(null);
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [composerLayoutVersion, setComposerLayoutVersion] = useState(0);
@@ -153,6 +175,8 @@ export function ChatComposer({
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const statusMenuCloseTimerRef = useRef<number | null>(null);
+  const statusSectionCloseTimerRef = useRef<number | null>(null);
 
   // 从 models 中提取模型族
   const modelFamilies = useMemo(() => {
@@ -171,6 +195,7 @@ export function ChatComposer({
 
   // 当前选中的模型族
   const currentFamily = modelFamilies.find((f) => f.id === selectedModelFamily) ?? modelFamilies[0] ?? null;
+  const visibleCommands = useMemo(() => commands.filter((command) => !isLogoutCommand(command)), [commands]);
 
   // 推理强度选项 —— 从 configOptions 中提取
   const reasoningConfig = configOptions.find((o) => o.id === "reasoning_effort") ?? null;
@@ -216,8 +241,7 @@ export function ChatComposer({
         setIsAccessMenuOpen(false);
       }
       if (isStatusMenuOpen && !statusMenuRef.current?.contains(target)) {
-        setIsStatusMenuOpen(false);
-        setExpandedStatusSection(null);
+        closeStatusMenu();
       }
       if (isCommandMenuOpen && !commandMenuRef.current?.contains(target)) {
         setIsCommandMenuOpen(false);
@@ -226,7 +250,18 @@ export function ChatComposer({
 
     window.addEventListener("mousedown", closeOnOutside);
     return () => window.removeEventListener("mousedown", closeOnOutside);
-  }, [isAccessMenuOpen, isStatusMenuOpen, isCommandMenuOpen]);
+  }, [expandedStatusSection, isAccessMenuOpen, isStatusMenuOpen, isCommandMenuOpen, isStatusMenuRendered]);
+
+  useEffect(() => {
+    return () => {
+      if (statusMenuCloseTimerRef.current !== null) {
+        window.clearTimeout(statusMenuCloseTimerRef.current);
+      }
+      if (statusSectionCloseTimerRef.current !== null) {
+        window.clearTimeout(statusSectionCloseTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!configLoading && !hasFastModePicker && isFastModeOn) {
@@ -399,39 +434,101 @@ export function ChatComposer({
 
   function toggleAccessMenu() {
     setIsAccessMenuOpen((open) => !open);
-    setIsStatusMenuOpen(false);
-    setExpandedStatusSection(null);
+    closeStatusMenu();
   }
 
   function selectFamily(familyId: string) {
     onModelFamilyChange(familyId);
-    setIsStatusMenuOpen(false);
-    setExpandedStatusSection(null);
+    closeStatusMenu();
   }
 
   function selectReasoning(value: string) {
     onReasoningEffortChange(value);
     onConfigChange("reasoning_effort", value);
-    setIsStatusMenuOpen(false);
-    setExpandedStatusSection(null);
+    closeStatusMenu();
   }
 
   function selectFastMode(value: "off" | "on") {
     onConfigChange("fast_mode", value);
-    setIsStatusMenuOpen(false);
-    setExpandedStatusSection(null);
+    closeStatusMenu();
   }
 
   function toggleStatusMenu() {
-    const nextOpen = !isStatusMenuOpen;
-    setIsStatusMenuOpen(nextOpen);
-    if (!nextOpen) {
-      setExpandedStatusSection(null);
+    if (isStatusMenuOpen) {
+      closeStatusMenu();
+      return;
     }
+    if (statusMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(statusMenuCloseTimerRef.current);
+      statusMenuCloseTimerRef.current = null;
+    }
+    if (statusSectionCloseTimerRef.current !== null) {
+      window.clearTimeout(statusSectionCloseTimerRef.current);
+      statusSectionCloseTimerRef.current = null;
+    }
+    setIsAccessMenuOpen(false);
+    setIsCommandMenuOpen(false);
+    setClosingStatusSection(null);
+    setIsStatusMenuRendered(true);
+    setIsStatusMenuClosing(false);
+    setIsStatusMenuOpen(true);
   }
 
   function toggleStatusSection(section: "model" | "speed") {
-    setExpandedStatusSection((current) => (current === section ? null : section));
+    if (expandedStatusSection === section) {
+      closeStatusSection(section);
+      return;
+    }
+    if (statusSectionCloseTimerRef.current !== null) {
+      window.clearTimeout(statusSectionCloseTimerRef.current);
+      statusSectionCloseTimerRef.current = null;
+    }
+    setClosingStatusSection(null);
+    setExpandedStatusSection(section);
+  }
+
+  function closeStatusMenu() {
+    const activeSection = expandedStatusSection;
+
+    if (statusMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(statusMenuCloseTimerRef.current);
+      statusMenuCloseTimerRef.current = null;
+    }
+    if (statusSectionCloseTimerRef.current !== null) {
+      window.clearTimeout(statusSectionCloseTimerRef.current);
+      statusSectionCloseTimerRef.current = null;
+    }
+
+    setIsStatusMenuOpen(false);
+    setExpandedStatusSection(null);
+    setClosingStatusSection(activeSection);
+
+    if (!isStatusMenuRendered) {
+      setIsStatusMenuClosing(false);
+      setClosingStatusSection(null);
+      return;
+    }
+
+    setIsStatusMenuClosing(true);
+    statusMenuCloseTimerRef.current = window.setTimeout(() => {
+      setIsStatusMenuRendered(false);
+      setIsStatusMenuClosing(false);
+      setClosingStatusSection(null);
+      statusMenuCloseTimerRef.current = null;
+    }, STATUS_MENU_ANIMATION_MS);
+  }
+
+  function closeStatusSection(section: "model" | "speed") {
+    if (statusSectionCloseTimerRef.current !== null) {
+      window.clearTimeout(statusSectionCloseTimerRef.current);
+      statusSectionCloseTimerRef.current = null;
+    }
+    setExpandedStatusSection(null);
+    setClosingStatusSection(section);
+    statusSectionCloseTimerRef.current = window.setTimeout(() => {
+      setClosingStatusSection(null);
+      statusSectionCloseTimerRef.current = null;
+    }, STATUS_SECTION_ANIMATION_MS);
   }
 
   const statusLabel = [
@@ -564,14 +661,14 @@ export function ChatComposer({
                   onClick={() => {
                     setIsCommandMenuOpen(open => !open);
                     setIsAccessMenuOpen(false);
-                    setIsStatusMenuOpen(false);
+                    closeStatusMenu();
                   }}
                 >
                   <Plus size={17} />
                 </button>
-                {isCommandMenuOpen && commands.length > 0 ? (
+                {isCommandMenuOpen && visibleCommands.length > 0 ? (
                   <div className="command-menu" role="menu">
-                    {commands.map(cmd => (
+                    {visibleCommands.map(cmd => (
                       <button
                         key={cmd.id}
                         className="command-menu-item"
@@ -657,8 +754,14 @@ export function ChatComposer({
                         <span>{statusLabel}</span>
                         <ChevronDown size={13} />
                       </button>
-                      {isStatusMenuOpen && (
-                        <div className={`status-menu-panels ${expandedStatusSection ? "section-open" : ""}`}>
+                      {isStatusMenuRendered && (
+                        <div
+                          className={[
+                            "status-menu-panels",
+                            expandedStatusSection ? "section-open" : "",
+                            isStatusMenuClosing ? "closing" : "",
+                          ].filter(Boolean).join(" ")}
+                        >
                           <div className="status-menu-panel status-primary-menu" role="menu">
                             {hasReasoningPicker ? (
                               <>
@@ -688,8 +791,12 @@ export function ChatComposer({
                                       <span>速率</span>
                                       <ChevronDown size={14} />
                                     </button>
-                                    {isSpeedListOpen ? (
-                                      <div className="status-model-list" role="group" aria-label="速率">
+                                    {isSpeedListOpen || closingStatusSection === "speed" ? (
+                                      <div
+                                        className={`status-model-list ${!isSpeedListOpen ? "closing" : ""}`}
+                                        role="group"
+                                        aria-label="速率"
+                                      >
                                         <div className="status-model-list-title">速率</div>
                                         {[
                                           { value: "off" as const, label: "1x 普通速率" },
@@ -723,8 +830,12 @@ export function ChatComposer({
                                       <span>{currentFamily.label}</span>
                                       <ChevronDown size={14} />
                                     </button>
-                                    {isModelListOpen ? (
-                                      <div className="status-model-list" role="group" aria-label="模型">
+                                    {isModelListOpen || closingStatusSection === "model" ? (
+                                      <div
+                                        className={`status-model-list ${!isModelListOpen ? "closing" : ""}`}
+                                        role="group"
+                                        aria-label="模型"
+                                      >
                                         <div className="status-model-list-title">模型</div>
                                         {modelFamilies.map((family) => (
                                           <button
@@ -757,8 +868,12 @@ export function ChatComposer({
                                       <span>速率</span>
                                       <ChevronDown size={14} />
                                     </button>
-                                    {isSpeedListOpen ? (
-                                      <div className="status-model-list" role="group" aria-label="速率">
+                                    {isSpeedListOpen || closingStatusSection === "speed" ? (
+                                      <div
+                                        className={`status-model-list ${!isSpeedListOpen ? "closing" : ""}`}
+                                        role="group"
+                                        aria-label="速率"
+                                      >
                                         <div className="status-model-list-title">速率</div>
                                         {[
                                           { value: "off" as const, label: "1x 普通速率" },
@@ -792,8 +907,12 @@ export function ChatComposer({
                                       <span>{currentFamily.label}</span>
                                       <ChevronDown size={14} />
                                     </button>
-                                    {isModelListOpen ? (
-                                      <div className="status-model-list" role="group" aria-label="模型">
+                                    {isModelListOpen || closingStatusSection === "model" ? (
+                                      <div
+                                        className={`status-model-list ${!isModelListOpen ? "closing" : ""}`}
+                                        role="group"
+                                        aria-label="模型"
+                                      >
                                         <div className="status-model-list-title">模型</div>
                                         {modelFamilies.map((family) => (
                                           <button
