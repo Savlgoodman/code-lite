@@ -38,6 +38,7 @@ export function App() {
   const [pairKey, setPairKey] = useState(localStorage.getItem(LS_PAIR_KEY) || "");
   const [connected, setConnected] = useState(false);
   const [hostOnline, setHostOnline] = useState(false);
+  const hostOnlineRef = useRef(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Record<string, ChatMessage[]>>({});
@@ -57,7 +58,7 @@ export function App() {
     const t = new RelayTransport({
       relayUrl,
       roomId,
-      onHostStatusChange: (online) => setHostOnline(online),
+      onHostStatusChange: (online) => { hostOnlineRef.current = online; setHostOnline(online); },
     });
     t.onStatus((s) => setConnected(s !== "idle" && s !== "closed"));
     try {
@@ -65,18 +66,14 @@ export function App() {
       setTransport(t);
       // 订阅全局频道以接收会话列表事件
       await t.subscribe("*");
-      // 等待 host 上线后再拉取列表（最多等 10s）
-      let waited = 0;
-      while (!hostOnline && waited < 100) {
-        await new Promise((r) => setTimeout(r, 100));
-        waited++;
-      }
-      if (hostOnline) {
-        setPage("projects");
+      setPage("projects");
+      // 直接拉取会话列表（host 不在线时 RPC 会超时，显示空列表即可）
+      try {
         const listResult = await t.request<{ sessions: Session[] }>("conversation.list", {});
         setSessions(listResult.sessions);
-      } else {
-        setPage("projects");
+        setHostOnline(true);
+      } catch {
+        setHostOnline(false);
       }
     } catch (e) {
       console.error("connect failed", e);
