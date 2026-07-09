@@ -6,13 +6,13 @@
 
 项目长期保留两个主干分支：
 
-1. `master`：稳定发布分支，只保留发布级合并、版本升级和用户明确授权的紧急修正。
+1. `master`：稳定发布分支，只保留发布级合并、编译发布验证和用户明确授权的紧急修正。
 2. `dev`：集成测试分支，用于在合并到 `master` 前汇总功能分支、修复分支和性能优化分支，并完成合并测试。
 
 `master` 分支只保留以下操作：
 
-1. 合并已经完成验证的特性分支。
-2. 合并后进行版本升级提交。
+1. 合并已经在 `dev` 完成集成验证且包含版本升级提交的内容。
+2. 在合并后执行编译、打包和发布验证。
 3. 用户明确授权的紧急文档或流程修正。
 
 除上述情况外，不应直接在 `master` 上开发新功能、修复 Bug、做性能优化或重构。
@@ -85,9 +85,14 @@ git merge --ff-only feat/settings-0630-model-provider
 
 如历史已经分叉且不能快进，应优先回到功能分支继续 `rebase dev`，避免无意义 merge commit。只有在需要保留分支上下文或用户明确要求时，才使用非快进合并。
 
-`dev` 累积到可以发布的程度后，先完成集成验证，再合入 `master`：
+`dev` 累积到可以发布的程度后，先完成集成验证，并在 `dev` 上完成独立版本升级提交，再合入 `master`：
 
 ```powershell
+git switch dev
+npm run version:set -- 0.1.3
+git status --short
+git add VERSION package.json ui/package.json ui/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
+git commit -m "chore: 升级版本到 0.1.3"
 git switch master
 git pull
 git merge --ff-only dev
@@ -104,11 +109,11 @@ git merge --ff-only dev
 
 ## 版本升级与发布
 
-`dev` 合并到 `master` 后，必须进行一次版本升级提交，然后再发布。
+发布前必须先在 `dev` 分支完成一次独立版本升级提交，再将 `dev` 快进合并到 `master`，最后在 `master` 上执行编译、打包和发布验证。
 
 版本升级提交要求：
 
-1. `dev` 合并到 `master` 后立即执行，不能跳过。
+1. 必须在 `dev` 分支完成，且必须早于 `dev` 合并到 `master`。
 2. 使用项目统一版本入口，例如 `npm run version:set -- 0.1.3` 或修改 `VERSION` 后运行 `npm run version:sync`。
 3. 版本提交只包含版本相关文件，不混入功能代码。
 4. 提交信息使用 Conventional Commits，例如 `chore: 升级版本到 0.1.3`。
@@ -116,20 +121,24 @@ git merge --ff-only dev
 推荐顺序：
 
 ```powershell
-git switch master
-git merge --ff-only dev
+git switch dev
 npm run version:set -- 0.1.3
 git status --short
 git add VERSION package.json ui/package.json ui/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
 git commit -m "chore: 升级版本到 0.1.3"
+git switch master
+git pull
+git merge --ff-only dev
 ```
 
-发布完成后，确保 `dev` 重新包含 `master` 上的版本升级提交：
+合并到 `master` 后，再执行编译、打包和发布验证。编译验证必须晚于 `master` 快进合并，以确认最终发布分支可构建：
 
 ```powershell
-git switch dev
-git rebase master
+npm run ui:build
+npm run tauri:build
 ```
+
+版本升级提交已经在 `dev` 上完成并随快进合并进入 `master`，发布完成后不需要再把 `master` 上的版本提交同步回 `dev`。如果发布过程中在 `master` 产生了额外修正，应先评估是否需要回到 `dev` 补提交并重新走发布流程，避免 `master` 与 `dev` 长期分叉。
 
 ## AI Agent 要求
 
@@ -140,7 +149,7 @@ git branch --show-current
 git status --short
 ```
 
-如果当前在 `master` 且任务不是版本升级、分支合并或用户明确授权的例外，应先切换到 `dev` 或从 `dev` 创建符合规范的新分支再修改代码。
+如果当前在 `master` 且任务不是分支合并、编译发布验证或用户明确授权的例外，应先切换到 `dev` 或从 `dev` 创建符合规范的新分支再修改代码。
 
 如果当前在 `dev` 且任务只是文档修改、参数配置或流程说明等小幅度改动，可以直接在 `dev` 上修改。其他开发、修复和优化任务应从 `dev` 新建分支。
 
