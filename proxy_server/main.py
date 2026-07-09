@@ -126,7 +126,7 @@ async def handle_hello(ws: WebSocket, payload: dict, room: Room) -> dict | None:
             return None
         room.host = ws
         room.last_host_seen = time.time()
-        logger.info("host joined room %s", room.room_id[:12])
+        logger.info("host joined room %s (%d waiting remotes)", room.room_id[:12], len(room.remotes))
         # 如果有等待中的 remote，通知它们 host 上线
         for remote in room.remotes.values():
             await safe_send_json(remote.ws, make_envelope("host.online"))
@@ -140,9 +140,8 @@ async def handle_hello(ws: WebSocket, payload: dict, room: Room) -> dict | None:
             logger.info("remote %s joined room %s (host offline, waiting)", peer_id, room.room_id[:12])
             return make_envelope("waiting", role="remote", peerId=peer_id)
         else:
+            logger.info("remote %s joined room %s, host IS online, sending host.online + ready", peer_id, room.room_id[:12])
             await safe_send_json(room.host, make_envelope("peer.joined", peerId=peer_id))
-            logger.info("remote %s joined room %s", peer_id, room.room_id[:12])
-            # host 已在线，告知 remote
             await safe_send_json(ws, make_envelope("host.online"))
             return make_envelope("ready", role="remote", peerId=peer_id)
 
@@ -229,8 +228,10 @@ async def relay_endpoint(ws: WebSocket) -> None:
                     payload = msg.get("payload")
                     if isinstance(payload, dict):
                         if role == Role.REMOTE and peer_id:
+                            logger.debug("remote %s → host: %s", peer_id, payload.get("method", "?"))
                             await handle_msg_from_remote(room, peer_id, payload)
                         elif role == Role.HOST:
+                            logger.debug("host → remote(peer=%s): %s", payload.get("peerId", "*"), payload.get("method", "?"))
                             await handle_msg_from_host(room, payload)
 
         async def heartbeat_loop() -> None:

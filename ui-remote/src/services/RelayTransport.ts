@@ -92,6 +92,7 @@ export class RelayTransport implements Transport {
   }
 
   private handleRelayMessage(msg: RelayEnvelope, resolveConnect?: () => void) {
+    console.log("[RelayTransport] recv:", msg.type, msg);
     if (msg.type === "ready") {
       this.setStatus("connected");
       this.startHeartbeat();
@@ -190,6 +191,7 @@ export class RelayTransport implements Transport {
           payload,
         },
       };
+      console.log("[RelayTransport] send:", method, envelope);
       this.ws!.send(JSON.stringify(envelope));
     });
   }

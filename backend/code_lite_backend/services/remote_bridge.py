@@ -178,6 +178,7 @@ class RemoteBridge:
                 "roomId": self._config.room_id,
             }))
             resp = json.loads(await ws.recv())
+            logger.info("relay hello response: %s", resp)
             if resp.get("type") != "ready":
                 logger.error("relay rejected: %s", resp)
                 return
@@ -208,6 +209,7 @@ class RemoteBridge:
                     elif msg_type == "msg":
                         payload = msg.get("payload", {})
                         peer_id = msg.get("peerId", "")
+                        logger.info("msg from peer %s: method=%s", peer_id, payload.get("method", "?"))
                         await self._handle_rpc(payload, peer_id)
                     elif msg_type == "host.offline":
                         pass  # 不应该收到
