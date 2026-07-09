@@ -42,6 +42,130 @@ class ConversationRecorderPlanTest(unittest.TestCase):
 
 
 class ConversationRecorderToolMetadataTest(unittest.TestCase):
+    def test_config_update_runtime_event_is_compact(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            recorder = ConversationRecorder(ConversationStore(Path(directory)))
+            turn = recorder.start_turn(conversation_id="conv-1", prompt="configure")
+
+            recorder.apply_agent_event(
+                conversation_id="conv-1",
+                assistant_message_id=str(turn.assistant_message["id"]),
+                event={
+                    "type": "agent.config.updated",
+                    "configOptions": [
+                        {
+                            "id": "fast-mode",
+                            "currentValue": "on",
+                            "options": [
+                                {
+                                    "description": "Default speed, normal usage",
+                                    "name": "Off",
+                                    "value": "off",
+                                },
+                                {
+                                    "description": "1.5x speed, increased usage",
+                                    "name": "On",
+                                    "value": "on",
+                                },
+                            ],
+                        },
+                        {
+                            "id": "reasoning_effort",
+                            "currentValue": "xhigh",
+                        },
+                    ],
+                    "metadata": {
+                        "runtime": "codex",
+                        "rawUpdate": {
+                            "sessionUpdate": "config_update",
+                            "configOptions": [
+                                {
+                                    "id": "fast-mode",
+                                    "currentValue": "on",
+                                    "options": [
+                                        {
+                                            "description": "Default speed, normal usage",
+                                            "name": "Off",
+                                            "value": "off",
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                },
+            )
+
+            runtime_event = turn.assistant_message["runtimeEvents"][0]
+            self.assertNotIn("configOptions", runtime_event)
+            self.assertEqual(runtime_event["configOptionIds"], ["fast-mode", "reasoning_effort"])
+            self.assertEqual(runtime_event["configOptionValues"]["fast-mode"], "on")
+            self.assertNotIn("rawUpdate", runtime_event["metadata"])
+            self.assertEqual(runtime_event["metadata"]["rawUpdateSummary"]["configOptionIds"], ["fast-mode"])
+
+    def test_existing_runtime_events_are_compacted_on_next_turn(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            store = ConversationStore(Path(directory))
+            store.save_session(
+                "conv-1",
+                {
+                    "id": "conv-1",
+                    "title": "configure",
+                    "preview": "configure",
+                    "status": "idle",
+                },
+            )
+            store.save_messages(
+                "conv-1",
+                [
+                    {
+                        "id": "assistant-old",
+                        "role": "assistant",
+                        "content": "",
+                        "createdAt": 1,
+                        "toolCalls": [],
+                        "runtimeEvents": [
+                            {
+                                "type": "agent.config.updated",
+                                "createdAt": 2,
+                                "configOptions": [
+                                    {
+                                        "id": "fast-mode",
+                                        "currentValue": "on",
+                                        "options": [{"name": "On", "value": "on"}],
+                                    },
+                                ],
+                                "metadata": {
+                                    "runtime": "codex",
+                                    "rawUpdate": {
+                                        "configOptions": [
+                                            {
+                                                "id": "fast-mode",
+                                                "currentValue": "on",
+                                                "options": [{"name": "On", "value": "on"}],
+                                            },
+                                        ],
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                ],
+            )
+
+            recorder = ConversationRecorder(store)
+            turn = recorder.start_turn(conversation_id="conv-1", prompt="next")
+
+            old_event = turn.messages[0]["runtimeEvents"][0]
+            self.assertNotIn("configOptions", old_event)
+            self.assertEqual(old_event["createdAt"], 2)
+            self.assertEqual(old_event["configOptionIds"], ["fast-mode"])
+            self.assertNotIn("rawUpdate", old_event["metadata"])
+
     def test_tool_call_projection_saves_diff_artifact(self) -> None:
         from tempfile import TemporaryDirectory
 

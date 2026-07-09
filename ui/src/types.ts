@@ -71,7 +71,9 @@ export interface SessionCapabilities {
   models: SessionModel[];
   configOptions: SessionConfigOption[];
   commands: SlashCommand[];
+  fastModeConfigOption?: SessionConfigOption | null;
   inputCapabilities?: SessionInputCapabilities;
+  modelFastSupport?: Record<string, boolean>;
 }
 
 export interface SessionInputCapabilities {

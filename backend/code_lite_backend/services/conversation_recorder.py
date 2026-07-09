@@ -47,8 +47,82 @@ def _default_tool_call(tool_call_id: str, name: str) -> dict[str, Any]:
     }
 
 
+def _config_options_summary(config_options: Any) -> dict[str, Any]:
+    ids: list[str] = []
+    values: dict[str, Any] = {}
+
+    if isinstance(config_options, list):
+        for item in config_options:
+            if not isinstance(item, dict):
+                continue
+            config_id = str(item.get("id") or "").strip()
+            if not config_id:
+                continue
+            ids.append(config_id)
+            if "currentValue" in item:
+                values[config_id] = item.get("currentValue")
+    elif isinstance(config_options, dict):
+        for key, item in config_options.items():
+            config_id = str(key or "").strip()
+            if not config_id:
+                continue
+            ids.append(config_id)
+            if isinstance(item, dict):
+                if "currentValue" in item:
+                    values[config_id] = item.get("currentValue")
+                elif "current_value" in item:
+                    values[config_id] = item.get("current_value")
+
+    summary: dict[str, Any] = {}
+    if ids:
+        summary["configOptionIds"] = ids
+    if values:
+        summary["configOptionValues"] = values
+    return summary
+
+
+def _runtime_raw_update_summary(raw_update: dict[str, Any]) -> dict[str, Any]:
+    summary = {
+        key: value
+        for key, value in raw_update.items()
+        if key not in {"content", "configOptions", "config_options"}
+    }
+
+    raw_config_options = raw_update.get("configOptions")
+    if raw_config_options is None:
+        raw_config_options = raw_update.get("config_options")
+    summary.update(_config_options_summary(raw_config_options))
+
+    content = raw_update.get("content")
+    if isinstance(content, list):
+        content_types = [
+            str(item.get("type") or "unknown")
+            for item in content
+            if isinstance(item, dict)
+        ]
+        summary["contentCount"] = len(content)
+        summary["contentTypes"] = content_types
+        summary["hasFileDiffs"] = any(item.get("type") == "diff" for item in content if isinstance(item, dict))
+    return summary
+
+
+def _runtime_event_metadata(metadata: Any) -> dict[str, Any] | None:
+    if not isinstance(metadata, dict):
+        return None
+    projected = {
+        key: value
+        for key, value in metadata.items()
+        if key not in {"rawUpdate", "configOptions", "config_options"}
+    }
+    raw_update = metadata.get("rawUpdate")
+    if isinstance(raw_update, dict):
+        projected["rawUpdateSummary"] = _runtime_raw_update_summary(raw_update)
+    return projected or None
+
+
 def _event_record(event: dict[str, Any]) -> dict[str, Any]:
-    timestamp = now_ms()
+    raw_created_at = event.get("createdAt")
+    timestamp = raw_created_at if isinstance(raw_created_at, int) else now_ms()
     keys = (
         "type",
         "updateKind",
@@ -57,13 +131,31 @@ def _event_record(event: dict[str, Any]) -> dict[str, Any]:
         "rpcKind",
         "modeId",
         "commands",
-        "configOptions",
         "raw",
-        "metadata",
     )
     record = {key: event[key] for key in keys if key in event}
+    if event.get("type") == "agent.config.updated":
+        record.update(_config_options_summary(event.get("configOptions")))
+    metadata = _runtime_event_metadata(event.get("metadata"))
+    if metadata:
+        record["metadata"] = metadata
     record["createdAt"] = timestamp
     return record
+
+
+def _compact_message_runtime_events(message: dict[str, Any]) -> dict[str, Any]:
+    events = message.get("runtimeEvents")
+    if not isinstance(events, list):
+        return message
+    compacted = [
+        _event_record(event)
+        for event in events[-200:]
+        if isinstance(event, dict)
+    ]
+    return {
+        **message,
+        "runtimeEvents": compacted,
+    }
 
 
 def _event_metadata(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -284,7 +376,11 @@ class ConversationRecorder:
             "streaming": True,
             "toolCalls": [],
         }
-        messages = list(persisted.get("messages") or []) if persisted else []
+        messages = [
+            _compact_message_runtime_events(message)
+            for message in (persisted.get("messages") or [])
+            if isinstance(message, dict)
+        ] if persisted else []
         messages.extend([user_message, assistant_message])
         self._active_sessions[conversation_id] = session
         self._active_messages[conversation_id] = messages

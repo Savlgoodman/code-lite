@@ -422,7 +422,7 @@ async def stream_turn(
                 "reasoningEffort": requested_reasoning_effort or "none",
             }
             runtime_fast_config_id = _runtime_fast_config_id(agent_id)
-            if requested_fast_mode and not _supports_runtime_fast_mode(
+            if requested_fast_mode and agent_id != "codex" and not _supports_runtime_fast_mode(
                 services,
                 conversation_id,
                 runtime_fast_config_id,

@@ -94,6 +94,108 @@ function isCodexCapabilities(caps: SessionCapabilities): boolean {
   return caps.agent.id === "codex";
 }
 
+function fastModeConfigOption(options: SessionConfigOption[] | undefined): SessionConfigOption | null {
+  return options?.find((option) => option.id === "fast_mode" || option.id === "fast-mode" || option.id === "fast") ?? null;
+}
+
+function withoutFastModeConfigOption(options: SessionConfigOption[]): SessionConfigOption[] {
+  return options.filter((option) => option.id !== "fast_mode" && option.id !== "fast-mode" && option.id !== "fast");
+}
+
+function createCodexFastModeConfigOption(currentValue: ChatConfigValue = "off"): SessionConfigOption {
+  return {
+    id: "fast_mode",
+    label: "速率",
+    type: "enum",
+    values: ["off", "on"],
+    currentValue,
+    valueLabels: {
+      off: "1x 普通速率",
+      on: "1.5x 高速",
+    },
+  };
+}
+
+function currentModelFamilyFromCapabilities(caps: SessionCapabilities): string {
+  const currentModel = caps.models.find((model) => model.isCurrent) ?? caps.models[0];
+  if (!currentModel) {
+    return "";
+  }
+  return isCodexCapabilities(caps) ? splitRuntimeModelId(currentModel.id).family : currentModel.id;
+}
+
+function codexModelLikelySupportsFast(modelFamily: string): boolean {
+  const normalized = modelFamily.trim().toLowerCase();
+  return Boolean(normalized) && !normalized.includes("mini");
+}
+
+function prepareRuntimeCapabilities(
+  caps: SessionCapabilities,
+  config?: SessionConfig | null,
+): SessionCapabilities {
+  void config;
+  const runtimeFamily = currentModelFamilyFromCapabilities(caps);
+  const currentFastOption = fastModeConfigOption(caps.configOptions);
+  const fastOption = currentFastOption
+    ?? caps.fastModeConfigOption
+    ?? (isCodexCapabilities(caps) ? createCodexFastModeConfigOption() : null);
+  const modelFastSupport = { ...(caps.modelFastSupport ?? {}) };
+  if (runtimeFamily && currentFastOption) {
+    modelFastSupport[runtimeFamily] = true;
+  }
+
+  return {
+    ...caps,
+    fastModeConfigOption: fastOption,
+    modelFastSupport,
+  };
+}
+
+function applyFastModeVisibility(
+  caps: SessionCapabilities | null,
+  config: SessionConfig | null | undefined,
+): SessionCapabilities | null {
+  if (!caps || !isCodexCapabilities(caps)) {
+    return caps;
+  }
+  const selectedFamily = config?.modelFamily || currentModelFamilyFromCapabilities(caps);
+  const storedFastOption = fastModeConfigOption(caps.configOptions)
+    ?? caps.fastModeConfigOption
+    ?? createCodexFastModeConfigOption();
+  if (!storedFastOption) {
+    return caps;
+  }
+
+  const support = selectedFamily ? caps.modelFastSupport?.[selectedFamily] : undefined;
+  const shouldShow = support ?? codexModelLikelySupportsFast(selectedFamily);
+  const configOptions = withoutFastModeConfigOption(caps.configOptions);
+  if (!shouldShow) {
+    return {
+      ...caps,
+      configOptions,
+    };
+  }
+
+  const selectedValue = config?.selectedConfig?.fast_mode
+    ?? config?.selectedConfig?.fastMode
+    ?? config?.selectedConfig?.["fast-mode"]
+    ?? config?.selectedConfig?.fast
+    ?? storedFastOption.currentValue
+    ?? "off";
+  return {
+    ...caps,
+    configOptions: [
+      ...configOptions,
+      {
+        ...storedFastOption,
+        id: "fast_mode",
+        label: "速率",
+        currentValue: isConfigValue(selectedValue) ? selectedValue : storedFastOption.currentValue,
+      },
+    ],
+  };
+}
+
 function createDraftSession(): Session {
   return {
     ...createEmptySession(),
@@ -311,15 +413,27 @@ function normalizeRuntimeConfigOptions(options: unknown[]): SessionConfigOption[
 function mergeRuntimeConfigOptions(
   current: SessionCapabilities | undefined,
   options: unknown[],
+  config?: SessionConfig | null,
 ): SessionCapabilities | undefined {
   if (!current) {
     return current;
   }
   const incoming = normalizeRuntimeConfigOptions(options);
-  return {
+  const incomingFastOption = fastModeConfigOption(incoming);
+  const modelFastSupport = { ...(current.modelFastSupport ?? {}) };
+  if (isCodexCapabilities(current)) {
+    const selectedFamily = config?.modelFamily || currentModelFamilyFromCapabilities(current);
+    if (selectedFamily) {
+      modelFastSupport[selectedFamily] = Boolean(incomingFastOption);
+    }
+  }
+  const merged = {
     ...current,
     configOptions: incoming,
+    fastModeConfigOption: incomingFastOption ?? current.fastModeConfigOption ?? (isCodexCapabilities(current) ? createCodexFastModeConfigOption() : null),
+    modelFastSupport,
   };
+  return prepareRuntimeCapabilities(merged, config);
 }
 
 function mergeMessagePlan(
@@ -452,8 +566,12 @@ export function ChatPage() {
   const [configLoadingBySession, setConfigLoadingBySession] = useState<Record<string, boolean>>({});
 
   // ─── 派生：当前会话的 capabilities 和 config ───
-  const currentCapabilities = capabilitiesBySession[activeSessionId] ?? null;
   const currentConfig = configBySession[activeSessionId] ?? null;
+  const rawCurrentCapabilities = capabilitiesBySession[activeSessionId] ?? null;
+  const currentCapabilities = useMemo(
+    () => applyFastModeVisibility(rawCurrentCapabilities, currentConfig),
+    [rawCurrentCapabilities, currentConfig],
+  );
   const isCurrentConfigReady = isConfigReady(currentCapabilities, currentConfig);
   const isCurrentConfigLoading =
     activeView === "chat" && ((configLoadingBySession[activeSessionId] ?? false) || !isCurrentConfigReady);
@@ -631,7 +749,10 @@ export function ChatPage() {
         if (cancelled) return;
 
         // 写入 capabilities 缓存
-        setCapabilitiesBySession((prev) => ({ ...prev, [activeSessionId]: caps }));
+        setCapabilitiesBySession((prev) => ({
+          ...prev,
+          [activeSessionId]: prepareRuntimeCapabilities(caps, configBySessionRef.current[activeSessionId]),
+        }));
 
         // 初始化 config（仅当该会话没有 config 时）— 使用函数式更新确保不覆盖
         setConfigBySession((prev) => {
@@ -710,7 +831,10 @@ export function ChatPage() {
           commands: [],
         };
 
-        setCapabilitiesBySession((prev) => ({ ...prev, [activeSessionId]: fallbackCaps }));
+        setCapabilitiesBySession((prev) => ({
+          ...prev,
+          [activeSessionId]: prepareRuntimeCapabilities(fallbackCaps, configBySessionRef.current[activeSessionId]),
+        }));
 
         // 初始化 config（仅当该会话没有 config 时）— 使用函数式更新确保不覆盖
         setConfigBySession((prev) => {
@@ -1175,7 +1299,7 @@ export function ChatPage() {
             if (prev[nextSessionId]) {
               return prev;
             }
-            return { ...prev, [nextSessionId]: draftCaps };
+            return { ...prev, [nextSessionId]: prepareRuntimeCapabilities(draftCaps, configBySessionRef.current[sessionId]) };
           });
         }
         const draftCfg = configBySession[sessionId];
@@ -1323,7 +1447,11 @@ export function ChatPage() {
       const hasFastOption = nextConfigOptions.some((option) => option.id === "fast_mode");
       setCapabilitiesBySession((prev) => ({
         ...prev,
-        [targetSessionId]: mergeRuntimeConfigOptions(prev[targetSessionId], event.configOptions) ?? prev[targetSessionId],
+        [targetSessionId]: mergeRuntimeConfigOptions(
+          prev[targetSessionId],
+          event.configOptions,
+          configBySessionRef.current[targetSessionId],
+        ) ?? prev[targetSessionId],
       }));
       setConfigBySession((prev) => {
         const current = prev[targetSessionId];
