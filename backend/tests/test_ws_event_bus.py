@@ -110,5 +110,37 @@ class WsEndpointTest(unittest.TestCase):
             self.assertEqual(reply["payload"]["code"], "method_not_implemented")
 
 
+class RemoteBridgeDispatchTest(unittest.TestCase):
+    """守护 0710 修复：中继 dispatch 的 5 参 handler 集合必须与 ws.py 实际签名一致。
+
+    历史 bug：turn.start 是 5 参 handler（末位 tasks），但 bridge 只给 subscribe
+    传了 tasks，turn.start 走 4 参分支抛 TypeError 被吞，导致远端发消息静默失败。
+    """
+
+    def test_handlers_needing_tasks_matches_actual_signatures(self) -> None:
+        import inspect
+
+        from code_lite_backend.services.remote_bridge import (
+            _HANDLERS_NEEDING_TASKS,
+            _get_rpc_handlers,
+        )
+
+        handlers = _get_rpc_handlers()
+        five_arg = set()
+        for method, handler in handlers.items():
+            params = [
+                p
+                for p in inspect.signature(handler).parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            ]
+            if len(params) >= 5:
+                five_arg.add(method)
+        self.assertEqual(
+            five_arg,
+            _HANDLERS_NEEDING_TASKS,
+            f"5-arg handlers {five_arg} != _HANDLERS_NEEDING_TASKS {_HANDLERS_NEEDING_TASKS}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

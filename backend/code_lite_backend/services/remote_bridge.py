@@ -35,6 +35,12 @@ def _envelope(kind: str, **fields: Any) -> dict[str, Any]:
     return envelope
 
 
+# 这些 handler 签名为 5 参（末位 tasks: 订阅/泵状态），其余为 4 参。
+# turn.start 会在启动 turn 前先订阅会话频道（见 ws.py _handle_turn_start），
+# 因此和 subscribe 一样需要 tasks；漏传会抛 TypeError 被吞，导致 turn 静默不启动。
+_HANDLERS_NEEDING_TASKS = {"subscribe", "turn.start"}
+
+
 def _get_rpc_handlers() -> dict[str, Any]:
     """懒加载 WS RPC handlers，避免循环导入"""
     from code_lite_backend.api.routes.ws import (
@@ -244,7 +250,9 @@ class RemoteBridge:
                 await fake_ws.send_json(_envelope("result", requestId=request_id, payload={"ok": True}))
             elif method in handlers:
                 handler = handlers[method]
-                if method == "subscribe":
+                # subscribe 与 turn.start 需要 tasks 参数（订阅状态）；其余 handler 只需 4 参。
+                # 见 docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md 第 1.1 节。
+                if method in _HANDLERS_NEEDING_TASKS:
                     await handler(fake_ws, services, request_id, rpc_payload, self._pump_tasks)
                 else:
                     await handler(fake_ws, services, request_id, rpc_payload)
