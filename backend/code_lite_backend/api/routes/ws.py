@@ -225,6 +225,77 @@ async def _handle_conversation_list(
     await _send(ws, _envelope("result", requestId=request_id, payload={"sessions": sessions}))
 
 
+async def _handle_fs_list(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """列出宿主机某目录下的子目录，供远端新建会话时浏览工作区路径。
+
+    仅返回目录（新建会话选的是工作区文件夹，无需列文件）。path 为空时返回
+    用户 home 目录内容 + 盘符（Windows）作为浏览起点。远端需 operator 权限
+    （见 remote_bridge._METHOD_MIN_ROLE），故仅已配对且授权的设备可浏览。
+    """
+    import os
+    import string as _string
+    from pathlib import Path
+
+    raw = str(payload.get("path") or "").strip()
+
+    def _drives() -> list[dict[str, Any]]:
+        # Windows 盘符列表（浏览起点之一）；非 Windows 返回空
+        if os.name != "nt":
+            return []
+        found: list[dict[str, Any]] = []
+        for letter in _string.ascii_uppercase:
+            root = f"{letter}:\\"
+            if os.path.exists(root):
+                found.append({"name": root, "path": root, "isDir": True})
+        return found
+
+    try:
+        if not raw:
+            base = Path.home()
+        else:
+            base = Path(raw).expanduser()
+            try:
+                base = base.resolve()
+            except OSError:
+                base = base.absolute()
+
+        if not base.exists() or not base.is_dir():
+            await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_a_directory", "path": str(base)}))
+            return
+
+        entries: list[dict[str, Any]] = []
+        try:
+            for child in sorted(base.iterdir(), key=lambda p: p.name.lower()):
+                try:
+                    if not child.is_dir():
+                        continue
+                    name = child.name
+                    if name.startswith("."):
+                        continue  # 跳过隐藏目录，减少噪音
+                    entries.append({"name": name, "path": str(child), "isDir": True})
+                except OSError:
+                    continue
+        except PermissionError:
+            await _send(ws, _envelope("error", requestId=request_id, payload={"code": "permission_denied", "path": str(base)}))
+            return
+
+        parent = str(base.parent) if base.parent != base else None
+        await _send(ws, _envelope("result", requestId=request_id, payload={
+            "path": str(base),
+            "parent": parent,
+            "entries": entries,
+            "drives": _drives(),
+        }))
+    except Exception:
+        logger.exception("fs.list failed for path=%s", raw)
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "internal_error"}))
+
+
 async def _handle_conversation_get(
     ws: WebSocket,
     services: AppServices,
@@ -437,6 +508,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 await _handle_conversation_list(ws, services, request_id, payload)
             elif method == "conversation.get":
                 await _handle_conversation_get(ws, services, request_id, payload)
+            elif method == "fs.list":
+                await _handle_fs_list(ws, services, request_id, payload)
             elif method == "conversation.create":
                 await _handle_conversation_create(ws, services, request_id, payload)
             elif method == "conversation.config.update":
