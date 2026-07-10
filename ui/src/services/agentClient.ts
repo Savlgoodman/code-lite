@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AgentEvent, MessageAttachment, Session, SessionCapabilities, UserContentBlock } from "../types";
 import { LocalTransport } from "./localTransport";
 import { SyncManager } from "@code-lite/sync";
+import { ConversationClient } from "@code-lite/chat-core";
 
 // 共享 WS 传输：本地桌面前端的事件源与命令通道（0709 阶段二）。
 let sharedTransport: LocalTransport | null = null;
@@ -23,6 +24,19 @@ export function getSyncManager(): SyncManager {
     sharedSyncManager = new SyncManager({ transport: getLocalTransport(), role: "host" });
   }
   return sharedSyncManager;
+}
+
+// 共享 ConversationClient（role=host）：会话列表 + 视图态的统一状态层。
+let sharedConversationClient: ConversationClient | null = null;
+
+export function getConversationClient(): ConversationClient {
+  if (!sharedConversationClient) {
+    sharedConversationClient = new ConversationClient({
+      transport: getLocalTransport(),
+      sync: getSyncManager(),
+    });
+  }
+  return sharedConversationClient;
 }
 
 interface BackendStatus {

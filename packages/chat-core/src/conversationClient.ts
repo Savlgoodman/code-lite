@@ -90,6 +90,8 @@ export class ConversationClient {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   // turn 完成回调：turnId -> resolver（sendTurn 的 Promise 收尾）。
   private readonly turnResolvers = new Map<string, (event: AgentEvent) => void>();
+  // 原始事件观察者：供 app 层处理 reducer 不覆盖的副作用（如桌面的 caps/config-from-events）。
+  private readonly eventObservers = new Set<(event: AgentEvent, channel: string) => void>();
 
   constructor(options: ConversationClientOptions) {
     this.transport = options.transport;
@@ -130,6 +132,40 @@ export class ConversationClient {
     return this.sync.isRunning(id) || Boolean(this.views[id]?.running);
   }
 
+  getActiveTurnId(id: string): string | undefined {
+    return this.activeTurnId[id];
+  }
+
+  /** 暴露内部 SyncManager，供 app 层订阅配置同步等额外事件。 */
+  getSync(): SyncManager {
+    return this.sync;
+  }
+
+  /** 本地 patch 单个会话字段（触发 UI 重渲染）。供 app 层做 resolveApproval/archive 等即时 UI 反馈。 */
+  patchSession(sessionId: string, patch: Partial<Session>): void {
+    this.updateSessionInternal(sessionId, patch);
+  }
+
+  /** 用新会话对象替换列表中的一个（id 相同的会话）。 */
+  replaceSession(updated: Session): void {
+    const sessions = this.sessions;
+    const existing = sessions.find((x) => x.id === updated.id);
+    this.sessions = existing
+      ? sessions.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))
+      : [updated, ...sessions];
+    this.emit();
+  }
+
+  /**
+   * 订阅原始会话级事件（reduce 之后触发），供 app 层处理 reducer 不覆盖的副作用：
+   * 桌面端据此更新 per-session capabilities、config-from-events、context usage。
+   * 返回取消函数。channel 为事件所属会话 id。
+   */
+  onRawEvent(observer: (event: AgentEvent, channel: string) => void): () => void {
+    this.eventObservers.add(observer);
+    return () => this.eventObservers.delete(observer);
+  }
+
   // ─── 启动 / 停止 ───────────────────────────────────────────
 
   /**
@@ -144,11 +180,11 @@ export class ConversationClient {
 
     // 运行态与配置由 SyncManager 驱动。
     this.disposers.push(this.sync.onSessionRunning((p) => {
-      this.patchSession(p.conversationId, { status: "running" });
+      this.updateSessionInternal(p.conversationId, { status: "running" });
       this.patchView(p.conversationId, (v) => ({ ...v, running: true }));
     }));
     this.disposers.push(this.sync.onSessionStopped((p) => {
-      this.patchSession(p.conversationId, (s) => ({ status: s.status === "running" ? "idle" : s.status }));
+      this.updateSessionInternal(p.conversationId, (s) => ({ status: s.status === "running" ? "idle" : s.status }));
       this.patchView(p.conversationId, (v) => ({ ...v, running: false }));
     }));
 
@@ -210,6 +246,9 @@ export class ConversationClient {
     const channel = (event as { conversationId?: string }).conversationId || meta.channel;
     if (!channel || channel === GLOBAL_CHANNEL) return;
 
+    // 通知原始事件观察者（app 层副作用：桌面的 caps/config/context）。
+    for (const obs of this.eventObservers) obs(event, channel);
+
     // 文本/推理增量走批处理缓冲（60ms flush）；其余事件即时 reduce。
     if (type === "agent.text.delta") {
       this.queueDelta(channel, (event as { delta: string }).delta, "text");
@@ -224,13 +263,14 @@ export class ConversationClient {
       return;
     }
 
-    this.flushDeltas();
-    this.reduceInto(channel, event);
-    // 记录活动 assistant 消息 id（供批处理 delta 定位）。
+    // 记录活动 assistant 消息 id（供批处理 delta 定位）——须在 reduce 前设好。
     if (type === "conversation.turn.started") {
       const assistantId = (event as { assistantMessage?: { id?: string } }).assistantMessage?.id;
       if (assistantId) this.activeAssistantId[channel] = assistantId;
     }
+
+    this.flushDeltas();
+    this.reduceInto(channel, event);
   };
 
   private readonly handleSnapshot = (channel: string, payload: unknown): void => {
@@ -261,7 +301,7 @@ export class ConversationClient {
 
   // ─── patch 辅助 ─────────────────────────────────────────────
 
-  private patchSession(id: string, patch: Partial<Session> | ((s: Session) => Partial<Session>)): void {
+  private updateSessionInternal(id: string, patch: Partial<Session> | ((s: Session) => Partial<Session>)): void {
     let changed = false;
     this.sessions = this.sessions.map((s) => {
       if (s.id !== id) return s;
