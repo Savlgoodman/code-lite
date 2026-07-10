@@ -9,7 +9,8 @@ let sharedTransport: LocalTransport | null = null;
 
 export function getLocalTransport(): LocalTransport {
   if (!sharedTransport) {
-    sharedTransport = new LocalTransport();
+    // 注入 Tauri 后端发现作为 urlProvider（避免 packages 依赖 Tauri）。
+    sharedTransport = new LocalTransport(ensureBackend);
   }
   return sharedTransport;
 }

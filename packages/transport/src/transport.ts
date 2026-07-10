@@ -15,12 +15,6 @@ export type TransportStatus =
   | "reconnecting"
   | "closed";
 
-/** RPC 请求成功结果。失败时以拒绝的 Promise（TransportError）表达。 */
-export interface RpcResult<T = unknown> {
-  requestId: string;
-  payload: T;
-}
-
 export class TransportError extends Error {
   readonly code: string;
   readonly requestId?: string;
@@ -63,17 +57,28 @@ export interface StatusHandler {
  * - subscribe：订阅某会话频道，先回 snapshot，之后推增量 event。
  * - onEvent / onSnapshot / onStatus：注册回调，返回取消函数。
  */
+/** 后端 -> 客户端控制信令回调。 */
+export interface ControlHandler {
+  (payload: unknown): void;
+}
+
 export interface Transport {
   readonly status: TransportStatus;
 
   connect(): Promise<void>;
   close(): void;
 
-  request<T = unknown>(method: WireMethod, payload?: unknown): Promise<RpcResult<T>>;
+  /** 发起 RPC，resolve 为后端返回的 payload（失败时 reject TransportError）。 */
+  request<T = unknown>(method: WireMethod | string, payload?: unknown): Promise<T>;
 
+  /** 订阅会话频道；先回 snapshot（走 onSnapshot），之后推增量 event（走 onEvent）。 */
   subscribe(channel: string, options?: SubscribeOptions): Promise<Subscription>;
+  /** 退订会话频道。 */
+  unsubscribe(channel: string): void;
 
   onEvent(handler: EventHandler): () => void;
   onSnapshot(handler: SnapshotHandler): () => void;
   onStatus(handler: StatusHandler): () => void;
+  /** 可选：订阅后端控制信令（host.online/offline 等）。 */
+  onControl?(handler: ControlHandler): () => void;
 }

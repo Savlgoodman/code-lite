@@ -1,236 +1,69 @@
-import type { AgentEvent } from "@code-lite/protocol";
-import type { Transport, TransportStatus } from "@code-lite/transport";
+import { WsTransport, type WsTransportConfig, type WireEnvelope, type HandshakeContext } from "@code-lite/transport";
 
 /**
- * 中继传输：通过 WebSocket 连接 relay 服务器，
- * 在 `msg` 信封内携带业务 payload。
+ * 中继传输：远端前端经 relay 服务器连接宿主后端。
+ *
+ * 复用 @code-lite/transport 的 WsTransport 基类，与桌面 LocalTransport 共享
+ * 全部 RPC/订阅/事件逻辑。中继链路的差异全部收敛在此文件的三个注入项：
+ * - encodeFrame：业务信封裹进 {type:"msg", payload}
+ * - decodeFrame：从 {type:"msg", payload} 拆出业务信封；ping/host.* 等非业务帧返回 null
+ * - onHandshake：发 hello、等 ready/waiting；处理 host.online/offline/ping
+ *
+ * 见 docs/design/0710-DUAL-END-UNIFICATION-REFACTOR.md 阶段 1。
  */
-
-const RELAY_VERSION = 1;
-
-type RelayKind = "hello" | "ready" | "waiting" | "msg" | "ping" | "pong" | "error" | "peer.joined" | "peer.left" | "host.online" | "host.offline";
-
-interface RelayEnvelope {
-  type: RelayKind;
-  role?: string;
-  peerId?: string;
-  roomId?: string;
-  error?: string;
-  // 路由字段只放外层（见 docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md 第 3.1 节）：
-  // remote 发送时无需填 to（中继固定转发给 host 并覆盖 from）；接收 host 帧时外层带 from。
-  to?: string;
-  from?: string;
-  payload?: unknown;
-}
 
 export interface RelayTransportOptions {
   relayUrl: string;
   roomId: string;
   peerId?: string;
-  onStatusChange?: (status: TransportStatus) => void;
   onHostStatusChange?: (online: boolean) => void;
 }
 
-export class RelayTransport implements Transport {
-  private ws: WebSocket | null = null;
-  private options: RelayTransportOptions;
-  private _status: TransportStatus = "idle";
-  private readonly eventHandlers = new Set<(event: AgentEvent, meta: { channel: string; seq?: number }) => void>();
-  private readonly snapshotHandlers = new Set<(channel: string, snapshot: unknown) => void>();
-  private readonly statusHandlers = new Set<(status: TransportStatus) => void>();
-  private readonly pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number }>();
-  private heartbeatTimer: number | null = null;
-
+export class RelayTransport extends WsTransport {
   constructor(options: RelayTransportOptions) {
-    this.options = options;
-  }
-
-  get status(): TransportStatus { return this._status; }
-
-  private setStatus(s: TransportStatus) {
-    this._status = s;
-    this.options.onStatusChange?.(s);
-    for (const h of this.statusHandlers) h(s);
-  }
-
-  async connect(): Promise<void> {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
-    return new Promise<void>((resolve, reject) => {
-      this.setStatus("connecting");
-      const ws = new WebSocket(this.options.relayUrl);
-      this.ws = ws;
-
-      ws.onopen = () => {
-        // 发送 hello
-        const hello: RelayEnvelope = {
-          type: "hello",
-          role: "remote",
-          roomId: this.options.roomId,
-        };
-        if (this.options.peerId) hello.peerId = this.options.peerId;
-        ws.send(JSON.stringify(hello));
-      };
-
-      ws.onmessage = (ev) => {
-        let msg: RelayEnvelope;
-        try { msg = JSON.parse(ev.data as string); } catch { return; }
-        this.handleRelayMessage(msg, resolve);
-      };
-
-      ws.onerror = () => {
-        this.setStatus("closed");
-        reject(new Error("WebSocket connection failed"));
-      };
-
-      ws.onclose = () => {
-        this.setStatus("closed");
-        this.clearHeartbeat();
-        for (const p of this.pending.values()) {
-          clearTimeout(p.timer);
-          p.reject(new Error("Connection closed"));
+    const config: WsTransportConfig = {
+      socketFactory: (url) => new WebSocket(url),
+      urlProvider: () => options.relayUrl,
+      // 出站：业务信封裹进中继 msg 外层（路由字段由中继按连接补 from）。
+      encodeFrame: (envelope: WireEnvelope) => ({ type: "msg", payload: envelope }),
+      // 入站：只有 {type:"msg"} 携带业务信封；其余（ready/ping/host.*）是连接控制帧，
+      // 已在 onHandshake 的 rawMessage 里处理，这里返回 null 不进业务分发。
+      decodeFrame: (raw: Record<string, unknown>) => {
+        if (raw.type === "msg" && raw.payload && typeof raw.payload === "object") {
+          return raw.payload as WireEnvelope;
         }
-        this.pending.clear();
-        this.ws = null;
-      };
-    });
-  }
-
-  private handleRelayMessage(msg: RelayEnvelope, resolveConnect?: () => void) {
-    console.log("[RelayTransport] recv:", msg.type, msg);
-    if (msg.type === "ready") {
-      this.setStatus("connected");
-      this.startHeartbeat();
-      resolveConnect?.();
-      return;
-    }
-    if (msg.type === "waiting") {
-      this.setStatus("connected");
-      resolveConnect?.();
-      return;
-    }
-    if (msg.type === "error") {
-      this.setStatus("closed");
-      resolveConnect?.();
-      return;
-    }
-    if (msg.type === "host.offline") {
-      this.options.onHostStatusChange?.(false);
-      return;
-    }
-    if (msg.type === "host.online") {
-      this.options.onHostStatusChange?.(true);
-      return;
-    }
-    if (msg.type === "ping") {
-      this.ws?.send(JSON.stringify({ type: "pong" }));
-      return;
-    }
-    if (msg.type === "pong") {
-      return;
-    }
-    if (msg.type === "msg" && msg.payload) {
-      // payload 是标准的 WS 信封
-      const payload = msg.payload as { v?: number; kind?: string; channel?: string; requestId?: string; seq?: number; method?: string; payload?: unknown };
-      const kind = payload.kind;
-      if (kind === "event" && payload.payload) {
-        const event = payload.payload as AgentEvent;
-        const channel = payload.channel ?? "";
-        for (const h of this.eventHandlers) h(event, { channel, seq: payload.seq });
-      } else if (kind === "snapshot" && payload.payload) {
-        const channel = payload.channel ?? "";
-        for (const h of this.snapshotHandlers) h(channel, payload.payload);
-        // subscribe 的响应也是 snapshot 类型，带 requestId，需要 resolve pending RPC
-        if (payload.requestId) {
-          const p = this.pending.get(payload.requestId);
-          if (p) {
-            clearTimeout(p.timer);
-            this.pending.delete(payload.requestId);
-            p.resolve(payload.payload);
-          }
-        }
-      } else if ((kind === "result" || kind === "error") && payload.requestId) {
-        const p = this.pending.get(payload.requestId);
-        if (p) {
-          clearTimeout(p.timer);
-          this.pending.delete(payload.requestId);
-          if (kind === "result") p.resolve(payload.payload);
-          else p.reject(new Error((payload.payload as { error?: string })?.error ?? "RPC error"));
-        }
-      }
-    }
-  }
-
-  private startHeartbeat() {
-    this.clearHeartbeat();
-    this.heartbeatTimer = window.setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: "ping" }));
-      }
-    }, 20000);
-  }
-
-  private clearHeartbeat() {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
-  }
-
-  close(): void {
-    this.clearHeartbeat();
-    this.ws?.close();
-    this.ws = null;
-    this.setStatus("closed");
-  }
-
-  async request<T = unknown>(method: string, payload?: unknown): Promise<T> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      await this.connect();
-    }
-    const requestId = `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    return new Promise<T>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        this.pending.delete(requestId);
-        reject(new Error(`RPC ${method} timed out`));
-      }, 30000);
-      this.pending.set(requestId, { resolve: resolve as (v: unknown) => void, reject, timer });
-      const envelope: RelayEnvelope = {
-        type: "msg",
-        payload: {
-          v: RELAY_VERSION,
-          kind: "req",
-          method,
-          requestId,
-          payload,
-        },
-      };
-      console.log("[RelayTransport] send:", method, envelope);
-      this.ws!.send(JSON.stringify(envelope));
-    });
-  }
-
-  async subscribe(channel: string, _options?: { afterSequence?: number }): Promise<{ channel: string; unsubscribe(): void }> {
-    await this.request("subscribe", { channel });
-    return {
-      channel,
-      unsubscribe: () => {
-        this.request("unsubscribe", { channel }).catch(() => {});
+        return null;
       },
+      heartbeat: true,
+      onHandshake: (ctx) => this.handshake(ctx, options),
     };
+    super(config);
   }
 
-  onEvent(handler: (event: AgentEvent, meta: { channel: string; seq?: number }) => void): () => void {
-    this.eventHandlers.add(handler);
-    return () => this.eventHandlers.delete(handler);
-  }
-
-  onSnapshot(handler: (channel: string, snapshot: unknown) => void): () => void {
-    this.snapshotHandlers.add(handler);
-    return () => this.snapshotHandlers.delete(handler);
-  }
-
-  onStatus(handler: (status: TransportStatus) => void): () => void {
-    this.statusHandlers.add(handler);
-    return () => this.statusHandlers.delete(handler);
+  private handshake(ctx: HandshakeContext, options: RelayTransportOptions): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      ctx.onRawMessage((msg) => {
+        const type = msg.type;
+        if (type === "ready" || type === "waiting") {
+          if (!settled) { settled = true; resolve(); }
+        } else if (type === "error") {
+          if (!settled) { settled = true; reject(new Error(String(msg.error ?? "relay error"))); }
+        } else if (type === "host.online") {
+          options.onHostStatusChange?.(true);
+          this.emitControl({ type: "host.online" });
+        } else if (type === "host.offline") {
+          options.onHostStatusChange?.(false);
+          this.emitControl({ type: "host.offline" });
+        } else if (type === "ping") {
+          // 中继心跳探测：回 pong（基类的 sendRaw 不可见，用 ctx.sendRaw）。
+          ctx.sendRaw({ type: "pong" });
+        }
+      });
+      // 发送 hello 握手。
+      const hello: Record<string, unknown> = { type: "hello", role: "remote", roomId: options.roomId };
+      if (options.peerId) hello.peerId = options.peerId;
+      ctx.sendRaw(hello);
+    });
   }
 }
