@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SessionConfig } from "../hooks/useSessionConfig";
-import { Sheet, Button, Select } from "../components/ui";
+import { Sheet, Button, Select, EffortSlider } from "../components/ui";
 
 export interface ConfigSheetProps {
   config: SessionConfig;
@@ -39,14 +39,16 @@ export function ConfigSheet({ config, onClose, onSave }: ConfigSheetProps) {
         </div>
       )}
       {/* 思考强度 */}
-      <div className="field">
-        <label>思考强度</label>
-        <Select
-          value={local.effort}
-          onChange={(v) => setLocal({ ...local, effort: v })}
-          options={effortOptions.map((id) => ({ value: id, label: id }))}
-        />
-      </div>
+      {effortOptions.length > 0 && (
+        <div className="field">
+          <label>思考强度</label>
+          <EffortSlider
+            value={local.effort}
+            options={effortOptions}
+            onChange={(v) => setLocal({ ...local, effort: v })}
+          />
+        </div>
+      )}
       {/* 访问模式 */}
       {local.modes.length > 0 && (
         <div className="field">
