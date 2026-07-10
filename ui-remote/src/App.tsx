@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Folder, MessageSquare, Settings, Send, ArrowLeft } from "lucide-react";
-import type { AgentEvent, ChatMessage, Session, SessionCapabilities, UsageStats } from "@code-lite/protocol";
+import type { AgentEvent, ChatMessage, Session, SessionCapabilities, SessionMode, UsageStats } from "@code-lite/protocol";
 import {
   applyConversationListEvent,
   isConversationListEvent,
@@ -20,20 +20,25 @@ const LS_RELAY_URL = "code-lite-relay-url";
 const LS_PAIR_KEY = "code-lite-pair-key";
 const GLOBAL_CHANNEL = "*";
 
-/** 会话运行配置：模型族 + 思考强度（二级联动）*/
+/** 会话运行配置：模型族 + 思考强度（二级联动）+ 权限模式 */
 interface SessionConfig {
   familyId: string; // 当前选中的模型族（isGrouped=false 时即模型 id）
   effort: string; // 当前选中的思考强度（isGrouped=false 时为空）
   grouping: ModelGrouping; // 分组结构（families 列表 + 当前值）
+  accessMode: string; // 权限模式（read-only / agent / agent-full-access）
+  modes: SessionMode[]; // 可用权限模式列表
 }
 
 /** 从 capabilities 构建默认运行配置 */
 function buildConfigFromCaps(caps: SessionCapabilities): SessionConfig {
   const grouping = groupModelsByFamily(caps.models);
+  const defaultMode = caps.modes.find((m) => m.isDefault) ?? caps.modes[0];
   return {
     familyId: grouping.currentFamilyId,
     effort: grouping.currentEffort,
     grouping,
+    accessMode: defaultMode?.id ?? "",
+    modes: caps.modes,
   };
 }
 
@@ -95,21 +100,22 @@ export function App() {
         current.map((s) => (s.id === channel ? { ...s, status: running ? "running" : s.status === "running" ? "idle" : s.status } : s)),
       );
     }
-    // 配置变更同步（另一端切换模型/思考强度 → 本端跟随）。
+    // 配置变更同步（另一端切换模型/思考强度/权限模式 → 本端跟随）。
     if (type === "conversation.config.updated") {
-      const configPayload = (event as unknown as { config?: { modelFamily?: string; reasoningEffort?: string } }).config;
+      const configPayload = (event as unknown as { config?: { modelFamily?: string; reasoningEffort?: string; accessMode?: string } }).config;
       if (configPayload && channel) {
         setConfigBySession((prev) => {
           const cfg = prev[channel];
           if (!cfg) return prev;
           const newFamily = configPayload.modelFamily ?? cfg.familyId;
           const newEffort = configPayload.reasoningEffort ?? cfg.effort;
+          const newAccessMode = configPayload.accessMode ?? cfg.accessMode;
           // 用分组结构校验 effort 是否在新 family 支持列表中
           const fam = cfg.grouping.families.find((f) => f.familyId === newFamily);
           const validEffort = fam && fam.efforts.length > 0
             ? (fam.efforts.includes(newEffort) ? newEffort : fam.efforts[0])
             : newEffort;
-          return { ...prev, [channel]: { ...cfg, familyId: newFamily, effort: validEffort } };
+          return { ...prev, [channel]: { ...cfg, familyId: newFamily, effort: validEffort, accessMode: newAccessMode } };
         });
       }
     }
@@ -206,12 +212,13 @@ export function App() {
         : cfg.familyId
       : "";
     const modelLabel = cfg?.grouping.families.find((f) => f.familyId === cfg.familyId)?.label;
-    // turn.start 携带完整运行配置（模型+思考强度），与桌面版一致。
+    // turn.start 携带完整运行配置（模型+思考强度+权限模式），与桌面版一致。
     try {
       await transport.request("turn.start", {
         conversationId: id,
         input: text,
         turnId,
+        ...(cfg?.accessMode ? { accessMode: cfg.accessMode } : {}),
         ...(modelId ? { modelId } : {}),
         ...(modelLabel ? { modelLabel } : {}),
         ...(cfg?.grouping.isGrouped && cfg.effort ? { reasoningEffort: cfg.effort } : {}),
@@ -227,12 +234,14 @@ export function App() {
   const activeConfig = activeSessionId ? configBySession[activeSessionId] : undefined;
 
   // 同步 config 到后端（广播给另一端），使用与桌面版一致的字段名。
-  const syncConfigToBackend = (sessionId: string, familyId: string, effort: string) => {
+  const syncConfigToBackend = (sessionId: string, familyId: string, effort: string, accessMode?: string) => {
     const transport = transportRef.current;
     if (!transport || !sessionId) return;
+    const config: Record<string, string> = { modelFamily: familyId, reasoningEffort: effort };
+    if (accessMode) config.accessMode = accessMode;
     transport.request("conversation.config.update", {
       conversationId: sessionId,
-      config: { modelFamily: familyId, reasoningEffort: effort },
+      config,
     }).catch((e) => console.warn("config sync failed", e));
   };
 
@@ -246,7 +255,7 @@ export function App() {
       const nextEffort = fam && fam.efforts.length > 0
         ? (fam.efforts.includes(cfg.effort) ? cfg.effort : fam.efforts[0])
         : "";
-      syncConfigToBackend(activeSessionId, familyId, nextEffort);
+      syncConfigToBackend(activeSessionId, familyId, nextEffort, prev[activeSessionId]?.accessMode);
       return { ...prev, [activeSessionId]: { ...cfg, familyId, effort: nextEffort } };
     });
   };
@@ -256,8 +265,18 @@ export function App() {
     setConfigBySession((prev) => {
       const cfg = prev[activeSessionId];
       if (!cfg) return prev;
-      syncConfigToBackend(activeSessionId, cfg.familyId, effort);
+      syncConfigToBackend(activeSessionId, cfg.familyId, effort, cfg.accessMode);
       return { ...prev, [activeSessionId]: { ...cfg, effort } };
+    });
+  };
+
+  const changeAccessMode = (mode: string) => {
+    if (!activeSessionId) return;
+    setConfigBySession((prev) => {
+      const cfg = prev[activeSessionId];
+      if (!cfg) return prev;
+      syncConfigToBackend(activeSessionId, cfg.familyId, cfg.effort, mode);
+      return { ...prev, [activeSessionId]: { ...cfg, accessMode: mode } };
     });
   };
 
@@ -331,16 +350,28 @@ export function App() {
           <div ref={messagesEndRef} />
         </div>
         <div className="chat-bottom-bar">
-          {activeConfig && activeConfig.grouping.families.length > 0 && (
+          {activeConfig && (activeConfig.grouping.families.length > 0 || activeConfig.modes.length > 1) && (
             <div className="chat-config-bar">
-              <div className="config-item">
-                <label>模型</label>
-                <select value={activeConfig.familyId} onChange={(e) => changeFamily(e.target.value)}>
-                  {activeConfig.grouping.families.map((f) => (
-                    <option key={f.familyId} value={f.familyId}>{f.label}</option>
-                  ))}
-                </select>
-              </div>
+              {activeConfig.modes.length > 1 && (
+                <div className="config-item">
+                  <label>模式</label>
+                  <select value={activeConfig.accessMode} onChange={(e) => changeAccessMode(e.target.value)}>
+                    {activeConfig.modes.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {activeConfig.grouping.families.length > 0 && (
+                <div className="config-item">
+                  <label>模型</label>
+                  <select value={activeConfig.familyId} onChange={(e) => changeFamily(e.target.value)}>
+                    {activeConfig.grouping.families.map((f) => (
+                      <option key={f.familyId} value={f.familyId}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {activeConfig.grouping.isGrouped && (() => {
                 const fam = activeConfig.grouping.families.find((f) => f.familyId === activeConfig.familyId);
                 if (!fam || fam.efforts.length === 0) return null;
