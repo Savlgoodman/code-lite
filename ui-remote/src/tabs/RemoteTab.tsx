@@ -59,7 +59,7 @@ export function RemoteTab({ connected, activeSessionId, setActiveSessionId }: {
       <div className="session-list">
         {Object.entries(projects).map(([project, projectSessions]) => {
           const isExpanded = expandedProjects[project] ?? true;
-          const visibleSessions = isExpanded ? projectSessions.slice(0, 5) : projectSessions.slice(0, 5);
+          const visibleSessions = projectSessions.slice(0, 5);
           const hasMore = projectSessions.length > 5;
 
           return (

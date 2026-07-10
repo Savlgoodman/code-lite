@@ -1,4 +1,9 @@
-/* code-lite remote — 移动端样式 */
+/* ============================================
+ * code-lite remote — 移动端样式
+ * 黑白风格 + 功能性强调色 (green/orange)
+ * ============================================ */
+
+/* ── 1. CSS Variables & Reset ─────────────── */
 
 :root {
   --line: #dedbd7;
@@ -8,7 +13,8 @@
   --sidebar: #f3f2f0;
   --hover: #eceff3;
   --active: #e7ebf0;
-  --blue: #1677ff;
+  --accent: #1f2328;
+  --accent-pressed: #3d4148;
   --green: #12845a;
   --orange: #e85d2a;
   --text: #1f2328;
@@ -25,6 +31,8 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── 2. App Shell Layout ──────────────────── */
+
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -32,447 +40,8 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* 顶部导航栏 */
-.tab-bar {
-  display: flex;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-  flex-shrink: 0;
-}
+/* ── 3. Bottom Tab Bar ────────────────────── */
 
-.tab-bar button {
-  flex: 1;
-  padding: 12px 0;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  font-size: 14px;
-  color: var(--muted);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.tab-bar button.active {
-  color: var(--blue);
-  border-bottom-color: var(--blue);
-  font-weight: 600;
-}
-
-/* 页面容器 */
-.page {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-}
-
-/* 配对页 */
-.pairing-page {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  padding: 40px 20px;
-}
-
-.pairing-page h2 {
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.pairing-page input {
-  width: 100%;
-  max-width: 320px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 16px;
-  text-align: center;
-  letter-spacing: 2px;
-}
-
-.pairing-page button {
-  padding: 12px 32px;
-  background: var(--blue);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.pairing-page button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.pairing-page .status {
-  font-size: 14px;
-  color: var(--muted);
-}
-
-/* 项目页 */
-.project-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.project-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  background: var(--panel);
-  border-radius: 10px;
-  cursor: pointer;
-  border: 1px solid var(--line);
-}
-
-.project-item:active {
-  background: var(--hover);
-}
-
-.project-item .icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--blue);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-.project-item .info {
-  flex: 1;
-  min-width: 0;
-}
-
-.project-item .name {
-  font-size: 15px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.project-item .meta {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 2px;
-}
-
-/* 聊天页 */
-.chat-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.chat-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
-}
-
-.chat-header .back-btn {
-  background: none;
-  border: none;
-  font-size: 20px;
-  cursor: pointer;
-  padding: 4px;
-}
-
-.chat-header .title {
-  font-size: 16px;
-  font-weight: 600;
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.message {
-  max-width: 85%;
-  padding: 10px 14px;
-  border-radius: 16px;
-  font-size: 15px;
-  line-height: 1.5;
-  word-wrap: break-word;
-}
-
-.message.user {
-  align-self: flex-end;
-  background: var(--blue);
-  color: white;
-  border-bottom-right-radius: 4px;
-}
-
-.message.assistant {
-  align-self: flex-start;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-bottom-left-radius: 4px;
-}
-
-.message .time {
-  font-size: 11px;
-  color: var(--subtle);
-  margin-top: 4px;
-  text-align: right;
-}
-
-.message.user .time {
-  color: rgba(255,255,255,0.7);
-}
-
-.message .reasoning {
-  font-size: 13px;
-  color: var(--subtle);
-  font-style: italic;
-  margin-bottom: 6px;
-  white-space: pre-wrap;
-}
-
-.message .tool-call {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  font-size: 13px;
-}
-
-.message .tool-call .tool-name {
-  font-family: ui-monospace, monospace;
-  font-weight: 600;
-}
-
-.message .tool-call .tool-status {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--subtle);
-  text-transform: uppercase;
-}
-
-.message .tool-call.error {
-  border-color: var(--orange);
-}
-
-.message .tool-call .tool-error,
-.message .message-error {
-  color: var(--orange);
-  font-size: 13px;
-  margin-top: 4px;
-}
-
-.approval-card {
-  align-self: stretch;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--panel);
-  border: 1px solid var(--orange);
-}
-
-.approval-card .approval-title {
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.approval-card .approval-purpose {
-  font-size: 13px;
-  color: var(--subtle);
-  margin-bottom: 10px;
-}
-
-.approval-card .approval-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.approval-card .approval-actions button {
-  flex: 1;
-  padding: 8px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  cursor: pointer;
-}
-
-.chat-input-bar {
-  display: flex;
-  gap: 8px;
-  padding: 12px 16px;
-  flex-shrink: 0;
-}
-
-.chat-input-bar input {
-  flex: 1;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  font-size: 15px;
-  outline: none;
-}
-
-.chat-input-bar input:focus {
-  border-color: var(--blue);
-}
-
-.chat-input-bar button {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--blue);
-  color: white;
-  border: none;
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.chat-input-bar button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* 终止按钮：运行中显示，红色区分于发送 */
-.chat-input-bar button.stop-btn {
-  background: var(--red, #e53e3e);
-}
-
-/* 列表页"新建会话"按钮 */
-.new-conversation-btn {
-  background: var(--blue);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.new-conversation-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* 配置栏（模型/思考强度/上下文窗口） */
-.chat-bottom-bar {
-  flex-shrink: 0;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-}
-
-.chat-config-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px 0;
-  flex-wrap: wrap;
-}
-
-.chat-config-bar .config-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.chat-config-bar .config-item label {
-  font-size: 12px;
-  color: var(--subtle);
-  white-space: nowrap;
-}
-
-.chat-config-bar .config-item select {
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 13px;
-  background: var(--bg);
-  color: var(--text);
-  outline: none;
-  max-width: 130px;
-}
-
-.chat-config-bar .config-item select:focus {
-  border-color: var(--blue);
-}
-
-.context-meter {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.context-meter-bar {
-  width: 48px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--line);
-  overflow: hidden;
-}
-
-.context-meter-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.3s ease;
-}
-
-.context-meter-label {
-  font-size: 11px;
-  font-weight: 600;
-}
-
-/* 空状态 */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.empty-state .icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-  opacity: 0.3;
-}
-
-.empty-state p {
-  font-size: 15px;
-}
-
-/* ========================================== */
-/* 新增：底部 Tab 栏样式 (Phase 1)            */
-/* ========================================== */
-
-/* 底部 Tab Bar */
 .bottom-tab-bar {
   position: fixed;
   bottom: 0;
@@ -518,21 +87,15 @@ html, body, #root {
 /* Tab 页面容器 */
 .tab-page {
   padding: 16px;
-  padding-bottom: 80px; /* 底部 Tab 栏 + 安全区 */
+  padding-bottom: 80px;
 }
 
 .tab-content.full {
   padding-bottom: 0;
 }
 
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin-bottom: 16px;
-  color: var(--text);
-}
+/* ── 4. Remote Tab (Session List) ─────────── */
 
-/* 会话列表 (RemoteTab) */
 .session-list {
   display: flex;
   flex-direction: column;
@@ -588,7 +151,7 @@ html, body, #root {
 
 .session-item.more {
   justify-content: center;
-  color: var(--blue);
+  color: var(--muted);
   font-size: 14px;
   font-weight: 500;
 }
@@ -611,167 +174,14 @@ html, body, #root {
 }
 
 .status-dot.running {
-  background: var(--blue);
+  background: var(--accent);
 }
 
 .status-dot.idle {
   background: var(--green);
 }
 
-/* 设备列表 (DevicesTab) */
-.device-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.device-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px;
-  background: var(--panel);
-  border-radius: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.device-info {
-  flex: 1;
-}
-
-.device-info h3 {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0 0 4px 0;
-  color: var(--text);
-}
-
-.device-url,
-.device-pair {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 2px 0;
-}
-
-.device-status {
-  margin-left: 16px;
-}
-
-.status-indicator {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.status-indicator.online {
-  color: var(--green);
-}
-
-.status-indicator.offline {
-  color: var(--subtle);
-}
-
-.floating-action-button {
-  position: fixed;
-  bottom: 80px;
-  right: 24px;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--blue);
-  color: #ffffff;
-  border: none;
-  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform 0.2s;
-  z-index: 99;
-}
-
-.floating-action-button:active {
-  transform: scale(0.95);
-}
-
-/* 设置列表 (SettingsTab) */
-.settings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.settings-section h3 {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-}
-
-.settings-section ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  background: var(--panel);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.settings-item {
-  padding: 16px;
-  font-size: 16px;
-  color: var(--text);
-  border-bottom: 1px solid var(--line);
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.settings-item:last-child {
-  border-bottom: none;
-}
-
-.settings-item:hover {
-  background: var(--hover);
-}
-
-/* 通用按钮 */
-.primary-button {
-  padding: 12px 24px;
-  background: var(--blue);
-  color: #ffffff;
-  border: none;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.primary-button:active {
-  background: #0d5fcc;
-}
-
-.secondary-button {
-  padding: 12px 24px;
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.secondary-button:active {
-  background: var(--hover);
-}
-
-/* ========================================== */
-/* 对话页 (ChatPage)                          */
-/* ========================================== */
+/* ── 5. Chat Page ─────────────────────────── */
 
 .chat-page {
   display: flex;
@@ -780,6 +190,7 @@ html, body, #root {
   background: var(--bg);
 }
 
+/* Header */
 .chat-header {
   display: flex;
   align-items: center;
@@ -812,6 +223,7 @@ html, body, #root {
   width: 40px;
 }
 
+/* Messages area */
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -819,6 +231,21 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-state p {
+  font-size: 15px;
 }
 
 /* 消息行 */
@@ -834,7 +261,7 @@ html, body, #root {
   justify-content: flex-start;
 }
 
-/* 用户气泡: 有边框，靠右，有 max-width */
+/* 用户气泡 */
 .user-bubble {
   max-width: 75%;
   background: var(--panel);
@@ -848,7 +275,7 @@ html, body, #root {
   word-break: break-word;
 }
 
-/* AI 内容: 占满宽度，无边框 */
+/* AI 内容 */
 .assistant-content {
   width: 100%;
   padding: 4px 0;
@@ -885,7 +312,7 @@ html, body, #root {
   white-space: pre-wrap;
 }
 
-/* 配置信息栏 (输入框上方边缘) */
+/* 配置信息栏 */
 .chat-config-bar {
   display: flex;
   align-items: center;
@@ -967,7 +394,7 @@ html, body, #root {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: var(--blue);
+  background: var(--accent);
   color: #ffffff;
   border: none;
   display: flex;
@@ -984,7 +411,7 @@ html, body, #root {
 }
 
 .send-btn:active:not(:disabled) {
-  background: #0d5fcc;
+  background: var(--accent-pressed);
 }
 
 .send-btn.cancel {
@@ -1082,7 +509,7 @@ html, body, #root {
 }
 
 .field select:focus {
-  border-color: var(--blue);
+  border-color: var(--line);
 }
 
 .modal-footer {
@@ -1096,9 +523,170 @@ html, body, #root {
   flex: 1;
 }
 
+/* ── 6. Devices Tab ───────────────────────── */
+
+.device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.device-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: var(--panel);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.device-info {
+  flex: 1;
+}
+
+.device-info h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  color: var(--text);
+}
+
+.device-url,
+.device-pair {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0;
+}
+
+.device-status {
+  margin-left: 16px;
+}
+
+.status-indicator {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.status-indicator.online {
+  color: var(--green);
+}
+
+.status-indicator.offline {
+  color: var(--subtle);
+}
+
+.floating-action-button {
+  position: fixed;
+  bottom: 80px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s;
+  z-index: 99;
+}
+
+.floating-action-button:active {
+  transform: scale(0.95);
+}
+
+/* ── 7. Settings Tab ──────────────────────── */
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.settings-section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--panel);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.settings-item {
+  padding: 16px;
+  font-size: 16px;
+  color: var(--text);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.settings-item:last-child {
+  border-bottom: none;
+}
+
+.settings-item:hover {
+  background: var(--hover);
+}
+
+/* ── 8. Shared Utilities ──────────────────── */
+
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+
+.primary-button {
+  padding: 12px 24px;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.primary-button:active {
+  background: var(--accent-pressed);
+}
+
+.secondary-button {
+  padding: 12px 24px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.secondary-button:active {
+  background: var(--hover);
+}
+
 .btn-primary {
   padding: 12px 24px;
-  background: var(--blue);
+  background: var(--accent);
   color: #ffffff;
   border: none;
   border-radius: 10px;
@@ -1109,7 +697,7 @@ html, body, #root {
 }
 
 .btn-primary:active {
-  background: #0d5fcc;
+  background: var(--accent-pressed);
 }
 
 .btn-secondary {
