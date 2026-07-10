@@ -1,7 +1,5 @@
-import { useRef, useMemo, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
-
-/** 弹幕道数量：星河被切成若干水平条，各自随机时长/延迟填入，形成参差的填充锋面。 */
-const LANES = 7;
+import { useRef, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
+import { useWebglFire } from "./useWebglFire";
 
 interface EffortSliderProps {
   /** 当前挡位值 */
@@ -15,43 +13,32 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
-/** 高强度挡位的语义 tone，用于标签配色。 */
-function effortTone(value: string): string {
-  const v = value.toLowerCase();
-  if (v === "xhigh") return "xhigh";
-  if (v === "max") return "max";
-  if (v === "ultra") return "ultra";
-  return "default";
-}
-
 /**
- * 思考强度拖动条。
+ * 思考强度拖动条。移植自 254558/claude-range-slider：暗色轨道 + 挡位点 +
+ * 白色发光滑块；拖到最高挡（Ultracode）时 canvas 用 WebGL2 shader 烧起火焰，
+ * 滑块与状态文字染上紫色辉光。
  *
- * 几何：白色圆滑块直径 = 轨道高度，其圆心在 [r, 宽度-r] 内移动
- * （首尾挡位各内缩一个半径 r），保证圆能贴合两端。挡位断点数量
- * 由 options 长度决定，位置按索引均匀计算。
- *
- * 视觉：默认仅用纯色填充到滑块处；仅当拖到最高挡位时，整条滑槽
- * 由右向左渐进铺满暖→紫渐变，叠加星光流动，右端半圆带漏光。
+ * 几何：滑块直径 = 轨道高度，圆心在 [r, 宽-r] 内移动（首尾挡位内缩一个半径）。
+ * 火焰按 canvas 的 mask 只在已填充区（0→滑块处）显示。
  */
 export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const draggingRef = useRef(false);
-
-  // 每条弹幕道随机延迟/时长，只算一次；填充整体偏慢（3.4~5.4s）
-  const lanes = useMemo(
-    () =>
-      Array.from({ length: LANES }, () => ({
-        delay: Math.random() * 1.6,
-        duration: 3.4 + Math.random() * 2,
-      })),
-    []
-  );
 
   const count = options.length;
   const index = Math.max(0, options.indexOf(value));
   const ratio = count > 1 ? index / (count - 1) : 0;
   const isMax = count > 1 && index === count - 1;
+
+  // 供 WebGL 渲染循环读取的实时值（避免每帧重渲染）
+  const sliderRef = useRef(ratio);
+  const activeRef = useRef(isMax);
+  const kickRef = useRef<(() => void) | null>(null);
+  sliderRef.current = ratio;
+  activeRef.current = isMax;
+
+  useWebglFire(canvasRef, sliderRef, activeRef, kickRef);
 
   // 指针位置 → 就近挡位。命中区间按 [r, 宽度-r] 反算，与滑块可达范围一致。
   const setFromClientX = (clientX: number) => {
@@ -63,7 +50,11 @@ export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
     const rel = clamp(clientX - rect.left - r, 0, span);
     const idx = span > 0 ? Math.round((rel / span) * (count - 1)) : 0;
     const next = options[idx];
-    if (next && next !== value) onChange(next);
+    if (next && next !== value) {
+      onChange(next);
+      // 进入最高挡时启动火焰渲染循环
+      if (idx === count - 1) kickRef.current?.();
+    }
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -83,12 +74,17 @@ export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
     trackRef.current?.releasePointerCapture(e.pointerId);
   };
 
-  const tone = effortTone(value);
+  // canvas mask：只显示 0→滑块处的火焰（多留 2% 让锋面盖住滑块）
+  const maskPct = Math.min(ratio * 100 + 2, 100);
+  const canvasMask: CSSProperties = {
+    maskImage: `linear-gradient(to right, black 0%, black ${maskPct}%, transparent ${maskPct}%)`,
+    WebkitMaskImage: `linear-gradient(to right, black 0%, black ${maskPct}%, transparent ${maskPct}%)`,
+  };
 
   return (
-    <div className="effort-slider">
+    <div className={`effort-slider${isMax ? " max" : ""}`}>
       <div
-        className={`effort-track${isMax ? " max" : ""}`}
+        className="effort-track"
         ref={trackRef}
         style={{ "--ratio": ratio } as CSSProperties}
         onPointerDown={onPointerDown}
@@ -100,43 +96,21 @@ export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
         aria-valuenow={index}
         aria-valuetext={value}
       >
-        {/* 纯色填充：到滑块中心；最高挡由 CSS 覆盖为整槽 */}
-        <div className="effort-fill">
-          {/* 星河：切成多条弹幕道，各自随机从右向左填入，锋面参差 */}
-          <div className="effort-galaxy">
-            {lanes.map((lane, i) => (
-              <div
-                key={i}
-                className="effort-lane"
-                style={{
-                  "--lane-top": `${(i / LANES) * 100}%`,
-                  "--lane-h": `${100 / LANES}%`,
-                  "--lane-delay": `${lane.delay}s`,
-                  "--lane-dur": `${lane.duration}s`,
-                } as CSSProperties}
-              >
-                <div className="effort-grad" />
-                <div className="effort-sparkle" />
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* 右端半圆弧形漏光，仅最高挡可见 */}
-        <div className="effort-leak" />
-        {options.map((opt, i) => {
-          const tickRatio = count > 1 ? i / (count - 1) : 0;
-          return (
+        <div className="effort-track-bg" />
+        <div className="effort-dots">
+          {options.map((opt, i) => (
             <span
               key={opt}
-              className={`effort-tick${i <= index ? " passed" : ""}`}
-              style={{ "--tr": tickRatio } as CSSProperties}
+              className="effort-dot"
+              style={{ "--tr": count > 1 ? i / (count - 1) : 0 } as CSSProperties}
             />
-          );
-        })}
+          ))}
+        </div>
+        <canvas ref={canvasRef} className="effort-canvas" style={canvasMask} />
         <span className="effort-thumb" />
       </div>
       <div className="effort-caption">
-        <span className={`effort-level effort-tone-${tone}`} data-text={value}>{value}</span>
+        <span className="effort-level" data-text={value}>{value}</span>
       </div>
     </div>
   );

@@ -260,7 +260,7 @@
   .select-option:hover { background: var(--hover); }
 }
 
-/* ── EffortSlider（思考强度拖动条） ── */
+/* ── EffortSlider（思考强度拖动条 + WebGL 火焰） ── */
 
 .effort-slider {
   display: flex;
@@ -268,170 +268,73 @@
   gap: 10px;
 }
 
-/* 几何变量：--h 轨道高度 = 滑块直径；--r 半径；
-   --ratio 当前挡位比例(0..1)，由 JS 注入。
-   圆心 x = r + ratio*(100% - 2r)，是所有定位的基准。 */
+/* 几何：--h 轨道高度 = 滑块直径；--r 半径；--ratio 当前比例(0..1)。
+   圆心 x = r + ratio*(100% - 2r)，为滑块与挡位点的定位基准。 */
 .effort-track {
-  --h: 40px;
+  --h: 34px;
   --r: calc(var(--h) / 2);
   --center: calc(var(--r) + var(--ratio) * (100% - var(--h)));
   position: relative;
   height: var(--h);
-  border-radius: var(--radius-pill);
-  background: var(--sidebar);
-  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #1a1a1e;
+  background: #0c0c0c;
+  isolation: isolate;
   cursor: pointer;
   touch-action: none;
 }
 
-/* 纯色填充：默认从左铺到滑块圆心处 */
-.effort-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: var(--center);
-  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
-  background: var(--accent);
-  overflow: hidden;
-  transition: width var(--dur-base) var(--ease-standard);
-}
-
-/* 星河层：容纳多条弹幕道，最高挡时各道随机从右向左漫入 */
-.effort-galaxy {
+.effort-track-bg {
   position: absolute;
   inset: 0;
-  pointer-events: none;
+  background: linear-gradient(135deg, #111113, #0a0a0b);
+  z-index: 0;
 }
 
-/* 单条弹幕道：占一条水平带，默认收在最右（clip 全裁） */
-.effort-lane {
+/* 挡位点 */
+.effort-dots {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: var(--lane-top);
-  height: var(--lane-h);
-  overflow: hidden;
-  clip-path: inset(0 0 0 100%);
-}
-
-/* 道内渐变/星光按整条轨道尺寸渲染并上移到本道位置，
-   使各道拼合成一整片连续星河 */
-.effort-grad,
-.effort-sparkle {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(-1 * var(--lane-top));
-  height: var(--h);
-  pointer-events: none;
-}
-
-/* 暖→紫渐变星河底色（最右为紫） */
-.effort-grad {
-  background: linear-gradient(
-    90deg,
-    #c96b3f 0%,
-    #d07a52 20%,
-    #c76f8f 48%,
-    #9b5fd6 76%,
-    #7c3fd0 100%
-  );
-}
-
-/* 星光点缀，缓慢明灭如星河 */
-.effort-sparkle {
-  background-image:
-    radial-gradient(1.5px 1.5px at 18% 42%, rgba(255,255,255,0.95), transparent),
-    radial-gradient(1px 1px at 38% 66%, rgba(255,255,255,0.8), transparent),
-    radial-gradient(1.5px 1.5px at 58% 30%, rgba(255,255,255,0.9), transparent),
-    radial-gradient(1px 1px at 72% 58%, rgba(255,255,255,0.78), transparent),
-    radial-gradient(1.5px 1.5px at 86% 38%, rgba(255,255,255,0.92), transparent),
-    radial-gradient(1px 1px at 30% 22%, rgba(255,255,255,0.72), transparent);
-  background-repeat: no-repeat;
-}
-
-/* ── 最高挡：整槽填满 + 各弹幕道随机液态漫入 ── */
-.effort-track.max .effort-fill {
-  width: 100%;
-  border-radius: var(--radius-pill);
-  background: #2a2140; /* 星河尚未漫到处的暗底 */
-}
-
-.effort-track.max .effort-lane {
-  animation: effortLiquid var(--lane-dur) var(--ease-page) var(--lane-delay) forwards;
-}
-
-.effort-track.max .effort-sparkle {
-  animation: effortSparkle 3.4s ease-in-out infinite;
-}
-
-/* 液态填充：可视区从右端向左铺满本道 */
-@keyframes effortLiquid {
-  from { clip-path: inset(0 0 0 100%); }
-  to   { clip-path: inset(0 0 0 0); }
-}
-
-@keyframes effortSparkle {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
-}
-
-/* 右端"漏光"：沿半圆端弧线的辉光（灯带弯到端头的感觉） */
-.effort-leak {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  width: var(--h);
-  height: var(--h);
-  border-radius: 50%;
-  transform: translateY(-50%);
-  /* 用锥形渐变只点亮右半弧，其余透明 */
-  background: conic-gradient(
-    from -90deg at 50% 50%,
-    transparent 0deg,
-    rgba(224, 200, 255, 0.95) 60deg,
-    rgba(190, 150, 255, 0.98) 90deg,
-    rgba(224, 200, 255, 0.95) 120deg,
-    transparent 180deg
-  );
-  -webkit-mask: radial-gradient(circle at 50% 50%, transparent calc(var(--r) - 2px), #000 calc(var(--r) - 1.5px), #000 var(--r), transparent calc(var(--r) + 0.5px));
-  mask: radial-gradient(circle at 50% 50%, transparent calc(var(--r) - 2px), #000 calc(var(--r) - 1.5px), #000 var(--r), transparent calc(var(--r) + 0.5px));
-  filter: blur(1.5px) drop-shadow(0 0 5px rgba(170, 120, 255, 0.7));
-  opacity: 0;
-  transition: opacity var(--dur-base) var(--ease-standard);
-  pointer-events: none;
-  z-index: 3;
-}
-
-.effort-track.max .effort-leak {
-  opacity: 1;
-  animation: effortLeak 2.8s ease-in-out infinite;
-}
-
-@keyframes effortLeak {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
-}
-
-/* 挡位断点：圆心 x = r + tr*(100% - 2r) */
-.effort-tick {
-  position: absolute;
-  top: 50%;
-  left: calc(var(--r) + var(--tr) * (100% - var(--h)));
-  width: 4px;
-  height: 4px;
-  margin-left: -2px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.5);
-  transform: translateY(-50%);
+  inset: 0;
   pointer-events: none;
   z-index: 1;
 }
 
-.effort-tick.passed { background: rgba(255, 255, 255, 0.9); }
+.effort-dot {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--r) + var(--tr) * (100% - var(--h)));
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: #494950;
+  transform: translateY(-50%);
+  transition: opacity 0.6s;
+}
 
-/* 白色圆滑块：直径 = 轨道高度，圆心随 --center */
+/* 到最高挡时挡位点隐去 */
+.effort-slider.max .effort-dot { opacity: 0; }
+
+/* 火焰 canvas：平时透明；最高挡淡入，screen 叠加发光 */
+.effort-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  mix-blend-mode: screen;
+  z-index: 2;
+  transition: opacity 0.3s;
+}
+
+.effort-slider.max .effort-canvas {
+  opacity: 1;
+  z-index: 4;
+}
+
+/* 白色发光滑块：直径 = 轨道高度，圆心随 --center */
 .effort-thumb {
   position: absolute;
   top: 50%;
@@ -439,13 +342,31 @@
   width: var(--h);
   height: var(--h);
   margin-left: calc(-1 * var(--r));
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+  border-radius: 11px;
+  background: linear-gradient(170deg, #ffffff 0%, #f0f0f2 40%, #e4e4e6 100%);
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 0.5px 1px rgba(0, 0, 0, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.25),
+    0 6px 16px rgba(0, 0, 0, 0.12),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -0.5px 0 rgba(0, 0, 0, 0.06);
   transform: translateY(-50%);
-  transition: left var(--dur-base) var(--ease-standard);
+  transition: left var(--dur-base) var(--ease-standard), box-shadow 0.4s ease;
   pointer-events: none;
-  z-index: 4;
+  z-index: 5;
+}
+
+/* 最高挡：滑块紫色辉光 */
+.effort-slider.max .effort-thumb {
+  box-shadow:
+    0 0.5px 1px rgba(0, 0, 0, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.25),
+    0 6px 16px rgba(0, 0, 0, 0.12),
+    0 0 24px rgba(168, 85, 247, 0.5),
+    0 0 44px rgba(168, 85, 247, 0.25),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -0.5px 0 rgba(0, 0, 0, 0.06);
 }
 
 .effort-caption {
@@ -458,34 +379,16 @@
   font-weight: 600;
   color: var(--muted);
   text-transform: capitalize;
+  transition: color 0.3s, text-shadow 0.3s;
 }
 
-.effort-level.effort-tone-xhigh { color: var(--tone-effort-xhigh); }
-.effort-level.effort-tone-max { color: var(--tone-effort-max); }
-
-.effort-level.effort-tone-ultra {
-  position: relative;
-  color: var(--tone-effort-ultra);
+/* 最高挡：状态文字紫色发光 */
+.effort-slider.max .effort-level {
+  color: #c084fc;
+  text-shadow: 0 0 12px rgba(168, 85, 247, 0.6);
+  font-weight: 600;
 }
 
-.effort-level.effort-tone-ultra::after {
-  content: attr(data-text);
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    100deg,
-    transparent 0%, transparent 30%,
-    rgba(216, 180, 255, 0.95) 50%,
-    transparent 70%, transparent 100%
-  );
-  background-repeat: no-repeat;
-  background-size: 48% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  pointer-events: none;
-  animation: effortShimmer 2.8s ease-in-out infinite;
-}
 
 /* ── EmptyState ── */
 
