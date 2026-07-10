@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Folder, ArrowDownWideNarrow } from "lucide-react";
+import { Folder, ArrowDownWideNarrow, Plus, FolderPlus } from "lucide-react";
 import type { Session } from "@code-lite/protocol";
 import { useConversationState } from "../useConversations";
 import { connectionManager } from "../services/ConnectionManager";
 import { ChatPage } from "../ChatPage";
 import { AgentIcon } from "../components/AgentIcon";
+import { NewConversationSheet } from "../components/NewConversationSheet";
 
 export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSessionId }: {
   connected: boolean;
@@ -17,6 +18,8 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   // 按最新活跃时间排序（updatedAt 降序）；关闭时保持后端返回的默认顺序
   const [sortByTime, setSortByTime] = useState(false);
+  // 新建对话弹窗：null=关闭；否则携带预填工作区路径（""=自由创建）
+  const [newConvWorkspace, setNewConvWorkspace] = useState<string | null>(null);
 
   // 如果正在查看会话，显示 ChatPage
   if (activeSessionId) {
@@ -61,6 +64,18 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
     );
   }
 
+  const newConvSheet = newConvWorkspace !== null && (
+    <NewConversationSheet
+      client={client}
+      initialWorkspace={newConvWorkspace}
+      onClose={() => setNewConvWorkspace(null)}
+      onCreated={(id) => {
+        setNewConvWorkspace(null);
+        setActiveSessionId(id);
+      }}
+    />
+  );
+
   if (sessions.length === 0) {
     return (
       <div className="tab-page">
@@ -68,8 +83,17 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
         <div className="page-subtitle">已连接</div>
         <div className="empty-state">
           <div className="empty-icon">☺</div>
-          <p>收件箱为空，等待新会话</p>
+          <p>收件箱为空，点击右下角新建对话</p>
         </div>
+        <button
+          className="floating-action-button"
+          onClick={() => setNewConvWorkspace("")}
+          aria-label="新建对话"
+          title="新建对话"
+        >
+          <Plus size={24} />
+        </button>
+        {newConvSheet}
       </div>
     );
   }
@@ -87,9 +111,24 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
 
           return (
             <div key={project} className="project-group">
-              <div className="project-header" onClick={() => toggleProject(project)}>
-                <Folder size={16} />
-                <span>{project}</span>
+              <div className="project-header">
+                <div className="project-header-main" onClick={() => toggleProject(project)}>
+                  <Folder size={16} />
+                  <span>{project}</span>
+                </div>
+                {project !== "未分类" && (
+                  <button
+                    className="project-new-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNewConvWorkspace(project);
+                    }}
+                    aria-label={`在 ${project} 新建对话`}
+                    title="在此项目新建对话"
+                  >
+                    <FolderPlus size={16} />
+                  </button>
+                )}
               </div>
               <ul className="session-items">
                 {visibleSessions.map((session) => (
@@ -119,13 +158,22 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
         })}
       </div>
       <button
-        className={`floating-action-button${sortByTime ? " active" : ""}`}
+        className={`floating-action-button fab-sort${sortByTime ? " active" : ""}`}
         onClick={() => setSortByTime((v) => !v)}
         aria-label={sortByTime ? "按最新活跃排序（已开启）" : "按最新活跃排序"}
         title={sortByTime ? "按最新活跃排序（已开启）" : "按最新活跃排序"}
       >
         <ArrowDownWideNarrow size={24} />
       </button>
+      <button
+        className="floating-action-button fab-new"
+        onClick={() => setNewConvWorkspace("")}
+        aria-label="新建对话"
+        title="新建对话（自由创建）"
+      >
+        <Plus size={24} />
+      </button>
+      {newConvSheet}
     </div>
   );
 }

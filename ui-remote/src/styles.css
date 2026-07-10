@@ -121,13 +121,44 @@ html, body, #root {
   padding: 12px 16px;
   font-weight: 600;
   color: var(--text);
-  cursor: pointer;
   border-bottom: 1px solid var(--line);
   user-select: none;
 }
 
-.project-header:hover {
+.project-header-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.project-header-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-header-main:hover {
+  color: var(--muted);
+}
+
+.project-new-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--muted);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.project-new-btn:active {
   background: var(--hover);
+  color: var(--text);
 }
 
 .session-items {
@@ -874,6 +905,26 @@ html, body, #root {
   background: var(--green);
 }
 
+/* 双 FAB 堆叠：新建在底部（主操作），排序在其上方 */
+.floating-action-button.fab-new {
+  bottom: 80px;
+}
+
+.floating-action-button.fab-sort {
+  bottom: 148px;
+  width: 48px;
+  height: 48px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.floating-action-button.fab-sort.active {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
+
 /* ── 6b. Add Device Sheet ─────────────────── */
 
 .form-input {
@@ -1378,4 +1429,184 @@ html, body, #root {
 @keyframes toastSlideDown {
   from { transform: translateY(-20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+
+/* ── 13. New Conversation Sheet ───────────── */
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-family: inherit;
+}
+
+.agent-card.selected {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+
+.agent-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-card-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.agent-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.agent-card-status.available { color: var(--green); }
+.agent-card-status.planned,
+.agent-card-status.needs_setup { color: var(--subtle); }
+
+.workspace-row {
+  display: flex;
+  gap: 8px;
+}
+
+.workspace-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-browse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.workspace-browse-btn:active {
+  background: var(--hover);
+}
+
+.workspace-hint {
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+/* ── 14. Directory Browser ────────────────── */
+
+.dir-browser {
+  height: 70vh;
+}
+
+.dir-browser-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.dir-up-btn {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.dir-up-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dir-current-path {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  flex: 1;
+}
+
+.dir-browser-body {
+  padding: 0;
+}
+
+.dir-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dir-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.dir-item:active {
+  background: var(--hover);
+}
+
+.dir-empty {
+  padding: 20px 16px;
+  text-align: center;
+  color: var(--subtle);
+  font-size: 13px;
+}
+
+.dir-browser-loading,
+.dir-browser-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.dir-browser-error { color: var(--orange); }
+
+.spin { animation: spin 1s linear infinite; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

@@ -41,6 +41,24 @@ export interface ClientState {
   views: Record<string, SessionViewState>;
 }
 
+/** fs.list 目录浏览返回（新建会话选工作区路径用）。 */
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+}
+
+export interface DirectoryListing {
+  /** 当前所在目录绝对路径 */
+  path: string;
+  /** 上级目录路径；已到根时为 null */
+  parent: string | null;
+  /** 子目录列表 */
+  entries: DirectoryEntry[];
+  /** 盘符列表（Windows），非 Windows 为空 */
+  drives: DirectoryEntry[];
+}
+
 export interface SendTurnParams {
   conversationId: string;
   input: string;
@@ -420,6 +438,11 @@ export class ConversationClient {
   async createConversation(options: { agentId?: string; workspace?: string; title?: string } = {}): Promise<Session> {
     const result = await this.transport.request<{ session: Session }>("conversation.create", options);
     return result.session;
+  }
+
+  /** 浏览宿主机目录（新建会话选工作区路径用）。path 为空返回 home + 盘符。 */
+  async browseDirectory(path?: string): Promise<DirectoryListing> {
+    return this.transport.request<DirectoryListing>("fs.list", { path: path ?? "" });
   }
 
   async archiveConversation(conversationId: string, archived: boolean): Promise<void> {
