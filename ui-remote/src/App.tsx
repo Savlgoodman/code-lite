@@ -1,26 +1,20 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Folder, MessageSquare, Settings, Send, ArrowLeft, Square, Plus } from "lucide-react";
-import type { AgentEvent, ChatMessage, Session, SessionCapabilities, SessionMode, UsageStats } from "@code-lite/protocol";
+import type { ChatMessage, Session, SessionCapabilities, SessionMode, UsageStats } from "@code-lite/protocol";
 import {
-  applyConversationListEvent,
-  isConversationListEvent,
-  reduceAgentEvent,
-  sessionViewFromSnapshot,
-  emptySessionView,
   groupModelsByFamily,
   buildModelId,
-  type SessionViewState,
+  ConversationClient,
   type ModelGrouping,
 } from "@code-lite/chat-core";
 import { RelayTransport } from "./services/RelayTransport";
-import { SyncManager } from "@code-lite/sync";
-import type { ConfigBatchPayload } from "@code-lite/sync";
+import { SyncManager, type ConfigBatchPayload } from "@code-lite/sync";
+import { useConversationState } from "./useConversations";
 
 type Page = "projects" | "chat" | "settings";
 
 const LS_RELAY_URL = "code-lite-relay-url";
 const LS_PAIR_KEY = "code-lite-pair-key";
-const GLOBAL_CHANNEL = "*";
 
 /** 会话运行配置：模型族 + 思考强度（二级联动）+ 权限模式 */
 interface SessionConfig {
@@ -52,24 +46,19 @@ async function computeRoomId(pairKey: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-interface SnapshotPayload {
-  snapshot: { session: Session | null; messages: ChatMessage[] } | null;
-  latestSequence?: number;
-}
-
 export function App() {
   const [page, setPage] = useState<Page>("settings");
   const [relayUrl, setRelayUrl] = useState(localStorage.getItem(LS_RELAY_URL) || "ws://localhost:18766/ws");
   const [pairKey, setPairKey] = useState(localStorage.getItem(LS_PAIR_KEY) || "");
   const [connected, setConnected] = useState(false);
   const [hostOnline, setHostOnline] = useState(false);
-  const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  // 每个会话一份视图状态，由 snapshot + 事件 reduce 得到（复用 chat-core，与桌面同源）。
-  const [views, setViews] = useState<Record<string, SessionViewState>>({});
   const [draft, setDraft] = useState("");
   // 每个会话的运行配置（模型族+思考强度分组，由 session.initialize 的 capabilities 构建）。
   const [configBySession, setConfigBySession] = useState<Record<string, SessionConfig>>({});
+  // 共享状态层：会话列表与视图态由 ConversationClient 统一管理（与桌面同源）。
+  const [client, setClient] = useState<ConversationClient | null>(null);
+  const { sessions, views } = useConversationState(client);
 
   const transportRef = useRef<RelayTransport | null>(null);
   const syncRef = useRef<SyncManager | null>(null);
@@ -80,44 +69,6 @@ export function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [views, activeSessionId]);
-
-  // 事件入口：同步事件（运行态/配置）先喂 SyncManager；再按频道分列表/单会话 reducer。
-  const handleEvent = useCallback((event: AgentEvent, meta: { channel: string }) => {
-    // 同步事件优先处理：session.running/stopped 走全局频道，必须在频道分流前拦截，
-    // 否则会在全局频道分支被丢弃，导致列表页运行态不刷新。
-    if ((event as { type?: string }).type === "sync") {
-      syncRef.current?.feedEvent(event);
-      return;
-    }
-    if (meta.channel === GLOBAL_CHANNEL || isConversationListEvent(event)) {
-      if (isConversationListEvent(event)) {
-        setSessions((current) => applyConversationListEvent(current, event));
-      }
-      return;
-    }
-    const channel = (event as { conversationId?: string }).conversationId || meta.channel;
-    if (!channel) return;
-    setViews((current) => {
-      const prev = current[channel] ?? emptySessionView(null);
-      return { ...current, [channel]: reduceAgentEvent(prev, event) };
-    });
-  }, []);
-
-  const handleSnapshot = useCallback((channel: string, payload: unknown) => {
-    if (channel === GLOBAL_CHANNEL) return;
-    const snap = payload as SnapshotPayload;
-    if (!snap?.snapshot) return;
-    const view = sessionViewFromSnapshot(snap.snapshot);
-    setViews((current) => ({ ...current, [channel]: view }));
-    if (view.session) {
-      setSessions((current) => {
-        const exists = current.some((s) => s.id === view.session!.id);
-        return exists
-          ? current.map((s) => (s.id === view.session!.id ? { ...s, ...view.session! } : s))
-          : [view.session!, ...current];
-      });
-    }
-  }, []);
 
   const connect = async () => {
     if (!pairKey.trim()) return;
@@ -130,33 +81,13 @@ export function App() {
       onHostStatusChange: (online) => setHostOnline(online),
     });
     t.onStatus((s) => setConnected(s !== "idle" && s !== "closed"));
-    t.onEvent(handleEvent);
-    t.onSnapshot(handleSnapshot);
     transportRef.current = t;
 
-    // 创建 SyncManager（role=remote），统一处理运行态与配置同步。
+    // 创建 SyncManager（role=remote）+ ConversationClient（共享状态层）。
     const sync = new SyncManager({ transport: t, role: "remote" });
     syncRef.current = sync;
-    // 运行态变化 → 列表项 status 与会话视图 running 跟随。
-    sync.onSessionRunning((p) => {
-      setSessions((current) =>
-        current.map((s) => (s.id === p.conversationId ? { ...s, status: "running" } : s)),
-      );
-      setViews((current) => {
-        const view = current[p.conversationId];
-        return view ? { ...current, [p.conversationId]: { ...view, running: true } } : current;
-      });
-    });
-    sync.onSessionStopped((p) => {
-      setSessions((current) =>
-        current.map((s) => (s.id === p.conversationId ? { ...s, status: s.status === "running" ? "idle" : s.status } : s)),
-      );
-      setViews((current) => {
-        const view = current[p.conversationId];
-        return view ? { ...current, [p.conversationId]: { ...view, running: false } } : current;
-      });
-    });
-    // 配置变更同步（另一端切换模型/思考强度/权限模式 → 本端跟随）。
+    const conv = new ConversationClient({ transport: t, sync });
+    // 配置变更同步：另一端切换模型/思考/权限 → 本端选择器跟随。
     sync.onConfigChange((payload) => {
       const p = payload as ConfigBatchPayload;
       const channel = p.conversationId;
@@ -175,33 +106,29 @@ export function App() {
         return { ...prev, [channel]: { ...cfg, familyId: newFamily, effort: validEffort, accessMode: newAccessMode } };
       });
     });
+    setClient(conv);
     try {
-      await t.connect();
-      await t.subscribe(GLOBAL_CHANNEL);
+      // ConversationClient.start 内部：connect + 订阅全局频道 + 拉会话列表 + 注册运行态/配置监听。
+      await conv.start();
       setPage("projects");
-      try {
-        const listResult = await t.request<{ sessions: Session[] }>("conversation.list", {});
-        setSessions(listResult.sessions);
-        setHostOnline(true);
-      } catch {
-        setHostOnline(false);
-      }
+      setHostOnline(true);
     } catch (e) {
       console.error("connect failed", e);
+      setHostOnline(false);
     }
   };
 
   const openSession = async (session: Session) => {
     const transport = transportRef.current;
-    if (!transport) return;
+    if (!client || !transport) return;
     setActiveSessionId(session.id);
     setPage("chat");
-    // 订阅该会话频道：后端先回 snapshot（handleSnapshot 建初始态），再推增量事件。
-    await transport.subscribe(session.id);
+    // 订阅该会话频道：后端先回 snapshot（client 建初始视图态），再推增量事件。
+    await client.openConversation(session.id);
     // 初始化 ACP session 拿 capabilities（模型列表、configOptions、上下文窗口）。
+    // 这是远端特有：用 capabilities 构建模型族/思考强度分组选择器。
     try {
       const caps = await transport.request<SessionCapabilities>("session.initialize", { conversationId: session.id });
-      // 初始化默认运行配置（首次进入时取 ACP 返回的当前值）
       setConfigBySession((prev) => {
         if (prev[session.id]) return prev; // 已有配置则不覆盖
         return { ...prev, [session.id]: buildConfigFromCaps(caps) };
@@ -212,23 +139,18 @@ export function App() {
   };
 
   const closeSession = () => {
-    const transport = transportRef.current;
     const id = activeSessionIdRef.current;
-    if (transport && id) {
-      transport.request("unsubscribe", { channel: id }).catch(() => {});
-    }
+    if (client && id) client.closeConversation(id);
     setActiveSessionId(null);
     setPage("projects");
   };
 
   const sendMessage = async () => {
-    const transport = transportRef.current;
     const id = activeSessionIdRef.current;
     const text = draft.trim();
-    if (!transport || !id || !text) return;
+    if (!client || !id || !text) return;
     setDraft("");
-    const turnId = `turn-${Date.now()}`;
-    const cfg = id ? configBySession[id] : undefined;
+    const cfg = configBySession[id];
     // 组回完整 modelId：分组模式 "family[effort]"，否则直接用 familyId（即模型 id）。
     const modelId = cfg
       ? cfg.grouping.isGrouped
@@ -236,47 +158,38 @@ export function App() {
         : cfg.familyId
       : "";
     const modelLabel = cfg?.grouping.families.find((f) => f.familyId === cfg.familyId)?.label;
-    // turn.start 携带完整运行配置（模型+思考强度+权限模式），与桌面版一致。
     try {
-      await transport.request("turn.start", {
+      await client.sendTurn({
         conversationId: id,
         input: text,
-        turnId,
-        ...(cfg?.accessMode ? { accessMode: cfg.accessMode } : {}),
-        ...(modelId ? { modelId } : {}),
-        ...(modelLabel ? { modelLabel } : {}),
-        ...(cfg?.grouping.isGrouped && cfg.effort ? { reasoningEffort: cfg.effort } : {}),
+        accessMode: cfg?.accessMode || undefined,
+        modelId: modelId || undefined,
+        modelLabel: modelLabel || undefined,
+        reasoningEffort: cfg?.grouping.isGrouped && cfg.effort ? cfg.effort : undefined,
       });
     } catch (e) {
       console.error("turn.start failed", e);
     }
   };
 
-  // 终止当前会话（双端均可终止，0710 统一同步协议）。走 SyncManager.cancelSession，
-  // 后端取消 turn 后广播 session.stopped，双端同步恢复。
+  // 终止当前会话（双端均可终止）。走 client.cancelTurn → SyncManager.cancelSession。
   const stopMessage = async () => {
     const id = activeSessionIdRef.current;
-    if (!id) return;
+    if (!client || !id) return;
     try {
-      await syncRef.current?.cancelSession(id);
+      await client.cancelTurn(id);
     } catch (e) {
       console.error("cancelSession failed", e);
     }
   };
 
-  // 远端新建会话：走 conversation.create WS RPC，后端广播 conversation.created 到全局频道，
-  // 本端 handleEvent 的列表 reducer 会自动插入新会话。创建后直接打开。
+  // 远端新建会话：client.createConversation 走 conversation.create WS RPC，
+  // 后端广播 conversation.created 到全局频道，client 列表自动插入。创建后直接打开。
   const createNewConversation = async () => {
-    const transport = transportRef.current;
-    if (!transport) return;
+    if (!client) return;
     try {
-      const result = await transport.request<{ session: Session }>("conversation.create", {});
-      if (result?.session) {
-        setSessions((current) =>
-          current.some((s) => s.id === result.session.id) ? current : [result.session, ...current],
-        );
-        void openSession(result.session);
-      }
+      const session = await client.createConversation();
+      if (session) void openSession(session);
     } catch (e) {
       console.error("conversation.create failed", e);
     }
