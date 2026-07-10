@@ -655,17 +655,17 @@ html, body, #root {
 
 .page-title {
   text-align: center;
-  padding: 20px 16px 4px;
-  font-size: 24px;
+  padding: 16px 16px 2px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text);
 }
 
 .page-subtitle {
   text-align: center;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--green);
-  margin: -4px 0 16px;
+  margin: 0 0 12px;
   display: flex;
   align-items: center;
   justify-content: center;
