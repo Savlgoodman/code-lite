@@ -95,6 +95,24 @@ export function App() {
         current.map((s) => (s.id === channel ? { ...s, status: running ? "running" : s.status === "running" ? "idle" : s.status } : s)),
       );
     }
+    // 配置变更同步（另一端切换模型/思考强度 → 本端跟随）。
+    if (type === "conversation.config.updated") {
+      const configPayload = (event as unknown as { config?: { modelFamily?: string; reasoningEffort?: string } }).config;
+      if (configPayload && channel) {
+        setConfigBySession((prev) => {
+          const cfg = prev[channel];
+          if (!cfg) return prev;
+          const newFamily = configPayload.modelFamily ?? cfg.familyId;
+          const newEffort = configPayload.reasoningEffort ?? cfg.effort;
+          // 用分组结构校验 effort 是否在新 family 支持列表中
+          const fam = cfg.grouping.families.find((f) => f.familyId === newFamily);
+          const validEffort = fam && fam.efforts.length > 0
+            ? (fam.efforts.includes(newEffort) ? newEffort : fam.efforts[0])
+            : newEffort;
+          return { ...prev, [channel]: { ...cfg, familyId: newFamily, effort: validEffort } };
+        });
+      }
+    }
   }, []);
 
   const handleSnapshot = useCallback((channel: string, payload: unknown) => {
@@ -208,6 +226,16 @@ export function App() {
   const activeRunning = activeView?.running ?? false;
   const activeConfig = activeSessionId ? configBySession[activeSessionId] : undefined;
 
+  // 同步 config 到后端（广播给另一端），使用与桌面版一致的字段名。
+  const syncConfigToBackend = (sessionId: string, familyId: string, effort: string) => {
+    const transport = transportRef.current;
+    if (!transport || !sessionId) return;
+    transport.request("conversation.config.update", {
+      conversationId: sessionId,
+      config: { modelFamily: familyId, reasoningEffort: effort },
+    }).catch((e) => console.warn("config sync failed", e));
+  };
+
   // 切换模型族：effort 重置为该族支持的首个（或保留当前若仍受支持）。
   const changeFamily = (familyId: string) => {
     if (!activeSessionId) return;
@@ -218,6 +246,7 @@ export function App() {
       const nextEffort = fam && fam.efforts.length > 0
         ? (fam.efforts.includes(cfg.effort) ? cfg.effort : fam.efforts[0])
         : "";
+      syncConfigToBackend(activeSessionId, familyId, nextEffort);
       return { ...prev, [activeSessionId]: { ...cfg, familyId, effort: nextEffort } };
     });
   };
@@ -227,6 +256,7 @@ export function App() {
     setConfigBySession((prev) => {
       const cfg = prev[activeSessionId];
       if (!cfg) return prev;
+      syncConfigToBackend(activeSessionId, cfg.familyId, effort);
       return { ...prev, [activeSessionId]: { ...cfg, effort } };
     });
   };
