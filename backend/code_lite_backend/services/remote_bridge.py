@@ -35,6 +35,41 @@ def _envelope(kind: str, **fields: Any) -> dict[str, Any]:
     return envelope
 
 
+def _strip_archived_for_remote(data: dict[str, Any]) -> dict[str, Any]:
+    """remote 出站边界：不向远端传输已归档会话（数据包层面剔除）。
+
+    桌面端仍需 archived 会话（归档设置页/过滤），故过滤只落在 remote peer
+    的出站边界，不动共享的 ws.py handler 与 chat-core 列表逻辑。
+
+    覆盖两条路径：
+    - conversation.list 结果：剔除 sessions 中 archived 的项。
+    - GLOBAL_CHANNEL 上的 conversation.archived 事件：改写为 conversation.deleted，
+      让已连接的远端把刚归档的会话从列表移除（否则该事件仍会携带会话数据）。
+    """
+    payload = data.get("payload")
+    if not isinstance(payload, dict):
+        return data
+    kind = data.get("kind")
+    if kind == "result" and isinstance(payload.get("sessions"), list):
+        sessions = payload["sessions"]
+        filtered = [
+            s for s in sessions
+            if not (isinstance(s, dict) and s.get("archived"))
+        ]
+        if len(filtered) != len(sessions):
+            return {**data, "payload": {**payload, "sessions": filtered}}
+        return data
+    if kind == "event" and payload.get("type") == "conversation.archived":
+        session = payload.get("session")
+        sid = session.get("id") if isinstance(session, dict) else None
+        if sid:
+            return {
+                **data,
+                "payload": {"type": "conversation.deleted", "session": {"id": sid}},
+            }
+    return data
+
+
 # 这些 handler 签名为 5 参（末位 tasks: 订阅/泵状态），其余为 4 参。
 # turn.start 会在启动 turn 前先订阅会话频道（见 ws.py _handle_turn_start），
 # 因此和 subscribe 一样需要 tasks；漏传会抛 TypeError 被吞，导致 turn 静默不启动。
@@ -105,6 +140,8 @@ class _PeerSession:
         self.connected_at: float = time.time()
 
     async def send_json(self, data: dict) -> None:
+        # remote 出站边界统一过滤：已归档会话不进数据包（覆盖 list 结果 + archived 增量事件）。
+        data = _strip_archived_for_remote(data)
         envelope = {"type": "msg", "to": self.peer_id, "from": "host", "payload": data}
         await self._real_ws.send(json.dumps(envelope, ensure_ascii=False))
 
