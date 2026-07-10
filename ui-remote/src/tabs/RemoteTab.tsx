@@ -31,15 +31,15 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
     setExpandedProjects((prev) => ({ ...prev, [name]: !prev[name] }));
   };
 
-  const title = deviceName ? `${deviceName} 的远程会话` : "远程会话";
+  const title = deviceName ? `${deviceName} 的远程 code-lite` : "远程 code-lite";
 
   if (!connected) {
     return (
       <div className="tab-page">
         <h2 className="page-title">{title}</h2>
+        <div className="page-subtitle offline">未连接</div>
         <div className="empty-state">
           <div className="empty-icon">◎</div>
-          <h2>未连接</h2>
           <p>请在"设备"页面添加并连接一台设备</p>
         </div>
       </div>
@@ -50,10 +50,10 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
     return (
       <div className="tab-page">
         <h2 className="page-title">{title}</h2>
+        <div className="page-subtitle">已连接</div>
         <div className="empty-state">
           <div className="empty-icon">☺</div>
-          <h2>收件箱为空</h2>
-          <p>与好友建立连接，开始共享会话</p>
+          <p>收件箱为空，等待新会话</p>
         </div>
       </div>
     );
@@ -62,6 +62,7 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
   return (
     <div className="tab-page">
       <h2 className="page-title">{title}</h2>
+      <div className="page-subtitle">已连接</div>
       <div className="session-list">
         {Object.entries(projects).map(([project, projectSessions]) => {
           const isExpanded = expandedProjects[project] ?? false;

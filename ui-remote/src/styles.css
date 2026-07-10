@@ -654,10 +654,39 @@ html, body, #root {
 /* ── 8. Shared Utilities ──────────────────── */
 
 .page-title {
+  text-align: center;
+  padding: 20px 16px 4px;
   font-size: 24px;
   font-weight: 600;
-  margin-bottom: 16px;
   color: var(--text);
+}
+
+.page-subtitle {
+  text-align: center;
+  font-size: 14px;
+  color: var(--green);
+  margin: -4px 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.page-subtitle::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  display: inline-block;
+}
+
+.page-subtitle.offline {
+  color: var(--subtle);
+}
+
+.page-subtitle.offline::before {
+  background: var(--subtle);
 }
 
 .primary-button {
