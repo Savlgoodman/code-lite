@@ -295,14 +295,16 @@ class RemoteBridge:
                         logger.info("remote peer joined: %s", peer_id)
                         # 每个 peer 一个独立会话（含独立 pump_tasks），互不串台（0710 第 4.1 节）。
                         peer = _PeerSession(ws, peer_id)
-                        # 新接入默认 pending（只读）；宿主确认后才可介入（0710 第 6 节）。
-                        # default_readonly=False 时确认后默认 operator，但首连仍需确认。
-                        peer.role = "pending"
+                        # 默认权限跟随配置（0709 设计 8.4）：远端默认 operator（随时介入），
+                        # 仅当宿主开启"新接入设备默认只读"时才落为 viewer，由宿主在设置页升权。
+                        # 首连确认作为更强的管控（设备列表 + 踢出）已提供，弹窗确认为后续增强。
+                        peer.role = "viewer" if self._config.default_readonly else "operator"
                         self._remote_peers[peer_id] = peer
-                        # 通知本地前端弹首连确认
+                        # 通知本地前端刷新设备列表（并可据此提示有新设备接入）
                         self._notify_local({
-                            "type": "remote.peer.pending",
+                            "type": "remote.peer.joined",
                             "peerId": peer_id,
+                            "role": peer.role,
                             "defaultReadonly": self._config.default_readonly,
                         })
                     elif msg_type == "peer.left":

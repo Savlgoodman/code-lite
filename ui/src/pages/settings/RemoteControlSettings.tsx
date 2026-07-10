@@ -50,7 +50,7 @@ export function RemoteControlSettings() {
     const transport = getLocalTransport();
     const unsub = transport.onEvent((event) => {
       const type = (event as unknown as { type?: string }).type;
-      if (type === "remote.peer.pending" || type === "remote.peer.left") {
+      if (type === "remote.peer.joined" || type === "remote.peer.pending" || type === "remote.peer.left") {
         void refreshPeers();
       }
     });

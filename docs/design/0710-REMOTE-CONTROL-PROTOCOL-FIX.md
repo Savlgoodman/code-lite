@@ -226,11 +226,11 @@ async def handle_xxx(session: WsSession, request_id: str | None, payload: dict) 
 
 ## 6. 最小安全模型
 
-- `RemoteBridge` 维护 `authorized_peers: set[str]` 与 `peer_roles: dict[str,str]`。
-- 新 peer `peer.joined` 时默认 **pending**：只允许 `subscribe`/`conversation.list`/`conversation.get`（viewer 只读），其余命令回 `forbidden`，并向本地前端推 `presence{peer.pending}` 弹首连确认。
-- 宿主确认后 `remote.peer.authorize{peerId, role}` 置为 operator（默认）；`remote.peer.kick{peerId}` 移出并请中继软断开。
-- 设置页"新接入设备默认只读"开关控制授权后的默认 role。
-- 权限校验在 dispatch 入口按 `WsSession.role` 与方法所需等级（3.3 表）比对。
+- `RemoteBridge` 每个 peer 会话持有 `role`（`viewer` | `operator`）。
+- 新 peer `peer.joined` 时默认权限跟随配置（0709 设计 8.4）：**默认 `operator`**（目标即"随时介入"），仅当宿主开启"新接入设备默认只读"开关时落为 `viewer`。加入后向本地前端推 `remote.peer.joined` 供设置页刷新设备列表。
+- 权限校验在 dispatch 入口按 `role` 与方法所需等级（3.3 表）比对：`viewer` 只允许 `subscribe`/`conversation.list`/`conversation.get`/`session.initialize`/`diff.get` 等只读方法，介入类命令回 `forbidden`。
+- 宿主可 `remote.peer.authorize{peerId, role}` 升/降权、`remote.peer.kick{peerId}` 移出并软断开。
+- 弹窗式"首连确认"（接入即冻结、须点确认才放行）作为后续增强；MVP 用"默认 operator + 设备列表 + 一键踢出/降级"提供等价管控，避免默认只读导致远端发消息被静默拒绝。
 
 ## 7. remote 前端改造（复用 chat-core）
 
