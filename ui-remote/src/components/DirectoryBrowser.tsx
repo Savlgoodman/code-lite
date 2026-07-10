@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowUp, Folder, HardDrive, Loader2, Check } from "lucide-react";
+import { ArrowUp, Folder, FolderPlus, HardDrive, Loader2, Check, X } from "lucide-react";
 import type { ConversationClient, DirectoryListing } from "@code-lite/chat-core";
 
 interface DirectoryBrowserProps {
@@ -16,11 +16,17 @@ export function DirectoryBrowser({ client, initialPath, onSelect, onClose }: Dir
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 新建文件夹：输入行显隐 + 名称 + 创建中
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
 
   const load = async (path?: string) => {
     if (!client) return;
     setLoading(true);
     setError(null);
+    setShowNewFolder(false);
+    setNewFolderName("");
     try {
       const result = await client.browseDirectory(path);
       setListing(result);
@@ -29,6 +35,26 @@ export function DirectoryBrowser({ client, initialPath, onSelect, onClose }: Dir
       setError("无法读取该目录");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!client || !listing?.path || !name || creatingFolder) return;
+    setCreatingFolder(true);
+    setError(null);
+    try {
+      await client.createDirectory(listing.path, name);
+      // 重新加载当前目录以显示新建的文件夹
+      const result = await client.browseDirectory(listing.path);
+      setListing(result);
+      setShowNewFolder(false);
+      setNewFolderName("");
+    } catch (err) {
+      console.error("[DirectoryBrowser] mkdir failed:", err);
+      setError("新建文件夹失败（可能已存在或名称非法）");
+    } finally {
+      setCreatingFolder(false);
     }
   };
 
@@ -45,7 +71,7 @@ export function DirectoryBrowser({ client, initialPath, onSelect, onClose }: Dir
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
-        {/* 当前路径 + 上级 */}
+        {/* 当前路径 + 上级 + 新建文件夹 */}
         <div className="dir-browser-path">
           <button
             className="dir-up-btn"
@@ -58,7 +84,53 @@ export function DirectoryBrowser({ client, initialPath, onSelect, onClose }: Dir
           <span className="dir-current-path" title={listing?.path}>
             {listing?.path || "…"}
           </span>
+          <button
+            className="dir-up-btn"
+            disabled={!listing?.path || loading}
+            onClick={() => {
+              setShowNewFolder((v) => !v);
+              setNewFolderName("");
+              setError(null);
+            }}
+            aria-label="新建文件夹"
+            title="在当前目录新建文件夹"
+          >
+            <FolderPlus size={16} />
+          </button>
         </div>
+
+        {/* 新建文件夹输入行 */}
+        {showNewFolder && (
+          <div className="dir-new-folder-row">
+            <input
+              className="form-input"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); handleCreateFolder(); }
+                if (e.key === "Escape") { setShowNewFolder(false); setNewFolderName(""); }
+              }}
+              placeholder="新文件夹名称"
+              autoFocus
+              spellCheck={false}
+            />
+            <button
+              className="dir-up-btn"
+              disabled={!newFolderName.trim() || creatingFolder}
+              onClick={handleCreateFolder}
+              aria-label="确认新建"
+            >
+              {creatingFolder ? <Loader2 size={16} className="spin" /> : <Check size={16} />}
+            </button>
+            <button
+              className="dir-up-btn"
+              onClick={() => { setShowNewFolder(false); setNewFolderName(""); }}
+              aria-label="取消新建"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         <div className="modal-body dir-browser-body">
           {loading ? (

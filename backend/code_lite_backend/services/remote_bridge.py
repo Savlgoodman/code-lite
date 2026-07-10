@@ -88,6 +88,7 @@ def _get_rpc_handlers() -> dict[str, Any]:
         _handle_conversation_list,
         _handle_diff_get,
         _handle_fs_list,
+        _handle_fs_mkdir,
         _handle_input_response,
         _handle_session_initialize,
         _handle_subscribe,
@@ -103,6 +104,7 @@ def _get_rpc_handlers() -> dict[str, Any]:
         "conversation.list": _handle_conversation_list,
         "conversation.get": _handle_conversation_get,
         "fs.list": _handle_fs_list,
+        "fs.mkdir": _handle_fs_mkdir,
         "conversation.create": _handle_conversation_create,
         "conversation.config.update": _handle_conversation_config_update,
         "conversation.archive": _handle_conversation_archive,
@@ -162,8 +164,9 @@ _METHOD_MIN_ROLE: dict[str, str] = {
     "conversation.get": "viewer",
     "session.initialize": "viewer",
     "diff.get": "viewer",
-    # 目录浏览会暴露宿主机真实文件树，要求 operator（与新建会话同级）
+    # 目录浏览/新建会暴露并修改宿主机真实文件树，要求 operator（与新建会话同级）
     "fs.list": "operator",
+    "fs.mkdir": "operator",
     "conversation.create": "operator",
     "conversation.config.update": "operator",
     "conversation.archive": "operator",

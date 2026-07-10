@@ -296,6 +296,66 @@ async def _handle_fs_list(
         await _send(ws, _envelope("error", requestId=request_id, payload={"code": "internal_error"}))
 
 
+async def _handle_fs_mkdir(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """在宿主机某目录下新建一个文件夹，供远端浏览器创建工作区目录。
+
+    要求 operator 权限（见 remote_bridge._METHOD_MIN_ROLE）。name 只允许单层
+    文件夹名，禁止路径分隔符与 .. 以防跳出父目录。返回新目录信息。
+    """
+    import os
+    from pathlib import Path
+
+    raw_parent = str(payload.get("path") or "").strip()
+    name = str(payload.get("name") or "").strip()
+
+    if not raw_parent:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_path"}))
+        return
+    if not name:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_name"}))
+        return
+    # 只允许单层名字，拒绝分隔符/上跳/盘符，防止越出父目录
+    if name in (".", "..") or "/" in name or "\\" in name or os.sep in name or (os.altsep and os.altsep in name) or ":" in name:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "invalid_name"}))
+        return
+
+    try:
+        parent = Path(raw_parent).expanduser()
+        try:
+            parent = parent.resolve()
+        except OSError:
+            parent = parent.absolute()
+
+        if not parent.exists() or not parent.is_dir():
+            await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_a_directory", "path": str(parent)}))
+            return
+
+        target = parent / name
+        if target.exists():
+            await _send(ws, _envelope("error", requestId=request_id, payload={"code": "already_exists", "path": str(target)}))
+            return
+
+        try:
+            target.mkdir()
+        except PermissionError:
+            await _send(ws, _envelope("error", requestId=request_id, payload={"code": "permission_denied", "path": str(parent)}))
+            return
+
+        await _send(ws, _envelope("result", requestId=request_id, payload={
+            "path": str(target),
+            "name": name,
+            "isDir": True,
+        }))
+    except Exception:
+        logger.exception("fs.mkdir failed for path=%s name=%s", raw_parent, name)
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "internal_error"}))
+
+
 async def _handle_conversation_get(
     ws: WebSocket,
     services: AppServices,
@@ -510,6 +570,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 await _handle_conversation_get(ws, services, request_id, payload)
             elif method == "fs.list":
                 await _handle_fs_list(ws, services, request_id, payload)
+            elif method == "fs.mkdir":
+                await _handle_fs_mkdir(ws, services, request_id, payload)
             elif method == "conversation.create":
                 await _handle_conversation_create(ws, services, request_id, payload)
             elif method == "conversation.config.update":

@@ -1559,6 +1559,20 @@ html, body, #root {
   flex: 1;
 }
 
+.dir-new-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.dir-new-folder-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
 .dir-browser-body {
   padding: 0;
 }

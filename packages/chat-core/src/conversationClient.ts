@@ -445,6 +445,11 @@ export class ConversationClient {
     return this.transport.request<DirectoryListing>("fs.list", { path: path ?? "" });
   }
 
+  /** 在宿主机 path 目录下新建名为 name 的文件夹，返回新目录信息。 */
+  async createDirectory(path: string, name: string): Promise<DirectoryEntry> {
+    return this.transport.request<DirectoryEntry>("fs.mkdir", { path, name });
+  }
+
   async archiveConversation(conversationId: string, archived: boolean): Promise<void> {
     await this.transport.request("conversation.archive", { conversationId, archived });
   }
