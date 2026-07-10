@@ -276,20 +276,34 @@
   --center: calc(var(--r) + var(--ratio) * (100% - var(--h)));
   position: relative;
   height: var(--h);
-  border-radius: 12px;
+  border-radius: var(--radius-pill);
   overflow: hidden;
-  border: 1px solid #1a1a1e;
-  background: #0c0c0c;
+  border: 1px solid var(--line);
+  background: var(--sidebar);
   isolation: isolate;
   cursor: pointer;
   touch-action: none;
+  transition: background var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard);
 }
 
 .effort-track-bg {
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, #111113, #0a0a0b);
   z-index: 0;
+}
+
+/* 浅色进度填充：从左铺到滑块圆心（非最高挡的常态反馈） */
+.effort-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--center);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  opacity: 0.9;
+  z-index: 1;
+  transition: width var(--dur-base) var(--ease-standard), opacity var(--dur-base) var(--ease-standard);
 }
 
 /* 挡位点 */
@@ -297,24 +311,22 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 1;
+  z-index: 2;
 }
 
 .effort-dot {
   position: absolute;
   top: 50%;
   left: calc(var(--r) + var(--tr) * (100% - var(--h)));
-  width: 5px;
-  height: 5px;
-  margin-left: -2.5px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
   border-radius: 50%;
-  background: #494950;
+  background: var(--subtle);
+  mix-blend-mode: difference;
   transform: translateY(-50%);
   transition: opacity 0.6s;
 }
-
-/* 到最高挡时挡位点隐去 */
-.effort-slider.max .effort-dot { opacity: 0; }
 
 /* 火焰 canvas：平时透明；最高挡淡入，screen 叠加发光 */
 .effort-canvas {
@@ -325,16 +337,29 @@
   pointer-events: none;
   opacity: 0;
   mix-blend-mode: screen;
-  z-index: 2;
+  z-index: 3;
   transition: opacity 0.3s;
 }
+
+/* ── 最高挡：轨道转深底让火焰显现，浅填充淡出，挡位点隐去 ── */
+.effort-slider.max .effort-track {
+  background: #0c0c0c;
+  border-color: #1a1a1e;
+}
+
+.effort-slider.max .effort-track-bg {
+  background: linear-gradient(135deg, #111113, #0a0a0b);
+}
+
+.effort-slider.max .effort-fill { opacity: 0; }
+.effort-slider.max .effort-dot { opacity: 0; }
 
 .effort-slider.max .effort-canvas {
   opacity: 1;
   z-index: 4;
 }
 
-/* 白色发光滑块：直径 = 轨道高度，圆心随 --center */
+/* 白色圆形滑块：直径 = 轨道高度，圆心随 --center */
 .effort-thumb {
   position: absolute;
   top: 50%;
@@ -342,15 +367,13 @@
   width: var(--h);
   height: var(--h);
   margin-left: calc(-1 * var(--r));
-  border-radius: 11px;
-  background: linear-gradient(170deg, #ffffff 0%, #f0f0f2 40%, #e4e4e6 100%);
+  border-radius: 50%;
+  background: #ffffff;
   border: 0.5px solid rgba(0, 0, 0, 0.08);
   box-shadow:
     0 0.5px 1px rgba(0, 0, 0, 0.18),
     0 2px 6px rgba(0, 0, 0, 0.25),
-    0 6px 16px rgba(0, 0, 0, 0.12),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
-    inset 0 -0.5px 0 rgba(0, 0, 0, 0.06);
+    0 6px 16px rgba(0, 0, 0, 0.12);
   transform: translateY(-50%);
   transition: left var(--dur-base) var(--ease-standard), box-shadow 0.4s ease;
   pointer-events: none;
@@ -360,13 +383,10 @@
 /* 最高挡：滑块紫色辉光 */
 .effort-slider.max .effort-thumb {
   box-shadow:
-    0 0.5px 1px rgba(0, 0, 0, 0.18),
     0 2px 6px rgba(0, 0, 0, 0.25),
     0 6px 16px rgba(0, 0, 0, 0.12),
     0 0 24px rgba(168, 85, 247, 0.5),
-    0 0 44px rgba(168, 85, 247, 0.25),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
-    inset 0 -0.5px 0 rgba(0, 0, 0, 0.06);
+    0 0 44px rgba(168, 85, 247, 0.25);
 }
 
 .effort-caption {

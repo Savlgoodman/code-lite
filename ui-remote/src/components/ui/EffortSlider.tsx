@@ -97,6 +97,7 @@ export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
         aria-valuetext={value}
       >
         <div className="effort-track-bg" />
+        <div className="effort-fill" />
         <div className="effort-dots">
           {options.map((opt, i) => (
             <span
