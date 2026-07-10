@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Radio, Sparkles, Network, Settings } from "lucide-react";
 import { RemoteTab } from "./tabs/RemoteTab";
 import { AiTab } from "./tabs/AiTab";
@@ -6,6 +6,7 @@ import { DevicesTab } from "./tabs/DevicesTab";
 import { SettingsTab } from "./tabs/SettingsTab";
 import { connectionManager } from "./services/ConnectionManager";
 import { deviceStore, type DeviceRecord } from "./services/DeviceStore";
+import { AddDeviceSheet } from "./components/AddDeviceSheet";
 
 type TabId = "remote" | "ai" | "devices" | "settings";
 
@@ -29,8 +30,13 @@ export function App() {
   const [deviceName, setDeviceName] = useState<string>("");
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
+  const [editingDevice, setEditingDevice] = useState<DeviceRecord | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
-  // 刷新设备列表
+  // 用 ref 避免回调闭包捕获过期的 activeDeviceId
+  const activeDeviceIdRef = useRef(activeDeviceId);
+  activeDeviceIdRef.current = activeDeviceId;
+
   const refreshDevices = useCallback(async () => {
     const list = await deviceStore.loadAll();
     setDevices(list);
@@ -59,15 +65,21 @@ export function App() {
       }
     })();
 
-    // 设置 host 状态回调
+    // 设置 host 状态回调 (使用 ref 避免闭包过期)
     connectionManager.setHostStatusCallback((online) => {
       setConnected(online);
-      if (activeDeviceId) {
-        deviceStore.updateDeviceOnline(activeDeviceId, online);
+      const id = activeDeviceIdRef.current;
+      if (id) {
+        deviceStore.updateDeviceOnline(id, online);
         refreshDevices();
       }
     });
   }, []);
+
+  const showError = (msg: string) => {
+    setErrorToast(msg);
+    setTimeout(() => setErrorToast(null), 3000);
+  };
 
   const handleSwitchDevice = useCallback(async (id: string) => {
     const device = devices.find((d) => d.id === id);
@@ -89,14 +101,15 @@ export function App() {
       setConnected(true);
       setActiveSessionId(null);
     } catch (err) {
-      console.error("[App] Switch device failed:", err);
-      alert("切换设备失败: " + (err instanceof Error ? err.message : String(err)));
+      const msg = err instanceof Error ? err.message : String(err);
+      showError("切换设备失败: " + msg);
+      // 回滚到之前的设备
+      await refreshDevices();
     }
-  }, [devices]);
+  }, [devices, refreshDevices]);
 
   const handleDeleteDevice = useCallback(async (id: string) => {
     if (id === activeDeviceId) {
-      // 删除当前设备需要断开连接
       connectionManager.disconnect();
       setConnected(false);
       setDeviceName("");
@@ -118,6 +131,20 @@ export function App() {
     await refreshDevices();
   }, [refreshDevices]);
 
+  const handleEditDevice = useCallback(async (id: string, name: string, relayUrl: string, pairKey: string) => {
+    const devices2 = await deviceStore.loadAll();
+    const device = devices2.find((d) => d.id === id);
+    if (!device) return;
+    device.name = name;
+    device.relayUrl = relayUrl;
+    device.pairKey = pairKey;
+    await deviceStore.saveDevice(device);
+    if (id === activeDeviceIdRef.current) {
+      setDeviceName(name);
+    }
+    await refreshDevices();
+  }, [refreshDevices]);
+
   const showTabBar = activeSessionId === null;
 
   return (
@@ -125,7 +152,7 @@ export function App() {
       <main className={showTabBar ? "tab-content" : "tab-content full"}>
         {activeTab === "remote" && <RemoteTab connected={connected} deviceName={deviceName} activeSessionId={activeSessionId} setActiveSessionId={setActiveSessionId} />}
         {activeTab === "ai" && <AiTab />}
-        {activeTab === "devices" && <DevicesTab devices={devices} activeDeviceId={activeDeviceId} onSwitch={handleSwitchDevice} onDelete={handleDeleteDevice} onAdd={handleAddDevice} />}
+        {activeTab === "devices" && <DevicesTab devices={devices} activeDeviceId={activeDeviceId} onSwitch={handleSwitchDevice} onDelete={handleDeleteDevice} onAdd={handleAddDevice} onEdit={handleEditDevice} />}
         {activeTab === "settings" && <SettingsTab />}
       </main>
 
@@ -142,6 +169,28 @@ export function App() {
             </button>
           ))}
         </nav>
+      )}
+
+      {/* 编辑设备 Modal Sheet */}
+      {editingDevice && (
+        <AddDeviceSheet
+          initial={editingDevice}
+          onClose={() => setEditingDevice(null)}
+          onSave={(name, relayUrl, pairKey) => {
+            handleEditDevice(editingDevice.id, name, relayUrl, pairKey);
+            setEditingDevice(null);
+          }}
+        />
+      )}
+
+      {/* 错误提示 Toast */}
+      {errorToast && (
+        <div className="error-toast-overlay" onClick={() => setErrorToast(null)}>
+          <div className="error-toast" onClick={(e) => e.stopPropagation()}>
+            <span className="error-toast-icon"></span>
+            <span className="error-toast-text">{errorToast}</span>
+          </div>
+        </div>
       )}
     </div>
   );

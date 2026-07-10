@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 import type { DeviceRecord } from "../services/DeviceStore";
 import { AddDeviceSheet } from "../components/AddDeviceSheet";
 
@@ -9,19 +9,21 @@ interface DevicesTabProps {
   onSwitch: (id: string) => void;
   onDelete: (id: string) => void;
   onAdd: (name: string, relayUrl: string, pairKey: string) => void;
+  onEdit: (id: string, name: string, relayUrl: string, pairKey: string) => void;
 }
 
-export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd }: DevicesTabProps) {
+export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd, onEdit }: DevicesTabProps) {
   const [showAddSheet, setShowAddSheet] = useState(false);
+  const [editingDevice, setEditingDevice] = useState<DeviceRecord | null>(null);
 
   const handleSave = (name: string, relayUrl: string, pairKey: string) => {
     onAdd(name, relayUrl, pairKey);
     setShowAddSheet(false);
   };
 
-  const handleCardClick = (device: DeviceRecord) => {
-    if (device.id === activeDeviceId) return;
-    onSwitch(device.id);
+  const handleEdit = (e: React.MouseEvent, device: DeviceRecord) => {
+    e.stopPropagation();
+    setEditingDevice(device);
   };
 
   const handleDelete = (e: React.MouseEvent, id: string, name: string) => {
@@ -29,6 +31,11 @@ export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd 
     if (window.confirm(`删除设备 "${name}"？`)) {
       onDelete(id);
     }
+  };
+
+  const handleCardClick = (device: DeviceRecord) => {
+    if (device.id === activeDeviceId) return;
+    onSwitch(device.id);
   };
 
   return (
@@ -63,13 +70,22 @@ export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd 
                     {device.online ? "● 在线" : "○ 离线"}
                   </span>
                   {!isActive && (
-                    <button
-                      className="device-delete-btn"
-                      onClick={(e) => handleDelete(e, device.id, device.name)}
-                      aria-label={`删除 ${device.name}`}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <>
+                      <button
+                        className="device-action-btn"
+                        onClick={(e) => handleEdit(e, device)}
+                        aria-label={`编辑 ${device.name}`}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        className="device-delete-btn"
+                        onClick={(e) => handleDelete(e, device.id, device.name)}
+                        aria-label={`删除 ${device.name}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -83,6 +99,16 @@ export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd 
       </button>
 
       {showAddSheet && <AddDeviceSheet onClose={() => setShowAddSheet(false)} onSave={handleSave} />}
+      {editingDevice && (
+        <AddDeviceSheet
+          initial={editingDevice}
+          onClose={() => setEditingDevice(null)}
+          onSave={(name, relayUrl, pairKey) => {
+            onEdit(editingDevice.id, name, relayUrl, pairKey);
+            setEditingDevice(null);
+          }}
+        />
+      )}
     </div>
   );
 }

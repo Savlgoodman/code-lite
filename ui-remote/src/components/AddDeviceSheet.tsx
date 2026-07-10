@@ -1,19 +1,32 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { RelayTransport } from "../services/RelayTransport";
 import { computeRoomId } from "../services/ConnectionManager";
+import type { DeviceRecord } from "../services/DeviceStore";
 
 export interface AddDeviceSheetProps {
+  initial?: DeviceRecord; // 编辑时传入，添加时省略
   onClose: () => void;
   onSave: (name: string, relayUrl: string, pairKey: string) => void;
 }
 
-export function AddDeviceSheet({ onClose, onSave }: AddDeviceSheetProps) {
+export function AddDeviceSheet({ initial, onClose, onSave }: AddDeviceSheetProps) {
   const [name, setName] = useState("");
   const [relayUrl, setRelayUrl] = useState("");
   const [pairKey, setPairKey] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"idle" | "success" | "fail">("idle");
   const [testError, setTestError] = useState("");
+
+  const isEdit = Boolean(initial);
+  const title = isEdit ? "编辑设备" : "添加设备";
+
+  useEffect(() => {
+    if (initial) {
+      setName(initial.name);
+      setRelayUrl(initial.relayUrl);
+      setPairKey(initial.pairKey);
+    }
+  }, [initial]);
 
   const allFilled = name.trim() && relayUrl.trim() && pairKey.trim();
 
@@ -30,7 +43,6 @@ export function AddDeviceSheet({ onClose, onSave }: AddDeviceSheetProps) {
     });
 
     try {
-      // 10 秒超时: connect() 内部完成握手（hello → ready）
       await Promise.race([
         transport.connect(),
         new Promise((_, reject) => setTimeout(() => reject(new Error("连接超时")), 10000)),
@@ -54,7 +66,7 @@ export function AddDeviceSheet({ onClose, onSave }: AddDeviceSheetProps) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>添加设备</h2>
+          <h2>{title}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
@@ -109,7 +121,7 @@ export function AddDeviceSheet({ onClose, onSave }: AddDeviceSheetProps) {
             onClick={handleSave}
             disabled={!allFilled}
           >
-            保存
+            {isEdit ? "保存修改" : "保存"}
           </button>
         </div>
       </div>
