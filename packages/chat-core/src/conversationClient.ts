@@ -141,6 +141,11 @@ export class ConversationClient {
     return this.sync;
   }
 
+  /** 透传 RPC 请求，供 app 层调用非标准方法（如 session.initialize）。 */
+  request<T = unknown>(method: string, payload?: unknown): Promise<T> {
+    return this.transport.request<T>(method, payload);
+  }
+
   /** 本地 patch 单个会话字段（触发 UI 重渲染）。供 app 层做 resolveApproval/archive 等即时 UI 反馈。 */
   patchSession(sessionId: string, patch: Partial<Session>): void {
     this.updateSessionInternal(sessionId, patch);

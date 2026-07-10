@@ -1,0 +1,20 @@
+{
+  "appId": "com.codelite.remote",
+  "appName": "Code-Lite Remote",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "Keyboard": {
+      "resize": "body",
+      "resizeOnFullScreen": true
+    },
+    "Preferences": {}
+  }
+}
