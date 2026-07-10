@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Folder, MessageSquare, Settings, Send, ArrowLeft } from "lucide-react";
+import { Folder, MessageSquare, Settings, Send, ArrowLeft, Square, Plus } from "lucide-react";
 import type { AgentEvent, ChatMessage, Session, SessionCapabilities, SessionMode, UsageStats } from "@code-lite/protocol";
 import {
   applyConversationListEvent,
@@ -81,8 +81,14 @@ export function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [views, activeSessionId]);
 
-  // 事件入口：全局频道走列表 reducer，会话频道走单会话 reducer（0710 第 5 节）。
+  // 事件入口：同步事件（运行态/配置）先喂 SyncManager；再按频道分列表/单会话 reducer。
   const handleEvent = useCallback((event: AgentEvent, meta: { channel: string }) => {
+    // 同步事件优先处理：session.running/stopped 走全局频道，必须在频道分流前拦截，
+    // 否则会在全局频道分支被丢弃，导致列表页运行态不刷新。
+    if ((event as { type?: string }).type === "sync") {
+      syncRef.current?.feedEvent(event);
+      return;
+    }
     if (meta.channel === GLOBAL_CHANNEL || isConversationListEvent(event)) {
       if (isConversationListEvent(event)) {
         setSessions((current) => applyConversationListEvent(current, event));
@@ -91,11 +97,6 @@ export function App() {
     }
     const channel = (event as { conversationId?: string }).conversationId || meta.channel;
     if (!channel) return;
-    // 同步事件（运行态/配置）交给 SyncManager 统一处理，不进消息 reducer。
-    if ((event as { type?: string }).type === "sync") {
-      syncRef.current?.feedEvent(event);
-      return;
-    }
     setViews((current) => {
       const prev = current[channel] ?? emptySessionView(null);
       return { ...current, [channel]: reduceAgentEvent(prev, event) };
@@ -248,6 +249,36 @@ export function App() {
       });
     } catch (e) {
       console.error("turn.start failed", e);
+    }
+  };
+
+  // 终止当前会话（双端均可终止，0710 统一同步协议）。走 SyncManager.cancelSession，
+  // 后端取消 turn 后广播 session.stopped，双端同步恢复。
+  const stopMessage = async () => {
+    const id = activeSessionIdRef.current;
+    if (!id) return;
+    try {
+      await syncRef.current?.cancelSession(id);
+    } catch (e) {
+      console.error("cancelSession failed", e);
+    }
+  };
+
+  // 远端新建会话：走 conversation.create WS RPC，后端广播 conversation.created 到全局频道，
+  // 本端 handleEvent 的列表 reducer 会自动插入新会话。创建后直接打开。
+  const createNewConversation = async () => {
+    const transport = transportRef.current;
+    if (!transport) return;
+    try {
+      const result = await transport.request<{ session: Session }>("conversation.create", {});
+      if (result?.session) {
+        setSessions((current) =>
+          current.some((s) => s.id === result.session.id) ? current : [result.session, ...current],
+        );
+        void openSession(result.session);
+      }
+    } catch (e) {
+      console.error("conversation.create failed", e);
     }
   };
 
@@ -421,12 +452,18 @@ export function App() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              placeholder={activeRunning ? "另一端正在运行..." : "输入消息..."}
+              placeholder={activeRunning ? "运行中..." : "输入消息..."}
               disabled={activeRunning}
             />
-            <button onClick={sendMessage} disabled={!draft.trim() || activeRunning}>
-              <Send size={18} />
-            </button>
+            {activeRunning ? (
+              <button className="stop-btn" onClick={stopMessage} title="终止当前会话">
+                <Square size={18} />
+              </button>
+            ) : (
+              <button onClick={sendMessage} disabled={!draft.trim()}>
+                <Send size={18} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -464,9 +501,20 @@ export function App() {
       <div className="page">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ fontSize: 20 }}>项目</h2>
-          <span style={{ fontSize: 12, color: hostOnline ? "var(--green)" : "var(--orange)" }}>
-            {hostOnline ? "● 宿主在线" : "○ 宿主离线"}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 12, color: hostOnline ? "var(--green)" : "var(--orange)" }}>
+              {hostOnline ? "● 宿主在线" : "○ 宿主离线"}
+            </span>
+            <button
+              className="new-conversation-btn"
+              onClick={createNewConversation}
+              disabled={!hostOnline}
+              title="新建会话"
+              style={{ display: "flex", alignItems: "center", gap: 4 }}
+            >
+              <Plus size={16} /> 新建
+            </button>
+          </div>
         </div>
         {Object.entries(projectGroups).map(([key, group]) => (
           <div key={key} style={{ marginBottom: 16 }}>

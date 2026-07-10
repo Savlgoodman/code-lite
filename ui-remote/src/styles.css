@@ -359,6 +359,27 @@ html, body, #root {
   cursor: not-allowed;
 }
 
+/* 终止按钮：运行中显示，红色区分于发送 */
+.chat-input-bar button.stop-btn {
+  background: var(--red, #e53e3e);
+}
+
+/* 列表页"新建会话"按钮 */
+.new-conversation-btn {
+  background: var(--blue);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.new-conversation-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* 配置栏（模型/思考强度/上下文窗口） */
 .chat-bottom-bar {
   flex-shrink: 0;
