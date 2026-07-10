@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
 
 interface EffortSliderProps {
   /** 当前挡位值 */
@@ -22,34 +22,33 @@ function effortTone(value: string): string {
 }
 
 /**
- * 思考强度拖动条：渐变轨道（暖 → 紫）+ 挡位断点 + 白色圆滑块。
- * 拖动或点击轨道就近吸附到某一挡位，越高强度越偏紫并带星点流光。
+ * 思考强度拖动条。
+ *
+ * 几何：白色圆滑块直径 = 轨道高度，其圆心在 [r, 宽度-r] 内移动
+ * （首尾挡位各内缩一个半径 r），保证圆能贴合两端。挡位断点数量
+ * 由 options 长度决定，位置按索引均匀计算。
+ *
+ * 视觉：默认仅用纯色填充到滑块处；仅当拖到最高挡位时，整条滑槽
+ * 由右向左渐进铺满暖→紫渐变，叠加星光流动，右端半圆带漏光。
  */
 export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const [trackW, setTrackW] = useState(0);
   const draggingRef = useRef(false);
 
   const count = options.length;
   const index = Math.max(0, options.indexOf(value));
-  const pct = count > 1 ? (index / (count - 1)) * 100 : 0;
+  const ratio = count > 1 ? index / (count - 1) : 0;
+  const isMax = count > 1 && index === count - 1;
 
-  // 测量轨道宽度，供内层渐变对齐（渐变始终按整条轨道铺满，再由 fill 裁剪）
-  useEffect(() => {
-    const el = trackRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setTrackW(el.clientWidth));
-    ro.observe(el);
-    setTrackW(el.clientWidth);
-    return () => ro.disconnect();
-  }, []);
-
+  // 指针位置 → 就近挡位。命中区间按 [r, 宽度-r] 反算，与滑块可达范围一致。
   const setFromClientX = (clientX: number) => {
     const el = trackRef.current;
     if (!el || count < 2) return;
     const rect = el.getBoundingClientRect();
-    const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
-    const idx = Math.round(ratio * (count - 1));
+    const r = rect.height / 2;
+    const span = rect.width - 2 * r;
+    const rel = clamp(clientX - rect.left - r, 0, span);
+    const idx = span > 0 ? Math.round((rel / span) * (count - 1)) : 0;
     const next = options[idx];
     if (next && next !== value) onChange(next);
   };
@@ -76,8 +75,9 @@ export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
   return (
     <div className="effort-slider">
       <div
-        className="effort-track"
+        className={`effort-track${isMax ? " max" : ""}`}
         ref={trackRef}
+        style={{ "--ratio": ratio } as CSSProperties}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -87,18 +87,26 @@ export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
         aria-valuenow={index}
         aria-valuetext={value}
       >
-        <div className="effort-fill" style={{ width: `${pct}%` }}>
-          <div className="effort-grad" style={{ width: trackW || "100%" }} />
-          <div className="effort-sparkle" style={{ width: trackW || "100%" }} />
+        {/* 纯色填充：到滑块中心；最高挡由 CSS 覆盖为整槽 */}
+        <div className="effort-fill">
+          {/* 渐变 + 流体光 + 星光，仅最高挡可见 */}
+          <div className="effort-grad" />
+          <div className="effort-flow" />
+          <div className="effort-sparkle" />
         </div>
-        {options.map((opt, i) => (
-          <span
-            key={opt}
-            className={`effort-tick${i <= index ? " passed" : ""}`}
-            style={{ left: `${count > 1 ? (i / (count - 1)) * 100 : 0}%` }}
-          />
-        ))}
-        <span className="effort-thumb" style={{ left: `${pct}%` }} />
+        {/* 右端漏光，仅最高挡可见 */}
+        <div className="effort-leak" />
+        {options.map((opt, i) => {
+          const tickRatio = count > 1 ? i / (count - 1) : 0;
+          return (
+            <span
+              key={opt}
+              className={`effort-tick${i <= index ? " passed" : ""}`}
+              style={{ "--tr": tickRatio } as CSSProperties}
+            />
+          );
+        })}
+        <span className="effort-thumb" />
       </div>
       <div className="effort-caption">
         <span className={`effort-level effort-tone-${tone}`} data-text={value}>{value}</span>
