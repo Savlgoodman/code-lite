@@ -1,4 +1,7 @@
-import { useRef, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
+import { useRef, useMemo, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
+
+/** 弹幕道数量：星河被切成若干水平条，各自随机时长/延迟填入，形成参差的填充锋面。 */
+const LANES = 7;
 
 interface EffortSliderProps {
   /** 当前挡位值 */
@@ -34,6 +37,16 @@ function effortTone(value: string): string {
 export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+
+  // 每条弹幕道随机延迟/时长，只算一次；填充整体偏慢（3.4~5.4s）
+  const lanes = useMemo(
+    () =>
+      Array.from({ length: LANES }, () => ({
+        delay: Math.random() * 1.6,
+        duration: 3.4 + Math.random() * 2,
+      })),
+    []
+  );
 
   const count = options.length;
   const index = Math.max(0, options.indexOf(value));
@@ -89,13 +102,26 @@ export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
       >
         {/* 纯色填充：到滑块中心；最高挡由 CSS 覆盖为整槽 */}
         <div className="effort-fill">
-          {/* 渐变星河，仅最高挡从右向左液态填满 */}
+          {/* 星河：切成多条弹幕道，各自随机从右向左填入，锋面参差 */}
           <div className="effort-galaxy">
-            <div className="effort-grad" />
-            <div className="effort-sparkle" />
+            {lanes.map((lane, i) => (
+              <div
+                key={i}
+                className="effort-lane"
+                style={{
+                  "--lane-top": `${(i / LANES) * 100}%`,
+                  "--lane-h": `${100 / LANES}%`,
+                  "--lane-delay": `${lane.delay}s`,
+                  "--lane-dur": `${lane.duration}s`,
+                } as CSSProperties}
+              >
+                <div className="effort-grad" />
+                <div className="effort-sparkle" />
+              </div>
+            ))}
           </div>
         </div>
-        {/* 右端灯带漏光，仅最高挡可见 */}
+        {/* 右端半圆弧形漏光，仅最高挡可见 */}
         <div className="effort-leak" />
         {options.map((opt, i) => {
           const tickRatio = count > 1 ? i / (count - 1) : 0;
