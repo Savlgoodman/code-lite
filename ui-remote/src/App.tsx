@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Folder, MessageSquare, Settings, Send, ArrowLeft, Square, Plus } from "lucide-react";
-import type { ChatMessage, Session, SessionCapabilities, SessionMode, UsageStats } from "@code-lite/protocol";
+import type { ChatMessage, Session, SessionCapabilities, SessionConfigOption, SessionMode, UsageStats } from "@code-lite/protocol";
 import {
   groupModelsByFamily,
   buildModelId,
@@ -16,25 +16,34 @@ type Page = "projects" | "chat" | "settings";
 const LS_RELAY_URL = "code-lite-relay-url";
 const LS_PAIR_KEY = "code-lite-pair-key";
 
-/** 会话运行配置：模型族 + 思考强度（二级联动）+ 权限模式 */
+/** 会话运行配置：模型族 + 思考强度 + 权限模式 */
 interface SessionConfig {
   familyId: string; // 当前选中的模型族（isGrouped=false 时即模型 id）
-  effort: string; // 当前选中的思考强度（isGrouped=false 时为空）
+  effort: string; // 当前选中的思考强度
   grouping: ModelGrouping; // 分组结构（families 列表 + 当前值）
   accessMode: string; // 权限模式（read-only / agent / agent-full-access）
   modes: SessionMode[]; // 可用权限模式列表
+  configOptions: SessionConfigOption[]; // 来自 capabilities，供思考强度选择器用
 }
 
 /** 从 capabilities 构建默认运行配置 */
 function buildConfigFromCaps(caps: SessionCapabilities): SessionConfig {
   const grouping = groupModelsByFamily(caps.models);
   const defaultMode = caps.modes.find((m) => m.isDefault) ?? caps.modes[0];
+  // 思考强度初始值：分组模式（codex）取 grouping.currentEffort；
+  // 非分组模式（claude）取 configOptions 里 reasoning_effort 的 currentValue。
+  let effort = grouping.currentEffort;
+  if (!grouping.isGrouped || !effort) {
+    const reasoningOpt = caps.configOptions.find((o) => o.id === "reasoning_effort");
+    if (reasoningOpt?.currentValue != null) effort = String(reasoningOpt.currentValue);
+  }
   return {
     familyId: grouping.currentFamilyId,
-    effort: grouping.currentEffort,
+    effort: effort || "medium",
     grouping,
     accessMode: defaultMode?.id ?? "",
     modes: caps.modes,
+    configOptions: caps.configOptions ?? [],
   };
 }
 
@@ -165,7 +174,7 @@ export function App() {
         accessMode: cfg?.accessMode || undefined,
         modelId: modelId || undefined,
         modelLabel: modelLabel || undefined,
-        reasoningEffort: cfg?.grouping.isGrouped && cfg.effort ? cfg.effort : undefined,
+        reasoningEffort: cfg?.effort || undefined,
       });
     } catch (e) {
       console.error("turn.start failed", e);
@@ -317,7 +326,10 @@ export function App() {
           <div ref={messagesEndRef} />
         </div>
         <div className="chat-bottom-bar">
-          {activeConfig && (activeConfig.grouping.families.length > 0 || activeConfig.modes.length > 1) && (
+          {activeConfig && (() => {
+            const hasReasoningOpt = activeConfig.configOptions.some((o) => o.id === "reasoning_effort" && (o.values?.length ?? 0) > 0);
+            return activeConfig.grouping.families.length > 0 || activeConfig.modes.length > 1 || hasReasoningOpt;
+          })() && (
             <div className="chat-config-bar">
               {activeConfig.modes.length > 1 && (
                 <div className="config-item">
@@ -339,15 +351,23 @@ export function App() {
                   </select>
                 </div>
               )}
-              {activeConfig.grouping.isGrouped && (() => {
-                const fam = activeConfig.grouping.families.find((f) => f.familyId === activeConfig.familyId);
-                if (!fam || fam.efforts.length === 0) return null;
+              {(() => {
+                // 思考强度选择器：分组模式（codex）用 family.efforts；
+                // 非分组模式（claude）用 configOptions 里 reasoning_effort 的 values。
+                const familyGrouping = activeConfig.grouping.families.find((f) => f.familyId === activeConfig.familyId);
+                const familyEfforts = familyGrouping?.efforts ?? [];
+                const reasoningOpt = activeConfig.configOptions.find((o) => o.id === "reasoning_effort");
+                const configEfforts = reasoningOpt?.values ?? [];
+                const efforts = activeConfig.grouping.isGrouped && familyEfforts.length > 0
+                  ? familyEfforts
+                  : configEfforts;
+                if (efforts.length === 0) return null;
                 return (
                   <div className="config-item">
                     <label>思考</label>
                     <select value={activeConfig.effort} onChange={(e) => changeEffort(e.target.value)}>
-                      {fam.efforts.map((v) => (
-                        <option key={v} value={v}>{v}</option>
+                      {efforts.map((v) => (
+                        <option key={v} value={v}>{reasoningOpt?.valueLabels?.[v] ?? v}</option>
                       ))}
                     </select>
                   </div>
