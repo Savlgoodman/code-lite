@@ -230,9 +230,24 @@ export class ConversationClient {
 
     // turn 生命周期：terminal 事件通知 sendTurn 的 resolver。
     const turnId = (event as { turnId?: string }).turnId;
+    if (type === "conversation.turn.started" && turnId) {
+      // 发起方在 draft 会话里发 turn：sendTurn 调用时还没有 conversationId，
+      // 现在后端返回了真实 id，补登记 activeTurnId（供 cancelTurn 使用 + 清理）。
+      const cid = (event as { conversationId?: string }).conversationId;
+      if (cid && !this.activeTurnId[cid]) {
+        this.activeTurnId[cid] = turnId;
+      }
+    }
     if (turnId && (type === "agent.run.completed" || type === "agent.run.failed")) {
       const resolver = this.turnResolvers.get(turnId);
       if (resolver) resolver(event);
+      // 清理该会话的 activeTurnId（turnId -> conversationId 反查）。
+      for (const [cid, tid] of Object.entries(this.activeTurnId)) {
+        if (tid === turnId) {
+          delete this.activeTurnId[cid];
+          break;
+        }
+      }
     }
 
     // 会话列表级事件（全局频道）：更新 sessions 列表。
