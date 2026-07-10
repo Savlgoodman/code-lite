@@ -470,6 +470,68 @@ html, body, #root {
   display: flex;
   align-items: center;
   margin-right: auto;
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.context-ring:active {
+  background: var(--hover);
+}
+
+/* 上下文占用弹窗内容 */
+.context-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.context-usage-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.context-usage-used {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-usage-total {
+  font-size: 16px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-usage-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.context-usage-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.context-usage-percent {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.context-usage-empty {
+  padding: 20px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .send-btn {

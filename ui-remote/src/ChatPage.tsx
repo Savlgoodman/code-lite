@@ -45,6 +45,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const { config, updateConfig } = useSessionConfig(client, sessionId);
   const [input, setInput] = useState("");
   const [showConfigSheet, setShowConfigSheet] = useState(false);
+  const [showContextModal, setShowContextModal] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
@@ -264,8 +265,13 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
     }
   };
 
-  // TODO: wire to actual context window usage
-  const contextPercent = 0;
+  // 上下文占用（来自 agent.context.updated / run.completed 累积的 usage）
+  const usage = view?.contextUsage ?? null;
+  const contextUsed = usage?.contextUsedTokens ?? usage?.totalTokens ?? 0;
+  const contextWindow = usage?.contextWindowTokens ?? 0;
+  const hasContextUsage = contextUsed > 0 && contextWindow > 0;
+  const contextRatio = hasContextUsage ? Math.min(contextUsed / contextWindow, 1) : 0;
+  const contextPercent = Math.round(contextRatio * 100);
 
   // 从 capabilities 中获取模型显示名
   const modelLabel = config?.grouping.families.find((f) => f.familyId === config.familyId)?.label
@@ -359,19 +365,26 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             <button className="input-config-btn" onClick={() => setShowConfigSheet(true)}>
               <Settings size={18} />
             </button>
-            <div className="context-ring">
-              <svg viewBox="0 0 36 36" width="28" height="28">
-                <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--line)" strokeWidth="2.5" />
+            <button
+              className="context-ring"
+              onClick={() => setShowContextModal(true)}
+              aria-label={hasContextUsage ? `上下文占用 ${contextPercent}%` : "上下文占用"}
+              title="上下文占用"
+            >
+              <svg viewBox="0 0 24 24" width="22" height="22">
+                <circle cx="12" cy="12" r="9" fill="none" stroke="var(--line)" strokeWidth="3.5" />
                 <circle
-                  cx="18" cy="18" r="15.5" fill="none"
-                  stroke={contextPercent > 80 ? "var(--orange)" : "var(--text)"}
-                  strokeWidth="2.5"
-                  strokeDasharray={`${contextPercent * 0.97} 100`}
+                  cx="12" cy="12" r="9" fill="none"
+                  stroke={contextRatio > 0.8 ? "var(--orange)" : "var(--text)"}
+                  strokeWidth="3.5"
+                  strokeDasharray={2 * Math.PI * 9}
+                  strokeDashoffset={2 * Math.PI * 9 * (1 - contextRatio)}
                   strokeLinecap="round"
-                  transform="rotate(-90 18 18)"
+                  transform="rotate(-90 12 12)"
+                  style={{ transition: "stroke-dashoffset 0.3s ease, stroke 0.3s ease" }}
                 />
               </svg>
-            </div>
+            </button>
             {isRunning ? (
               <button className="send-btn cancel" onClick={handleCancel}>
                 <Square size={18} />
@@ -407,6 +420,40 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             setShowConfigSheet(false);
           }}
         />
+      )}
+
+      {/* 上下文占用弹窗 */}
+      {showContextModal && (
+        <div className="modal-overlay" onClick={() => setShowContextModal(false)}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>上下文占用</h2>
+              <button className="modal-close" onClick={() => setShowContextModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              {hasContextUsage ? (
+                <div className="context-usage">
+                  <div className="context-usage-figure">
+                    <span className="context-usage-used">{contextUsed.toLocaleString()}</span>
+                    <span className="context-usage-total">/ {contextWindow.toLocaleString()}</span>
+                  </div>
+                  <div className="context-usage-bar">
+                    <div
+                      className="context-usage-bar-fill"
+                      style={{
+                        width: `${contextPercent}%`,
+                        background: contextRatio > 0.8 ? "var(--orange)" : "var(--accent)",
+                      }}
+                    />
+                  </div>
+                  <div className="context-usage-percent">{contextPercent}% 已使用</div>
+                </div>
+              ) : (
+                <div className="context-usage-empty">暂无上下文占用数据</div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
