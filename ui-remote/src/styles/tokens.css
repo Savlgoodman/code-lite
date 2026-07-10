@@ -1,32 +1,13 @@
 /* ============================================
  * Design tokens — single source of truth
- * 颜色 / 圆角 / 阴影 / 动效 / 层级
+ *
+ * 颜色令牌按 data-theme（mono / warm）× data-mode（light / dark）
+ * 四种组合定义；其余令牌（圆角/阴影/动效/层级/语义色）与主题无关，
+ * 统一放在 :root。
  * ============================================ */
 
 :root {
-  /* ── 颜色：中性 ── */
-  --line: #dedbd7;
-  --muted: #6f747b;
-  --subtle: #8b9096;
-  --panel: #fbfbfa;
-  --sidebar: #f3f2f0;
-  --hover: #eceff3;
-  --active: #e7ebf0;
-  --bg: #f6f5f3;
-  --text: #1f2328;
-  --surface: #ffffff;
-
-  /* ── 颜色：强调 ── */
-  --accent: #1f2328;
-  --accent-pressed: #3d4148;
-  --on-accent: #ffffff;
-  --green: #12845a;
-  --green-soft: rgba(18, 132, 90, 0.1);
-  --orange: #e85d2a;
-  --orange-pressed: #c44d1e;
-  --orange-soft: rgba(232, 93, 42, 0.08);
-
-  /* ── 语义色：访问模式 / 思考强度 ── */
+  /* ── 语义色：访问模式 / 思考强度（跨主题恒定） ── */
   --tone-codex-full: #db4f1d;
   --tone-claude-bypass: #a6322a;
   --tone-claude-accept: #6f3fb5;
@@ -63,4 +44,101 @@
   --z-chat: 150;
   --z-modal: 200;
   --z-toast: 300;
+
+  color-scheme: light;
+}
+
+[data-mode="dark"] { color-scheme: dark; }
+
+/* ── 主题 mono（黑白，默认）· 浅色 ── */
+:root,
+[data-theme="mono"] {
+  --line: #dedbd7;
+  --muted: #6f747b;
+  --subtle: #8b9096;
+  --panel: #fbfbfa;
+  --sidebar: #f3f2f0;
+  --hover: #eceff3;
+  --active: #e7ebf0;
+  --bg: #f6f5f3;
+  --text: #1f2328;
+  --surface: #ffffff;
+
+  --accent: #1f2328;
+  --accent-pressed: #3d4148;
+  --on-accent: #ffffff;
+  --green: #12845a;
+  --green-soft: rgba(18, 132, 90, 0.1);
+  --orange: #e85d2a;
+  --orange-pressed: #c44d1e;
+  --orange-soft: rgba(232, 93, 42, 0.08);
+}
+
+/* ── 主题 mono · 暗色 ── */
+[data-theme="mono"][data-mode="dark"] {
+  --line: #363b40;
+  --muted: #9aa0a6;
+  --subtle: #71787e;
+  --panel: #232629;
+  --sidebar: #2a2e32;
+  --hover: #2f3438;
+  --active: #363b40;
+  --bg: #1a1c1e;
+  --text: #e8eaed;
+  --surface: #232629;
+
+  --accent: #e8eaed;
+  --accent-pressed: #c8ccd0;
+  --on-accent: #1a1c1e;
+  --green: #2ea67e;
+  --green-soft: rgba(46, 166, 126, 0.16);
+  --orange: #f47048;
+  --orange-pressed: #d85a35;
+  --orange-soft: rgba(244, 112, 72, 0.16);
+}
+
+/* ── 主题 warm（Happy Hues 11）· 浅色 ── */
+[data-theme="warm"] {
+  --line: #e0d3c0;
+  --muted: #716040;
+  --subtle: #9a8a6a;
+  --panel: #fffffe;
+  --sidebar: #eaddcf;
+  --hover: #f0e6d8;
+  --active: #eaddcf;
+  --bg: #f9f4ef;
+  --text: #020826;
+  --surface: #fffffe;
+
+  --accent: #8c7851;
+  --accent-pressed: #75623f;
+  --on-accent: #fffffe;
+  --green: #12845a;
+  --green-soft: rgba(18, 132, 90, 0.1);
+  --orange: #f25042;
+  --orange-pressed: #d63e30;
+  --orange-soft: rgba(242, 80, 66, 0.1);
+}
+
+/* ── 主题 warm · 暗色 ── */
+[data-theme="warm"][data-mode="dark"] {
+  --line: #383442;
+  --muted: #b5a789;
+  --subtle: #8a7d64;
+  --panel: #22202a;
+  --sidebar: #2b2833;
+  --hover: #302d3a;
+  --active: #383442;
+  --bg: #16151a;
+  --text: #fffffe;
+  --surface: #22202a;
+
+  --accent: #a08a5f;
+  --accent-pressed: #b89e6d;
+  --on-accent: #16151a;
+  --green: #2ea67e;
+  --green-soft: rgba(46, 166, 126, 0.16);
+  --orange: #f25042;
+  --orange-pressed: #d63e30;
+  --orange-soft: rgba(242, 80, 66, 0.16);
 }

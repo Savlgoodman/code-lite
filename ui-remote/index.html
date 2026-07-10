@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#f6f5f3" />
     <title>code-lite remote</title>
+    <script>
+      // 首屏前应用已保存的主题，避免闪白
+      (function () {
+        try {
+          var t = localStorage.getItem("code-lite-theme");
+          var m = localStorage.getItem("code-lite-mode");
+          if (t !== "warm" && t !== "mono") t = "mono";
+          if (m !== "dark" && m !== "light") {
+            m = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          var r = document.documentElement;
+          r.setAttribute("data-theme", t);
+          r.setAttribute("data-mode", m);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

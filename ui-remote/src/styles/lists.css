@@ -259,3 +259,119 @@
 
 .settings-item:last-child { border-bottom: none; }
 .settings-item:hover { background: var(--hover); }
+
+/* ── 外观设置：卡片 / 行 / 主题选择 / 开关 ── */
+
+.settings-card {
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  width: 100%;
+}
+
+.settings-row-btn {
+  background: none;
+  border: none;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-row-btn:active { background: var(--hover); }
+
+.settings-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  padding: 0 16px 14px;
+}
+
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--dur-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.theme-swatch.selected { border-color: var(--accent); }
+
+.theme-swatch-preview {
+  position: relative;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+}
+
+.theme-swatch-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+.theme-swatch-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.theme-swatch-label svg { color: var(--green); }
+
+/* 开关 */
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  flex-shrink: 0;
+  transition: background var(--dur-fast);
+}
+
+.toggle.on { background: var(--green); }
+
+.toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.toggle.on .toggle-knob { transform: translateX(18px); }
