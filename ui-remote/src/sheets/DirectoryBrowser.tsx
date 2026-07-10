@@ -136,18 +136,18 @@ export function DirectoryBrowser({ client, initialPath, onSelect, onClose }: Dir
       className="dir-browser"
       bodyClassName="dir-browser-body"
       beforeBody={beforeBody}
-      footer={
+      footer={(close) => (
         <>
-          <Button variant="secondary" onClick={onClose}>取消</Button>
+          <Button variant="secondary" onClick={() => close()}>取消</Button>
           <Button
             variant="primary"
             disabled={!listing?.path}
-            onClick={() => listing?.path && onSelect(listing.path)}
+            onClick={() => listing?.path && close(() => onSelect(listing.path))}
           >
             <Check size={16} /> 选此目录
           </Button>
         </>
-      }
+      )}
     >
       {loading ? (
         <div className="dir-browser-loading"><Loader2 size={18} className="spin" /> 加载中…</div>

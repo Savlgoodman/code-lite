@@ -67,7 +67,7 @@ export function AddDeviceSheet({ initial, onClose, onSave }: AddDeviceSheetProps
     <Sheet
       title={title}
       onClose={onClose}
-      footer={
+      footer={(close) => (
         <>
           <Button
             variant="secondary"
@@ -76,11 +76,15 @@ export function AddDeviceSheet({ initial, onClose, onSave }: AddDeviceSheetProps
           >
             {testing ? "测试中..." : "测试连接"}
           </Button>
-          <Button variant="primary" onClick={handleSave} disabled={!allFilled}>
+          <Button
+            variant="primary"
+            onClick={() => allFilled && close(handleSave)}
+            disabled={!allFilled}
+          >
             {isEdit ? "保存修改" : "保存"}
           </Button>
         </>
-      }
+      )}
     >
       <div className="field">
         <label>设备名称</label>

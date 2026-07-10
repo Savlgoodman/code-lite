@@ -103,14 +103,33 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* 离场：遮罩淡出 + 抽屉下滑 */
+.modal-overlay.closing {
+  animation: overlayFadeOut var(--dur-base) var(--ease-standard) forwards;
+}
+
+.modal-overlay.closing .modal-sheet {
+  animation: sheetSlideDown var(--dur-base) var(--ease-page) forwards;
+}
+
 @keyframes overlayFade {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
+@keyframes overlayFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 @keyframes sheetSlideUp {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
+}
+
+@keyframes sheetSlideDown {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
 }
 
 .modal-header {

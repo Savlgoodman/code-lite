@@ -88,14 +88,14 @@ export function NewConversationSheet({
       <Sheet
         title={<><Bot size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />新建对话</>}
         onClose={onClose}
-        footer={
+        footer={(close) => (
           <>
-            <Button variant="secondary" onClick={onClose}>取消</Button>
+            <Button variant="secondary" onClick={() => close()}>取消</Button>
             <Button variant="primary" disabled={!canCreate} onClick={handleCreate}>
               {creating ? "创建中…" : "开始会话"}
             </Button>
           </>
-        }
+        )}
       >
         <div className="field">
           <label>选择 Agent</label>

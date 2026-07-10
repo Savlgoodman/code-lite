@@ -20,12 +20,12 @@ export function ConfigSheet({ config, onClose, onSave }: ConfigSheetProps) {
     <Sheet
       title="会话配置"
       onClose={onClose}
-      footer={
+      footer={(close) => (
         <>
-          <Button variant="secondary" onClick={onClose}>取消</Button>
-          <Button variant="primary" onClick={() => onSave(local)}>保存</Button>
+          <Button variant="secondary" onClick={() => close()}>取消</Button>
+          <Button variant="primary" onClick={() => close(() => onSave(local))}>保存</Button>
         </>
-      }
+      )}
     >
       {/* 模型选择 — 始终显示（codex 显示族，claude 显示单个模型） */}
       {local.grouping.families.length > 0 && (

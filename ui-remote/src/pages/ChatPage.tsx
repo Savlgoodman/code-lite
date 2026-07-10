@@ -7,7 +7,7 @@ import { useSessionConfig } from "../hooks/useSessionConfig";
 import { MessageBubble } from "../components/MessageBubble";
 import { ConfigSheet } from "../sheets/ConfigSheet";
 import { ConfigBar } from "../components/ConfigBar";
-import { EmptyState, Button } from "../components/ui";
+import { EmptyState, Button, Sheet } from "../components/ui";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -424,36 +424,28 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
 
       {/* 上下文占用弹窗 */}
       {showContextModal && (
-        <div className="modal-overlay" onClick={() => setShowContextModal(false)}>
-          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>上下文占用</h2>
-              <button className="modal-close" onClick={() => setShowContextModal(false)}>×</button>
+        <Sheet title="上下文占用" onClose={() => setShowContextModal(false)}>
+          {hasContextUsage ? (
+            <div className="context-usage">
+              <div className="context-usage-figure">
+                <span className="context-usage-used">{contextUsed.toLocaleString()}</span>
+                <span className="context-usage-total">/ {contextWindow.toLocaleString()}</span>
+              </div>
+              <div className="context-usage-bar">
+                <div
+                  className="context-usage-bar-fill"
+                  style={{
+                    width: `${contextPercent}%`,
+                    background: contextRatio > 0.8 ? "var(--orange)" : "var(--accent)",
+                  }}
+                />
+              </div>
+              <div className="context-usage-percent">{contextPercent}% 已使用</div>
             </div>
-            <div className="modal-body">
-              {hasContextUsage ? (
-                <div className="context-usage">
-                  <div className="context-usage-figure">
-                    <span className="context-usage-used">{contextUsed.toLocaleString()}</span>
-                    <span className="context-usage-total">/ {contextWindow.toLocaleString()}</span>
-                  </div>
-                  <div className="context-usage-bar">
-                    <div
-                      className="context-usage-bar-fill"
-                      style={{
-                        width: `${contextPercent}%`,
-                        background: contextRatio > 0.8 ? "var(--orange)" : "var(--accent)",
-                      }}
-                    />
-                  </div>
-                  <div className="context-usage-percent">{contextPercent}% 已使用</div>
-                </div>
-              ) : (
-                <div className="context-usage-empty">暂无上下文占用数据</div>
-              )}
-            </div>
-          </div>
-        </div>
+          ) : (
+            <div className="context-usage-empty">暂无上下文占用数据</div>
+          )}
+        </Sheet>
       )}
     </div>
   );
