@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SessionConfig } from "../hooks/useSessionConfig";
-import { Sheet, Button } from "../components/ui";
+import { Sheet, Button, Select } from "../components/ui";
 
 export interface ConfigSheetProps {
   config: SessionConfig;
@@ -10,6 +10,11 @@ export interface ConfigSheetProps {
 
 export function ConfigSheet({ config, onClose, onSave }: ConfigSheetProps) {
   const [local, setLocal] = useState(config);
+
+  // 思考强度候选：分组模型取当前族的 efforts，否则取 reasoning_effort 选项值
+  const effortOptions: string[] = local.grouping.isGrouped
+    ? local.grouping.families.find((f) => f.familyId === local.familyId)?.efforts ?? []
+    : (local.configOptionsRaw.find((o) => o.id === "reasoning_effort")?.values ?? []).map((v) => String(v));
 
   return (
     <Sheet
@@ -26,36 +31,31 @@ export function ConfigSheet({ config, onClose, onSave }: ConfigSheetProps) {
       {local.grouping.families.length > 0 && (
         <div className="field">
           <label>模型</label>
-          <select value={local.familyId} onChange={(e) => setLocal({ ...local, familyId: e.target.value })}>
-            {local.grouping.families.map((fam) => (
-              <option key={fam.familyId} value={fam.familyId}>{fam.label}</option>
-            ))}
-          </select>
+          <Select
+            value={local.familyId}
+            onChange={(v) => setLocal({ ...local, familyId: v })}
+            options={local.grouping.families.map((fam) => ({ value: fam.familyId, label: fam.label }))}
+          />
         </div>
       )}
       {/* 思考强度 */}
       <div className="field">
         <label>思考强度</label>
-        <select value={local.effort} onChange={(e) => setLocal({ ...local, effort: e.target.value })}>
-          {local.grouping.isGrouped
-            ? local.grouping.families.find((f) => f.familyId === local.familyId)?.efforts.map((id) => (
-                <option key={id} value={id}>{id}</option>
-              ))
-            : local.configOptionsRaw.find((o) => o.id === "reasoning_effort")?.values?.map((v) => (
-                <option key={String(v)} value={String(v)}>{String(v)}</option>
-              ))
-          }
-        </select>
+        <Select
+          value={local.effort}
+          onChange={(v) => setLocal({ ...local, effort: v })}
+          options={effortOptions.map((id) => ({ value: id, label: id }))}
+        />
       </div>
       {/* 访问模式 */}
       {local.modes.length > 0 && (
         <div className="field">
           <label>访问模式</label>
-          <select value={local.accessMode} onChange={(e) => setLocal({ ...local, accessMode: e.target.value })}>
-            {local.modes.map((mode) => (
-              <option key={mode.id} value={mode.id}>{mode.label}</option>
-            ))}
-          </select>
+          <Select
+            value={local.accessMode}
+            onChange={(v) => setLocal({ ...local, accessMode: v })}
+            options={local.modes.map((mode) => ({ value: mode.id, label: mode.label }))}
+          />
         </div>
       )}
     </Sheet>

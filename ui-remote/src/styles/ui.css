@@ -186,6 +186,80 @@
 .form-input:focus { border-color: var(--muted); }
 .form-input::placeholder { color: var(--subtle); }
 
+/* ── Select（自定义下拉） ── */
+
+.select { position: relative; }
+
+.select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--dur-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.select.open .select-trigger { border-color: var(--muted); }
+
+.select-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-value.placeholder { color: var(--subtle); }
+
+.select-chevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.select.open .select-chevron { transform: rotate(180deg); }
+
+.select-panel {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  max-height: 240px;
+  overflow-y: auto;
+  animation: selectPanelIn var(--dur-fast) var(--ease-standard);
+}
+
+@keyframes selectPanelIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.select-option:active { background: var(--hover); }
+.select-option.selected { color: var(--text); font-weight: 600; }
+.select-option.selected svg { color: var(--green); flex-shrink: 0; }
+
+@media (hover: hover) {
+  .select-option:hover { background: var(--hover); }
+}
+
 /* ── EmptyState ── */
 
 .empty-state {
