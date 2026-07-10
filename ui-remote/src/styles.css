@@ -249,7 +249,6 @@ html, body, #root {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(8px + max(8px, env(safe-area-inset-bottom)));
   z-index: 50;
   width: 36px;
   height: 36px;

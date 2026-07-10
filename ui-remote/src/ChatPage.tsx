@@ -48,9 +48,11 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const [showThinking, setShowThinking] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
+  const [composerHeight, setComposerHeight] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const smoothScrollFrameRef = useRef<number | null>(null);
   const smoothScrollActiveRef = useRef(false);
 
@@ -173,6 +175,16 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       textareaRef.current.style.height = Math.max(48, Math.min(textareaRef.current.scrollHeight, 120)) + "px";
     }
   }, [input]);
+
+  // 测量输入区域（config-bar + input-area）总高度，供回到底部按钮定位
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setComposerHeight(el.offsetHeight));
+    ro.observe(el);
+    setComposerHeight(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
 
   // "正在思考" 流光指示器：running 且没有内容流式输出时显示
   useEffect(() => {
@@ -309,6 +321,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       {showScrollToBottom && (
         <button
           className="scroll-bottom-button"
+          style={{ bottom: composerHeight + 8 }}
           aria-label="回到底部"
           onClick={() => {
             setShowScrollToBottom(false);
@@ -319,14 +332,16 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
         </button>
       )}
 
-      {/* 顶部信息栏 (输入框上方边缘) */}
-      <div className="chat-config-bar">
-        <span>{accessModeLabel}</span>
-        <span className="config-bar-sep">·</span>
-        <span>{modelLabel}</span>
-        <span className="config-bar-sep">·</span>
-        <span>{effortLabel}</span>
-      </div>
+      {/* 底部输入区（含配置栏） */}
+      <div ref={composerRef}>
+        {/* 顶部信息栏 (输入框上方边缘) */}
+        <div className="chat-config-bar">
+          <span>{accessModeLabel}</span>
+          <span className="config-bar-sep">·</span>
+          <span>{modelLabel}</span>
+          <span className="config-bar-sep">·</span>
+          <span>{effortLabel}</span>
+        </div>
 
       {/* 底部输入区 */}
       <footer className="chat-input-area">
@@ -369,6 +384,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
           </div>
         </div>
       </footer>
+      </div>
 
       {/* 配置选择器 Modal Sheet */}
       {showConfigSheet && config && (
