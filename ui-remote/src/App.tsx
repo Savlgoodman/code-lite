@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Folder, MessageSquare, Settings, Send, ArrowLeft } from "lucide-react";
-import type { AgentEvent, ChatMessage, Session } from "@code-lite/protocol";
+import type { AgentEvent, ChatMessage, Session, SessionCapabilities, UsageStats } from "@code-lite/protocol";
 import {
   applyConversationListEvent,
   isConversationListEvent,
@@ -16,6 +16,23 @@ type Page = "projects" | "chat" | "settings";
 const LS_RELAY_URL = "code-lite-relay-url";
 const LS_PAIR_KEY = "code-lite-pair-key";
 const GLOBAL_CHANNEL = "*";
+
+/** 从 capabilities 中提取默认模型与思考强度 */
+function buildDefaultsFromCaps(caps: SessionCapabilities) {
+  const currentModel = caps.models.find((m) => m.isCurrent) ?? caps.models[0];
+  const modelId = currentModel?.id ?? "";
+  const modelLabel = currentModel?.label ?? "";
+  const effortOpt = caps.configOptions.find((o) => o.id === "reasoning_effort" || o.id === "effort");
+  const reasoningEffort = effortOpt?.currentValue ? String(effortOpt.currentValue) : "medium";
+  return { modelId, modelLabel, reasoningEffort };
+}
+
+/** 会话运行配置（模型+思考强度等）*/
+interface SessionConfig {
+  modelId: string;
+  modelLabel: string;
+  reasoningEffort: string;
+}
 
 async function computeRoomId(pairKey: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -41,6 +58,9 @@ export function App() {
   // 每个会话一份视图状态，由 snapshot + 事件 reduce 得到（复用 chat-core，与桌面同源）。
   const [views, setViews] = useState<Record<string, SessionViewState>>({});
   const [draft, setDraft] = useState("");
+  // 会话能力（模型列表、configOptions 等）与当前选择的运行配置。
+  const [capsBySession, setCapsBySession] = useState<Record<string, SessionCapabilities>>({});
+  const [configBySession, setConfigBySession] = useState<Record<string, SessionConfig>>({});
 
   const transportRef = useRef<RelayTransport | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -128,6 +148,18 @@ export function App() {
     setPage("chat");
     // 订阅该会话频道：后端先回 snapshot（handleSnapshot 建初始态），再推增量事件。
     await transport.subscribe(session.id);
+    // 初始化 ACP session 拿 capabilities（模型列表、configOptions、上下文窗口）。
+    try {
+      const caps = await transport.request<SessionCapabilities>("session.initialize", { conversationId: session.id });
+      setCapsBySession((prev) => ({ ...prev, [session.id]: caps }));
+      // 初始化默认运行配置（首次进入时取 ACP 返回的当前值）
+      setConfigBySession((prev) => {
+        if (prev[session.id]) return prev; // 已有配置则不覆盖
+        return { ...prev, [session.id]: buildDefaultsFromCaps(caps) };
+      });
+    } catch (e) {
+      console.warn("session.initialize failed (capabilities unavailable)", e);
+    }
   };
 
   const closeSession = () => {
@@ -147,9 +179,17 @@ export function App() {
     if (!transport || !id || !text) return;
     setDraft("");
     const turnId = `turn-${Date.now()}`;
-    // 只发 turn.start RPC，不本地插入消息；消息骨架由回流的 conversation.turn.started 生成。
+    const cfg = id ? configBySession[id] : undefined;
+    // turn.start 携带完整运行配置（模型+思考强度），与桌面版一致。
     try {
-      await transport.request("turn.start", { conversationId: id, input: text, turnId });
+      await transport.request("turn.start", {
+        conversationId: id,
+        input: text,
+        turnId,
+        ...(cfg?.modelId ? { modelId: cfg.modelId } : {}),
+        ...(cfg?.modelLabel ? { modelLabel: cfg.modelLabel } : {}),
+        ...(cfg?.reasoningEffort ? { reasoningEffort: cfg.reasoningEffort } : {}),
+      });
     } catch (e) {
       console.error("turn.start failed", e);
     }
@@ -158,6 +198,16 @@ export function App() {
   const activeView = activeSessionId ? views[activeSessionId] : null;
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? activeView?.session ?? null;
   const activeRunning = activeView?.running ?? false;
+  const activeCaps = activeSessionId ? capsBySession[activeSessionId] : undefined;
+  const activeConfig = activeSessionId ? configBySession[activeSessionId] : undefined;
+
+  const setActiveConfig = (patch: Partial<SessionConfig>) => {
+    if (!activeSessionId) return;
+    setConfigBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: { ...(prev[activeSessionId] ?? { modelId: "", modelLabel: "", reasoningEffort: "medium" }), ...patch },
+    }));
+  };
 
   // ── 配对页 ──
   if (!connected && page === "settings") {
@@ -228,17 +278,53 @@ export function App() {
           )}
           <div ref={messagesEndRef} />
         </div>
-        <div className="chat-input-bar">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            placeholder={activeRunning ? "另一端正在运行..." : "输入消息..."}
-            disabled={activeRunning}
-          />
-          <button onClick={sendMessage} disabled={!draft.trim() || activeRunning}>
-            <Send size={18} />
-          </button>
+        <div className="chat-bottom-bar">
+          {activeCaps && activeConfig && (
+            <div className="chat-config-bar">
+              <div className="config-item">
+                <label>模型</label>
+                <select
+                  value={activeConfig.modelId}
+                  onChange={(e) => {
+                    const m = activeCaps.models.find((x) => x.id === e.target.value);
+                    setActiveConfig({ modelId: e.target.value, modelLabel: m?.label ?? e.target.value });
+                  }}
+                >
+                  {activeCaps.models.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="config-item">
+                <label>思考</label>
+                <select
+                  value={activeConfig.reasoningEffort}
+                  onChange={(e) => setActiveConfig({ reasoningEffort: e.target.value })}
+                >
+                  {(activeCaps.configOptions.find((o) => o.id === "reasoning_effort" || o.id === "effort")?.values ?? ["low", "medium", "high", "max"]).map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </div>
+              {activeView?.contextUsage && (activeView.contextUsage as any).contextWindowTokens ? (
+                <div className="config-item context-usage">
+                  <ContextMeter usage={activeView.contextUsage} />
+                </div>
+              ) : null}
+            </div>
+          )}
+          <div className="chat-input-bar">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+              placeholder={activeRunning ? "另一端正在运行..." : "输入消息..."}
+              disabled={activeRunning}
+            />
+            <button onClick={sendMessage} disabled={!draft.trim() || activeRunning}>
+              <Send size={18} />
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -306,6 +392,24 @@ export function App() {
           <Settings size={18} style={{ verticalAlign: "middle" }} />
         </button>
       </div>
+    </div>
+  );
+}
+
+/** 简易上下文用量条：百分比 + 颜色。 */
+function ContextMeter({ usage }: { usage: UsageStats | null }) {
+  const used = (usage as any)?.contextUsedTokens ?? (usage as any)?.totalTokens ?? 0;
+  const total = (usage as any)?.contextWindowTokens ?? 0;
+  if (!total) return null;
+  const ratio = Math.min(used / total, 1);
+  const percent = Math.round(ratio * 100);
+  const color = ratio > 0.8 ? "var(--red, #e53e3e)" : ratio > 0.5 ? "var(--orange, #dd6b20)" : "var(--blue, #3182ce)";
+  return (
+    <div className="context-meter" title={`${used.toLocaleString()} / ${total.toLocaleString()} tokens`}>
+      <div className="context-meter-bar">
+        <div className="context-meter-fill" style={{ width: `${percent}%`, background: color }} />
+      </div>
+      <span className="context-meter-label" style={{ color }}>{percent}%</span>
     </div>
   );
 }
