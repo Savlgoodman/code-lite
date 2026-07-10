@@ -7,6 +7,12 @@ import { useSessionConfig } from "./hooks/useSessionConfig";
 import { MessageBubble } from "./components/MessageBubble";
 import { ConfigSheet } from "./components/ConfigSheet";
 
+/** 是否应显示该 assistant 消息的时间戳 */
+function shouldShowTimestamp(msg: ChatMessage, index: number, messages: ChatMessage[], isRunning: boolean) {
+  if (msg.role !== "assistant" || msg.streaming) return false;
+  return !isRunning || index < messages.length - 1;
+}
+
 interface ChatPageProps {
   sessionId: string;
   onBack: () => void;
@@ -21,8 +27,11 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const { config, updateConfig } = useSessionConfig(client, sessionId);
   const [input, setInput] = useState("");
   const [showConfigSheet, setShowConfigSheet] = useState(false);
+  const [showThinking, setShowThinking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const isRunning = client?.isRunning(sessionId) ?? false;
 
   // 自动滚动到底部
   useEffect(() => {
@@ -36,6 +45,26 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       textareaRef.current.style.height = Math.max(48, Math.min(textareaRef.current.scrollHeight, 120)) + "px";
     }
   }, [input]);
+
+  // "正在思考" 流光指示器：running 且没有内容流式输出时显示
+  useEffect(() => {
+    if (!isRunning) {
+      setShowThinking(false);
+      return;
+    }
+    // 检查是否有正在 streaming 的 assistant 消息且已有内容
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    const hasStreamingContent = lastAssistant?.streaming && lastAssistant.content.length > 0;
+
+    if (!hasStreamingContent) {
+      // 没有内容在 streaming，立即显示
+      setShowThinking(true);
+    } else {
+      // 有内容在 streaming，延迟 1200ms 再显示（避免闪烁）
+      const timer = setTimeout(() => setShowThinking(true), 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [isRunning, messages]);
 
   if (!session) {
     return (
@@ -95,7 +124,6 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
     }
   };
 
-  const isRunning = client?.isRunning(sessionId) ?? false;
   // TODO: wire to actual context window usage
   const contextPercent = 0;
 
@@ -132,7 +160,19 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             <p>输入你的问题，AI 将为你解答</p>
           </div>
         ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+          messages.map((msg, i) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              showTimestamp={shouldShowTimestamp(msg, i, messages, isRunning)}
+            />
+          ))
+        )}
+        {/* 正在思考流光指示器 */}
+        {showThinking && (
+          <div className="thinking-indicator-row">
+            <span className="thinking-indicator" data-text="正在思考">正在思考</span>
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
