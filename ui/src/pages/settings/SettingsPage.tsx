@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AboutSettings } from "./AboutSettings";
 import { AcpConnectionSettings } from "./AcpConnectionSettings";
 import { AgentRuntimeSettings } from "./AgentRuntimeSettings";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { ArchivedSessionsSettings } from "./ArchivedSessionsSettings";
 import { LogsSettings } from "./LogsSettings";
 import { ModelProvidersSettings } from "./ModelProvidersSettings";
@@ -17,10 +18,11 @@ export function SettingsPage({
   onDeleteArchivedSession,
   onRestoreArchivedSession
 }: SettingsPageProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("agents");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
 
   return (
     <SettingsLayout activeSection={activeSection} onBack={onBack} onSectionChange={setActiveSection}>
+      {activeSection === "appearance" ? <AppearanceSettings /> : null}
       {activeSection === "agents" ? <AgentRuntimeSettings /> : null}
       {activeSection === "acp" ? <AcpConnectionSettings /> : null}
       {activeSection === "providers" ? <ModelProvidersSettings /> : null}

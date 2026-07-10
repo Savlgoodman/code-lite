@@ -12,7 +12,7 @@
   display: grid;
   place-items: center;
   background: transparent;
-  color: #20242b;
+  color: var(--text-primary);
 }
 
 .fast-mode-indicator svg {

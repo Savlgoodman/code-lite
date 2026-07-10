@@ -8,7 +8,7 @@
 .tool-call-group {
   border: 1px solid #e5e1dc;
   border-radius: 8px;
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 .tool-call-group-head {
@@ -19,7 +19,7 @@
 }
 
 .tool-call-group[open] .tool-call-group-head {
-  border-bottom: 1px solid #ebe7e2;
+  border-bottom: 1px solid var(--border-tertiary);
 }
 
 .tool-call-group > .tool-call-list {
@@ -65,9 +65,9 @@
 
 .tool-call-card {
   padding: 10px;
-  border: 1px solid #ebe7e2;
+  border: 1px solid var(--border-tertiary);
   border-radius: 8px;
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 .tool-call-card.error {
@@ -108,7 +108,7 @@
 .tool-call-head em {
   min-width: 0;
   overflow: hidden;
-  color: #7b8188;
+  color: var(--text-muted);
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -93,12 +93,12 @@
   padding: 0 14px;
   border: 1px solid #dfd7ce;
   border-radius: 8px;
-  background: #fff;
-  color: #373c44;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
 }
 
 .approval-actions button.primary {
-  border-color: #20242b;
-  background: #20242b;
+  border-color: var(--text-primary);
+  background: var(--text-primary);
   color: #fff;
 }

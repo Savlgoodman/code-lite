@@ -1,7 +1,7 @@
 .agent-icon {
   --agent-icon-size: 24px;
   --agent-icon-padding: 4px;
-  --agent-icon-color: #303640;
+  --agent-icon-color: var(--text-primary);
   width: var(--agent-icon-size);
   height: var(--agent-icon-size);
   flex: 0 0 var(--agent-icon-size);
@@ -44,13 +44,13 @@
 .agent-icon-lg {
   --agent-icon-size: 56px;
   --agent-icon-padding: 14px;
-  border: 1px solid #d9dde2;
+  border: 1px solid var(--border-primary);
   border-radius: 14px;
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 .agent-icon-codex {
-  --agent-icon-color: #20242b;
+  --agent-icon-color: var(--text-primary);
 }
 
 .agent-icon-claude_code {

@@ -36,9 +36,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  border: 1px solid #dedbd7;
+  border: 1px solid var(--border-primary);
   border-radius: 20px;
-  background: #fff;
+  background: var(--bg-elevated);
   box-shadow: var(--shadow);
   pointer-events: auto;
 }
@@ -50,7 +50,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: #20242b;
+  color: var(--text-primary);
   line-height: 1.6;
   scrollbar-color: rgba(105, 112, 121, 0.28) transparent;
   scrollbar-width: thin;
@@ -66,7 +66,7 @@
 }
 
 .composer textarea::placeholder {
-  color: #a0a5ac;
+  color: var(--text-tertiary);
 }
 
 .composer-actions {
@@ -190,11 +190,11 @@
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #3f454d;
+  color: var(--text-secondary);
 }
 
 .model-chip:hover {
-  background: #f5f5f3;
+  background: var(--hover-overlay);
 }
 
 .model-chip span {
@@ -278,7 +278,7 @@
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: #2f353d;
+  color: var(--text-primary);
   font: inherit;
   text-align: left;
 }
@@ -294,15 +294,14 @@
 
 .model-provider-label {
   justify-content: space-between;
-  color: #747980;
+  color: var(--text-muted);
 }
 
-.model-provider-label.active,
 .model-provider-label:hover,
 .model-menu-item:hover,
 .model-menu-item.selected {
-  background: #f0f1f2;
-  color: #20242b;
+  background: var(--hover-overlay);
+  color: var(--text-primary);
 }
 
 .model-menu-item {
@@ -311,7 +310,7 @@
 
 .model-menu-item svg {
   flex: 0 0 auto;
-  color: #20242b;
+  color: var(--text-primary);
 }
 
 .access-mode-picker {
@@ -327,7 +326,7 @@
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #3f454d;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 13px;
   transition: all 0.15s ease;
@@ -335,9 +334,9 @@
 }
 
 .access-mode-chip:hover {
-  border-color: #e4e1dd;
-  background: #f5f5f3;
-  color: #20242b;
+  border-color: var(--border-secondary);
+  background: var(--hover-overlay);
+  color: var(--text-primary);
 }
 
 .access-mode-chip.access-mode-tone-codex-full-access,
@@ -467,9 +466,9 @@
   flex-direction: column;
   gap: 4px;
   padding: 11px 7px;
-  border: 1px solid #dfdfdf;
+  border: 1px solid var(--border-primary);
   border-radius: 14px;
-  background: #fff;
+  background: var(--bg-elevated);
   box-shadow: 0 14px 34px rgba(32, 36, 43, 0.13);
 }
 
@@ -483,7 +482,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #20242b;
+  color: var(--text-primary);
   cursor: pointer;
   font-size: 13px;
   line-height: 1.35;
@@ -492,7 +491,7 @@
 }
 
 .access-mode-item:hover {
-  background: #f1f1f1;
+  background: var(--hover-overlay);
 }
 
 .access-mode-item span {
@@ -515,22 +514,22 @@
   place-items: center;
   border: 0;
   border-radius: 50%;
-  background: #20242b;
+  background: var(--text-primary);
   color: #fff;
 }
 
 .send-button:hover {
-  background: #333941;
+  background: var(--text-secondary);
 }
 
 .send-button:disabled {
   cursor: default;
-  background: #d7d3cd;
+  background: var(--border-primary);
   color: rgba(255, 255, 255, 0.82);
 }
 
 .send-button:disabled:hover {
-  background: #d7d3cd;
+  background: var(--border-primary);
 }
 
 .composer-status-bar {
@@ -552,7 +551,7 @@
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #323740;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 13px;
   transition: all 0.15s ease;
@@ -560,9 +559,9 @@
 }
 
 .status-chip:hover {
-  border-color: #e4e1dd;
-  background: #f4f4f3;
-  color: #20242b;
+  border-color: var(--border-secondary);
+  background: var(--hover-overlay);
+  color: var(--text-primary);
 }
 
 .status-chip span {
@@ -602,9 +601,9 @@
   flex-direction: column;
   gap: 2px;
   padding: 9px 6px 6px;
-  border: 1px solid #dfdfdf;
+  border: 1px solid var(--border-primary);
   border-radius: 14px;
-  background: #fff;
+  background: var(--bg-elevated);
   box-shadow: 0 14px 34px rgba(32, 36, 43, 0.13);
   scrollbar-width: none;
   transition: max-height 0.18s ease, width 0.18s ease;
@@ -620,7 +619,7 @@
 
 .status-menu-title {
   padding: 0 9px 4px;
-  color: #999da3;
+  color: var(--text-tertiary);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -636,7 +635,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #20242b;
+  color: var(--text-primary);
   cursor: pointer;
   font-size: 13px;
   line-height: 1.35;
@@ -645,11 +644,11 @@
 }
 
 .status-dropdown-item:hover {
-  background: #f1f1f1;
+  background: var(--hover-overlay);
 }
 
 .status-dropdown-item.selected {
-  color: #20242b;
+  color: var(--text-primary);
 }
 
 .status-dropdown-item.selected span {
@@ -666,11 +665,11 @@
 
 .status-dropdown-item svg {
   flex: 0 0 auto;
-  color: #4a4f56;
+  color: var(--text-secondary);
 }
 
 .status-model-trigger {
-  background: #f1f1f1;
+  background: var(--hover-overlay);
 }
 
 .status-model-trigger svg {
@@ -699,7 +698,7 @@
 
 .status-model-list-title {
   padding: 3px 9px 1px;
-  color: #999da3;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 
@@ -763,7 +762,7 @@
   height: 1px;
   flex: 0 0 auto;
   margin: 4px 0 5px;
-  background: #e7e7e7;
+  background: var(--border-tertiary);
 }
 
 @media (max-width: 780px) {
@@ -801,9 +800,9 @@
   flex-direction: column;
   gap: 4px;
   padding: 8px 7px;
-  border: 1px solid #dfdfdf;
+  border: 1px solid var(--border-primary);
   border-radius: 14px;
-  background: #fff;
+  background: var(--bg-elevated);
   box-shadow: 0 14px 34px rgba(32, 36, 43, 0.13);
   max-height: 320px;
   overflow-y: auto;
@@ -819,7 +818,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #20242b;
+  color: var(--text-primary);
   cursor: pointer;
   font-size: 13px;
   line-height: 1.35;
@@ -828,7 +827,7 @@
 }
 
 .command-menu-item:hover {
-  background: #f1f1f1;
+  background: var(--hover-overlay);
 }
 
 .command-label {
@@ -838,7 +837,7 @@
 }
 
 .command-description {
-  color: #747980;
+  color: var(--text-muted);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;

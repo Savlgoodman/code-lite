@@ -44,7 +44,7 @@
   padding: 0 8px;
   border: 1px solid #d5deea;
   border-radius: 8px;
-  background: #fff;
+  background: var(--bg-elevated);
   color: #3d4652;
   font-size: 12px;
 }
@@ -70,13 +70,13 @@
   padding: 0 12px;
   border: 1px solid #d4dce7;
   border-radius: 8px;
-  background: #fff;
-  color: #373c44;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
 }
 
 .input-request-actions button.primary {
-  border-color: #20242b;
-  background: #20242b;
+  border-color: var(--text-primary);
+  background: var(--text-primary);
   color: #fff;
 }
 
@@ -158,8 +158,8 @@
   padding: 0 10px;
   border: 1px solid #d4dce7;
   border-radius: 8px;
-  background: #fff;
-  color: #20242b;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .input-request-empty {

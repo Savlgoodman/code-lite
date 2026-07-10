@@ -42,7 +42,7 @@
 .empty-chat-welcome h2 {
   max-width: min(760px, 100%);
   margin: 0;
-  color: #20242b;
+  color: var(--text-primary);
   font-size: 28px;
   font-weight: 500;
   line-height: 1.28;

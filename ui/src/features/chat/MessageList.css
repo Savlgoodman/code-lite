@@ -87,7 +87,7 @@
 
 .message-body p {
   margin: 0;
-  color: #2a2f36;
+  color: var(--text-primary);
   line-height: 1.9;
   word-break: break-word;
 }
@@ -95,8 +95,8 @@
 .user-message-text {
   padding: 10px 16px;
   border-radius: 18px;
-  background: #f0f0ef;
-  color: #20242b;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   white-space: pre-wrap;
 }
 
@@ -171,7 +171,7 @@
 
 .reasoning-block {
   margin-top: 10px;
-  color: #737982;
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -181,7 +181,7 @@
   align-items: center;
   gap: 4px;
   border-radius: 4px;
-  color: #7b828b;
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 13px;
   line-height: 1.7;
@@ -230,7 +230,7 @@
 
 .reasoning-content {
   margin-top: 6px;
-  color: #5f6770;
+  color: var(--text-muted);
   font-size: 0.92em;
 }
 
@@ -250,7 +250,7 @@
   position: relative;
   width: fit-content;
   overflow: hidden;
-  color: #697079;
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 400;
   line-height: 1.7;
@@ -302,7 +302,7 @@
   justify-content: center;
   gap: 7px;
   margin: 10px 0 6px;
-  color: #737982;
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 550;
   line-height: 1.6;
@@ -312,20 +312,19 @@
 .compaction-indicator::before,
 .compaction-indicator::after {
   height: 1px;
-  flex: 1;
-  min-width: 48px;
+  flex: 0 0 auto;
   content: "";
-  background: #dedbd7;
+  background: var(--border-primary);
 }
 
 .compaction-indicator svg {
-  color: #737982;
+  color: var(--text-muted);
   flex: 0 0 auto;
 }
 
 .conversation-boundary-time {
   margin: 18px 0 0;
-  color: #9aa0a8;
+  color: var(--text-tertiary);
   font-size: 12px;
   line-height: 1.5;
   text-align: left;
@@ -342,10 +341,10 @@
   display: grid;
   place-items: center;
   transform: translateX(-50%);
-  border: 1px solid #dedbd7;
+  border: 1px solid var(--border-primary);
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.52);
-  color: #343a42;
+  color: var(--text-secondary);
   box-shadow: 0 10px 28px rgba(30, 35, 42, 0.12);
   backdrop-filter: blur(10px);
   transition:

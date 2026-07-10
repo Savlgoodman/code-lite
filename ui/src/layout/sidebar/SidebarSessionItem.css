@@ -7,11 +7,11 @@
 
 .sidebar-session-row:hover,
 .sidebar-session-row:focus-within {
-  background: rgba(30, 35, 42, 0.05);
+  background: var(--hover-overlay);
 }
 
 .sidebar-session-row.active {
-  background: #e7ebef;
+  background: var(--active-overlay);
 }
 
 .sidebar-session-select {
@@ -25,7 +25,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #2f353d;
+  color: var(--text-primary);
   cursor: pointer;
   text-align: left;
 }
@@ -44,11 +44,11 @@
 }
 
 .sidebar-session-agent {
-  color: #5f6873;
+  color: var(--text-muted);
 }
 
 .sidebar-session-time {
-  color: #8a9098;
+  color: var(--text-muted);
   font-size: 13px;
   white-space: nowrap;
   transition: opacity 120ms ease;
@@ -66,7 +66,7 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #5f6873;
+  color: var(--text-primary);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -89,15 +89,15 @@
 
 .sidebar-session-archive:hover,
 .sidebar-session-archive:focus-visible {
-  background: rgba(30, 35, 42, 0.08);
-  color: #20252c;
+  background: var(--hover-overlay);
+  color: var(--text-primary);
   outline: 0;
 }
 
 .sidebar-session-row.confirming-archive .sidebar-session-archive {
   width: 42px;
   border-radius: 7px;
-  background: #c83b32;
+  background: var(--accent-danger);
   color: #fff;
   font-size: 12px;
   font-weight: 650;
@@ -105,7 +105,7 @@
 
 .sidebar-session-row.confirming-archive .sidebar-session-archive:hover,
 .sidebar-session-row.confirming-archive .sidebar-session-archive:focus-visible {
-  background: #b02f27;
+  background: var(--accent-danger);
   color: #fff;
 }
 

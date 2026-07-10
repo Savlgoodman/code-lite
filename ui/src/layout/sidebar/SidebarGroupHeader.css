@@ -25,14 +25,14 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #626973;
+  color: var(--text-muted);
   cursor: pointer;
   text-align: left;
 }
 
 .sidebar-group-label-button:hover,
 .sidebar-group-label-button:focus-visible {
-  color: #353b43;
+  color: var(--text-primary);
   outline: 0;
 }
 
@@ -58,7 +58,7 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #68707a;
+  color: var(--text-muted);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -75,6 +75,6 @@
 .sidebar-group-new-session:hover,
 .sidebar-group-new-session:focus-visible {
   background: rgba(30, 35, 42, 0.08);
-  color: #242a31;
+  color: var(--text-primary);
   outline: 0;
 }
