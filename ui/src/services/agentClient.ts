@@ -78,19 +78,11 @@ export async function ensureBackend(): Promise<string> {
   return backendUrlFromStatus(status);
 }
 
-/** 进入对话时调用，初始化 ACP session 并返回 SessionCapabilities。 */
+/** 进入对话时调用，初始化 ACP session 并返回 SessionCapabilities（0710 收敛：走 WS RPC）。 */
 export async function initializeSession(conversationId: string): Promise<SessionCapabilities> {
-  const baseUrl = await ensureBackend();
-  const response = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(conversationId)}/initialize`, {
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    throw new Error(`Backend returned ${response.status}`);
-  }
-
-  return response.json() as Promise<SessionCapabilities>;
+  const transport = getLocalTransport();
+  await transport.connect();
+  return transport.request<SessionCapabilities>("session.initialize", { conversationId });
 }
 
 export async function createConversation(options: {
