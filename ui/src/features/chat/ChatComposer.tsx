@@ -31,6 +31,7 @@ import type {
   SlashCommand,
   UsageStats,
 } from "../../types";
+import { groupModelsByFamily, type ModelFamily as ModelFamilyGrouping } from "@code-lite/chat-core";
 import { loadBillingPrices } from "../../services/billingStore";
 import { ApprovalCard } from "./ApprovalCard";
 import { buildSessionBillingSummary } from "./billing";
@@ -43,19 +44,10 @@ import { IMAGE_ACCEPT, type DraftImage } from "./draftImages";
 import { ImagePreview, type PreviewImage } from "./ImagePreview";
 import "./ChatComposer.css";
 
-/** 从模型 ID 提取模型族和推理强度 */
-function parseModelId(modelId: string): { family: string; effort: string | null } {
-  const match = modelId.match(/^(.*?)\[(.*?)\]$/);
-  if (match) {
-    return { family: match[1].trim(), effort: match[2].trim() };
-  }
-  return { family: modelId.trim(), effort: null };
-}
-
-/** 模型族选项 */
+/**  模型族（向后兼容原 parseModelId 生成的 ModelFamily 接口，桌面版内部引用）*/
 interface ModelFamily {
-  id: string;        // 如 "gpt-5.5"
-  label: string;     // 如 "GPT-5.5"
+  id: string;
+  label: string;
   models: SessionModel[];
 }
 
@@ -178,28 +170,30 @@ export function ChatComposer({
   const statusMenuCloseTimerRef = useRef<number | null>(null);
   const statusSectionCloseTimerRef = useRef<number | null>(null);
 
-  // 从 models 中提取模型族
-  const modelFamilies = useMemo(() => {
-    const familyMap = new Map<string, ModelFamily>();
-    for (const model of models) {
-      const { family } = parseModelId(model.id);
-      if (!familyMap.has(family)) {
-        const labelMatch = model.label.match(/^(.*?)\s*(?:\(|\[)/);
-        const familyLabel = labelMatch ? labelMatch[1].trim() : model.label || family;
-        familyMap.set(family, { id: family, label: familyLabel, models: [] });
-      }
-      familyMap.get(family)!.models.push(model);
-    }
-    return Array.from(familyMap.values());
-  }, [models]);
+  // 从 models 分组：Codex 用 family[effort]（chat-core 自动拆分），Claude Code 直接用 id。
+  const grouping = useMemo(() => groupModelsByFamily(models), [models]);
+  const modelFamilies: ModelFamily[] = useMemo(() => {
+    return grouping.families.map((f) => ({
+      id: f.familyId,
+      label: f.label,
+      models: models.filter((m) => {
+        const mFam = m.id.includes("[") ? m.id.split("[")[0].trim() : m.id;
+        return mFam === f.familyId;
+      }),
+    }));
+  }, [grouping.families, models]);
 
   // 当前选中的模型族
   const currentFamily = modelFamilies.find((f) => f.id === selectedModelFamily) ?? modelFamilies[0] ?? null;
-  const visibleCommands = useMemo(() => commands.filter((command) => !isLogoutCommand(command)), [commands]);
-
-  // 推理强度选项 —— 从 configOptions 中提取
+  // 当前族支持的 reasoning 列表：分组模式（isGrouped）用 family.efforts（动态），否则回退 configOptions（固定）。
+  const familyGroupingEntry = grouping.families.find((f) => f.familyId === selectedModelFamily);
+  const reasoningValuesFromFamily = familyGroupingEntry?.efforts ?? [];
   const reasoningConfig = configOptions.find((o) => o.id === "reasoning_effort") ?? null;
-  const reasoningValues = reasoningConfig?.values ?? [];
+  const reasoningValuesFromConfig = reasoningConfig?.values ?? [];
+  const reasoningValues = grouping.isGrouped && reasoningValuesFromFamily.length > 0
+    ? reasoningValuesFromFamily
+    : reasoningValuesFromConfig;
+  const visibleCommands = useMemo(() => commands.filter((command) => !isLogoutCommand(command)), [commands]);
   const fastModeConfig = configOptions.find((o) => o.id === "fast_mode" || o.id === "fast-mode" || o.id === "fast") ?? null;
   const hasFastModePicker = Boolean(fastModeConfig);
   const fastModeValue = normalizeFastModeValue(selectedConfig.fast_mode ?? selectedConfig.fastMode ?? selectedConfig["fast-mode"] ?? selectedConfig.fast ?? fastModeConfig?.currentValue);
@@ -438,6 +432,14 @@ export function ChatComposer({
   }
 
   function selectFamily(familyId: string) {
+    // 切换模型族时，若当前 effort 不在新族支持列表中,重置为新族的首个。
+    const targetFamily = grouping.families.find((f) => f.familyId === familyId);
+    if (grouping.isGrouped && targetFamily && targetFamily.efforts.length > 0) {
+      if (!targetFamily.efforts.includes(reasoningEffort)) {
+        onReasoningEffortChange(targetFamily.efforts[0]);
+        onConfigChange("reasoning_effort", targetFamily.efforts[0]);
+      }
+    }
     onModelFamilyChange(familyId);
     closeStatusMenu();
   }
