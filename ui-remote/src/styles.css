@@ -193,6 +193,7 @@ html, body, #root {
   flex-direction: column;
   height: 100vh;
   background: var(--bg);
+  position: relative;
 }
 
 /* Header */
@@ -236,6 +237,43 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  scrollbar-width: none;
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 0;
+}
+
+/* 回到底部按钮 */
+.scroll-bottom-button {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(8px + max(8px, env(safe-area-inset-bottom)));
+  z-index: 50;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  animation: fadeInUp 0.2s ease;
+}
+
+.scroll-bottom-button:active {
+  transform: translateX(-50%) scale(0.92);
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* 空状态 */

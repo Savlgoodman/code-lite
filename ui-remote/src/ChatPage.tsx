@@ -1,11 +1,29 @@
-import { useState, useEffect, useRef } from "react";
-import { ArrowLeft, Send, Settings, Square } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { ArrowLeft, ArrowDown, Send, Settings, Square } from "lucide-react";
 import type { ChatMessage, Session } from "@code-lite/protocol";
 import { useConversationState } from "./useConversations";
 import { connectionManager } from "./services/ConnectionManager";
 import { useSessionConfig } from "./hooks/useSessionConfig";
 import { MessageBubble } from "./components/MessageBubble";
 import { ConfigSheet } from "./components/ConfigSheet";
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** 三阶段缓动：加速 → 恒速 → 减速 */
+function scrollCruiseProgress(progress: number) {
+  const ramp = 0.22;
+  const t = clamp(progress, 0, 1);
+  if (t < ramp) {
+    return (t * t) / (2 * ramp * (1 - ramp));
+  }
+  if (t > 1 - ramp) {
+    const remaining = 1 - t;
+    return 1 - (remaining * remaining) / (2 * ramp * (1 - ramp));
+  }
+  return (t - ramp / 2) / (1 - ramp);
+}
 
 /** 是否应显示该 assistant 消息的时间戳 */
 function shouldShowTimestamp(msg: ChatMessage, index: number, messages: ChatMessage[], isRunning: boolean) {
@@ -28,15 +46,125 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const [input, setInput] = useState("");
   const [showConfigSheet, setShowConfigSheet] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const smoothScrollFrameRef = useRef<number | null>(null);
+  const smoothScrollActiveRef = useRef(false);
 
   const isRunning = client?.isRunning(sessionId) ?? false;
 
-  // 自动滚动到底部
+  /** 判断是否在底部（8px 容差） */
+  const isAtBottom = useCallback((el: HTMLElement) => {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= 8;
+  }, []);
+
+  /** 取消正在进行的平滑滚动动画 */
+  const cancelSmoothScroll = useCallback(() => {
+    if (smoothScrollFrameRef.current !== null) {
+      cancelAnimationFrame(smoothScrollFrameRef.current);
+      smoothScrollFrameRef.current = null;
+    }
+    smoothScrollActiveRef.current = false;
+  }, []);
+
+  /** 带缓动动画的滚动到底部（加速→恒速→减速） */
+  const animateScrollToBottom = useCallback(() => {
+    const element = scrollContainerRef.current;
+    if (!element) return;
+
+    cancelSmoothScroll();
+
+    const startTop = element.scrollTop;
+    const targetTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    const distance = targetTop - startTop;
+    if (distance <= 1) {
+      element.scrollTop = targetTop;
+      setIsPinnedToBottom(true);
+      setShowScrollToBottom(false);
+      return;
+    }
+
+    // 自适应时长：1.8px/ms，范围 [360ms, 860ms]
+    const duration = clamp(Math.round(distance / 1.8), 360, 860);
+    const startTime = performance.now();
+    smoothScrollActiveRef.current = true;
+
+    const step = (now: number) => {
+      const progress = clamp((now - startTime) / duration, 0, 1);
+      // 每帧重新读取 scrollHeight，处理流式内容增长
+      const latestTargetTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      element.scrollTop = startTop + (latestTargetTop - startTop) * scrollCruiseProgress(progress);
+
+      if (progress < 1) {
+        smoothScrollFrameRef.current = requestAnimationFrame(step);
+        return;
+      }
+      // 最终对齐
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      smoothScrollFrameRef.current = null;
+      smoothScrollActiveRef.current = false;
+      setIsPinnedToBottom(true);
+      setShowScrollToBottom(false);
+    };
+
+    smoothScrollFrameRef.current = requestAnimationFrame(step);
+  }, [cancelSmoothScroll]);
+
+  /** 即时跳到底部（无动画） */
+  const scrollToBottom = useCallback((behavior: "auto" | "smooth" = "auto") => {
+    const element = scrollContainerRef.current;
+    if (!element) return;
+    if (behavior === "smooth") {
+      animateScrollToBottom();
+    } else {
+      cancelSmoothScroll();
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      setIsPinnedToBottom(true);
+      setShowScrollToBottom(false);
+    }
+  }, [animateScrollToBottom, cancelSmoothScroll]);
+
+  // 滚动事件监听：更新磁吸状态 & 显示/隐藏回到底部按钮
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const element = scrollContainerRef.current;
+    if (!element) return;
+
+    const handleScroll = () => {
+      if (smoothScrollActiveRef.current) {
+        setShowScrollToBottom(false);
+        return;
+      }
+      const atBottom = isAtBottom(element);
+      setIsPinnedToBottom(atBottom);
+      setShowScrollToBottom(!atBottom);
+    };
+
+    const cancelOnUserScroll = () => cancelSmoothScroll();
+
+    element.addEventListener("scroll", handleScroll, { passive: true });
+    element.addEventListener("touchstart", cancelOnUserScroll, { passive: true });
+    element.addEventListener("wheel", cancelOnUserScroll, { passive: true });
+    return () => {
+      element.removeEventListener("scroll", handleScroll);
+      element.removeEventListener("touchstart", cancelOnUserScroll);
+      element.removeEventListener("wheel", cancelOnUserScroll);
+    };
+  }, [isAtBottom, cancelSmoothScroll]);
+
+  // 消息更新时：仅在底部磁吸时自动跟随
+  useEffect(() => {
+    if (isPinnedToBottom) {
+      requestAnimationFrame(() => scrollToBottom("auto"));
+    }
+  }, [isPinnedToBottom, messages, scrollToBottom]);
+
+  // 切换会话时：无条件滚动到底部
+  useEffect(() => {
+    requestAnimationFrame(() => scrollToBottom("auto"));
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // textarea 自适应高度
   useEffect(() => {
@@ -152,7 +280,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       </header>
 
       {/* 消息流 */}
-      <div className="chat-messages">
+      <div className="chat-messages" ref={scrollContainerRef}>
         {messages.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon"></div>
@@ -176,6 +304,20 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* 回到底部按钮（输入框上方） */}
+      {showScrollToBottom && (
+        <button
+          className="scroll-bottom-button"
+          aria-label="回到底部"
+          onClick={() => {
+            setShowScrollToBottom(false);
+            scrollToBottom("smooth");
+          }}
+        >
+          <ArrowDown size={18} />
+        </button>
+      )}
 
       {/* 顶部信息栏 (输入框上方边缘) */}
       <div className="chat-config-bar">
