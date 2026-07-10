@@ -748,6 +748,10 @@ html, body, #root {
   transform: scale(0.95);
 }
 
+.floating-action-button.active {
+  background: var(--green);
+}
+
 /* ── 6b. Add Device Sheet ─────────────────── */
 
 .form-input {

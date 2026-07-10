@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Folder } from "lucide-react";
+import { Folder, ArrowDownWideNarrow } from "lucide-react";
 import type { Session } from "@code-lite/protocol";
 import { useConversationState } from "../useConversations";
 import { connectionManager } from "../services/ConnectionManager";
@@ -15,6 +15,8 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
   const client = connectionManager.getClient();
   const { sessions } = useConversationState(client);
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  // 按最新活跃时间排序（updatedAt 降序）；关闭时保持后端返回的默认顺序
+  const [sortByTime, setSortByTime] = useState(false);
 
   // 如果正在查看会话，显示 ChatPage
   if (activeSessionId) {
@@ -27,6 +29,18 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
     (acc[ws] ??= []).push(s);
     return acc;
   }, {});
+
+  // 排序开启时：组内按 updatedAt 降序，组间按各组最新会话时间降序
+  let projectEntries = Object.entries(projects);
+  if (sortByTime) {
+    for (const [, list] of projectEntries) {
+      list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    }
+    projectEntries = projectEntries.sort(([, a], [, b]) => {
+      const latest = (list: Session[]) => list.reduce((m, s) => Math.max(m, s.updatedAt ?? 0), 0);
+      return latest(b) - latest(a);
+    });
+  }
 
   const toggleProject = (name: string) => {
     setExpandedProjects((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -65,7 +79,7 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
       <h2 className="page-title">{title}</h2>
       <div className="page-subtitle">已连接</div>
       <div className="session-list">
-        {Object.entries(projects).map(([project, projectSessions]) => {
+        {projectEntries.map(([project, projectSessions]) => {
           const isExpanded = expandedProjects[project] ?? false;
           const LIMIT = 5;
           const visibleSessions = isExpanded ? projectSessions : projectSessions.slice(0, LIMIT);
@@ -104,6 +118,14 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
           );
         })}
       </div>
+      <button
+        className={`floating-action-button${sortByTime ? " active" : ""}`}
+        onClick={() => setSortByTime((v) => !v)}
+        aria-label={sortByTime ? "按最新活跃排序（已开启）" : "按最新活跃排序"}
+        title={sortByTime ? "按最新活跃排序（已开启）" : "按最新活跃排序"}
+      >
+        <ArrowDownWideNarrow size={24} />
+      </button>
     </div>
   );
 }
