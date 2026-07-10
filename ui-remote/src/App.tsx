@@ -13,6 +13,8 @@ import {
   type ModelGrouping,
 } from "@code-lite/chat-core";
 import { RelayTransport } from "./services/RelayTransport";
+import { SyncManager } from "@code-lite/sync";
+import type { ConfigBatchPayload } from "@code-lite/sync";
 
 type Page = "projects" | "chat" | "settings";
 
@@ -70,6 +72,7 @@ export function App() {
   const [configBySession, setConfigBySession] = useState<Record<string, SessionConfig>>({});
 
   const transportRef = useRef<RelayTransport | null>(null);
+  const syncRef = useRef<SyncManager | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   activeSessionIdRef.current = activeSessionId;
@@ -88,37 +91,15 @@ export function App() {
     }
     const channel = (event as { conversationId?: string }).conversationId || meta.channel;
     if (!channel) return;
+    // 同步事件（运行态/配置）交给 SyncManager 统一处理，不进消息 reducer。
+    if ((event as { type?: string }).type === "sync") {
+      syncRef.current?.feedEvent(event);
+      return;
+    }
     setViews((current) => {
       const prev = current[channel] ?? emptySessionView(null);
       return { ...current, [channel]: reduceAgentEvent(prev, event) };
     });
-    // 运行态变化同步到列表项的 status（供列表显示"运行中"）。
-    const type = (event as { type: string }).type;
-    if (type === "turn.lock" || type === "turn.unlock" || type === "agent.run.completed" || type === "agent.run.failed") {
-      const running = type === "turn.lock";
-      setSessions((current) =>
-        current.map((s) => (s.id === channel ? { ...s, status: running ? "running" : s.status === "running" ? "idle" : s.status } : s)),
-      );
-    }
-    // 配置变更同步（另一端切换模型/思考强度/权限模式 → 本端跟随）。
-    if (type === "conversation.config.updated") {
-      const configPayload = (event as unknown as { config?: { modelFamily?: string; reasoningEffort?: string; accessMode?: string } }).config;
-      if (configPayload && channel) {
-        setConfigBySession((prev) => {
-          const cfg = prev[channel];
-          if (!cfg) return prev;
-          const newFamily = configPayload.modelFamily ?? cfg.familyId;
-          const newEffort = configPayload.reasoningEffort ?? cfg.effort;
-          const newAccessMode = configPayload.accessMode ?? cfg.accessMode;
-          // 用分组结构校验 effort 是否在新 family 支持列表中
-          const fam = cfg.grouping.families.find((f) => f.familyId === newFamily);
-          const validEffort = fam && fam.efforts.length > 0
-            ? (fam.efforts.includes(newEffort) ? newEffort : fam.efforts[0])
-            : newEffort;
-          return { ...prev, [channel]: { ...cfg, familyId: newFamily, effort: validEffort, accessMode: newAccessMode } };
-        });
-      }
-    }
   }, []);
 
   const handleSnapshot = useCallback((channel: string, payload: unknown) => {
@@ -151,6 +132,48 @@ export function App() {
     t.onEvent(handleEvent);
     t.onSnapshot(handleSnapshot);
     transportRef.current = t;
+
+    // 创建 SyncManager（role=remote），统一处理运行态与配置同步。
+    const sync = new SyncManager({ transport: t, role: "remote" });
+    syncRef.current = sync;
+    // 运行态变化 → 列表项 status 与会话视图 running 跟随。
+    sync.onSessionRunning((p) => {
+      setSessions((current) =>
+        current.map((s) => (s.id === p.conversationId ? { ...s, status: "running" } : s)),
+      );
+      setViews((current) => {
+        const view = current[p.conversationId];
+        return view ? { ...current, [p.conversationId]: { ...view, running: true } } : current;
+      });
+    });
+    sync.onSessionStopped((p) => {
+      setSessions((current) =>
+        current.map((s) => (s.id === p.conversationId ? { ...s, status: s.status === "running" ? "idle" : s.status } : s)),
+      );
+      setViews((current) => {
+        const view = current[p.conversationId];
+        return view ? { ...current, [p.conversationId]: { ...view, running: false } } : current;
+      });
+    });
+    // 配置变更同步（另一端切换模型/思考强度/权限模式 → 本端跟随）。
+    sync.onConfigChange((payload) => {
+      const p = payload as ConfigBatchPayload;
+      const channel = p.conversationId;
+      const changes = p.changes as { modelFamily?: string; reasoningEffort?: string; accessMode?: string } | undefined;
+      if (!channel || !changes) return;
+      setConfigBySession((prev) => {
+        const cfg = prev[channel];
+        if (!cfg) return prev;
+        const newFamily = changes.modelFamily ?? cfg.familyId;
+        const newEffort = changes.reasoningEffort ?? cfg.effort;
+        const newAccessMode = changes.accessMode ?? cfg.accessMode;
+        const fam = cfg.grouping.families.find((f) => f.familyId === newFamily);
+        const validEffort = fam && fam.efforts.length > 0
+          ? (fam.efforts.includes(newEffort) ? newEffort : fam.efforts[0])
+          : newEffort;
+        return { ...prev, [channel]: { ...cfg, familyId: newFamily, effort: validEffort, accessMode: newAccessMode } };
+      });
+    });
     try {
       await t.connect();
       await t.subscribe(GLOBAL_CHANNEL);

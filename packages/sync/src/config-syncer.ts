@@ -11,20 +11,25 @@
  * - 批量更新：支持一次更新多个配置项，减少网络往返
  */
 
-import type { Transport } from "@code-lite/transport";
+import type { SyncTransportAdapter } from "./manager";
 import type { SyncRole, SessionConfig, ConfigChangePayload, ConfigBatchPayload } from "./types";
 
 export type ConfigUpdateHandler = (conversationId: string, config: SessionConfig) => void;
 
 export class ConfigSyncer {
-  private readonly transport: Transport;
+  private readonly transport: SyncTransportAdapter;
   private readonly role: SyncRole;
   private readonly configs = new Map<string, SessionConfig>();
   private readonly handlers = new Set<ConfigUpdateHandler>();
 
-  constructor(transport: Transport, role: SyncRole) {
+  constructor(transport: SyncTransportAdapter, role: SyncRole) {
     this.transport = transport;
     this.role = role;
+  }
+
+  /** 当前同步角色（host/remote），供调用方标注操作来源。 */
+  get syncRole(): SyncRole {
+    return this.role;
   }
 
   /** 获取某会话的当前配置 */
@@ -49,10 +54,10 @@ export class ConfigSyncer {
     this.configs.set(conversationId, existing);
     this.notify(conversationId);
 
-    // 发送 RPC
+    // 发送 RPC（后端 _handle_conversation_config_update 期望 config 字段）
     await this.transport.request("conversation.config.update", {
       conversationId,
-      ...changes,
+      config: changes,
     });
   }
 

@@ -24,7 +24,7 @@ import { formatJson } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
-import { cancelTurn, createConversation, getLocalTransport, initializeSession, notifyTurnEvent, sendApprovalDecision, sendInputResponse, streamAgentTurn, uploadTurnAttachments } from "../services/agentClient";
+import { cancelTurn, createConversation, getLocalTransport, getSyncManager, initializeSession, notifyTurnEvent, sendApprovalDecision, sendInputResponse, streamAgentTurn, uploadTurnAttachments } from "../services/agentClient";
 import type { SnapshotListener } from "../services/localTransport";
 import {
   deleteConversation,
@@ -675,30 +675,9 @@ export function ChatPage() {
         // 会话级事件：路由到 handleAgentEvent（观察者与发起方共用 reducer）。
         const channel = (event as { conversationId?: string }).conversationId;
         const eventType2 = (event as unknown as { type: string }).type;
-        // turn.lock/turn.unlock 是互锁控制事件（0709 设计 6.1），不走 handleAgentEvent
-        if (eventType2 === "turn.lock" || eventType2 === "turn.unlock") {
-          if (!channel) return;
-          setSessionRunning(channel, eventType2 === "turn.lock");
-          return;
-        }
-        // 配置同步（0709 设计 5.3）：另一端改模型/模式后选择器跟随
-        if (eventType2 === "conversation.config.updated") {
-          if (!channel) return;
-          const configPayload = (event as unknown as { config?: Partial<SessionConfig> }).config;
-          if (configPayload) {
-            setConfigBySession((prev) => {
-              const existing = prev[channel];
-              const next: SessionConfig = {
-                modelFamily: configPayload.modelFamily ?? existing?.modelFamily ?? "",
-                accessMode: configPayload.accessMode ?? existing?.accessMode ?? "",
-                reasoningEffort: configPayload.reasoningEffort ?? existing?.reasoningEffort ?? "medium",
-                selectedConfig: configPayload.selectedConfig ?? existing?.selectedConfig ?? {},
-              };
-              const result = { ...prev, [channel]: next };
-              configBySessionRef.current = result;
-              return result;
-            });
-          }
+        // 同步事件（运行态/配置）统一交给 SyncManager 处理（0710 统一同步协议）。
+        if (eventType2 === "sync") {
+          getSyncManager().feedEvent(event);
           return;
         }
         if (channel && channel !== "*") {
@@ -755,6 +734,44 @@ export function ChatPage() {
       transport.unsubscribe("*");
     };
     // setSessionRunning 是稳定引用（内部 useState setter），handleAgentEventRef 是 ref
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── SyncManager 事件绑定（0710 统一同步协议）───
+  // 运行态与配置的双端同步由 SyncManager 统一驱动：
+  // - session.running/stopped → 更新 runningSessionIds（供输入框锁定/解锁）
+  // - config.batch → 另一端改配置后本端选择器跟随
+  useEffect(() => {
+    const sync = getSyncManager();
+    const offRunning = sync.onSessionRunning((p) => {
+      setSessionRunning(p.conversationId, true);
+    });
+    const offStopped = sync.onSessionStopped((p) => {
+      setSessionRunning(p.conversationId, false);
+    });
+    const offConfig = sync.onConfigChange((payload) => {
+      const p = payload as { conversationId?: string; changes?: Partial<SessionConfig> };
+      const channel = p.conversationId;
+      const changes = p.changes;
+      if (!channel || !changes) return;
+      setConfigBySession((prev) => {
+        const existing = prev[channel];
+        const next: SessionConfig = {
+          modelFamily: changes.modelFamily ?? existing?.modelFamily ?? "",
+          accessMode: changes.accessMode ?? existing?.accessMode ?? "",
+          reasoningEffort: changes.reasoningEffort ?? existing?.reasoningEffort ?? "medium",
+          selectedConfig: changes.selectedConfig ?? existing?.selectedConfig ?? {},
+        };
+        const result = { ...prev, [channel]: next };
+        configBySessionRef.current = result;
+        return result;
+      });
+    });
+    return () => {
+      offRunning();
+      offStopped();
+      offConfig();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

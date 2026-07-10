@@ -85,26 +85,14 @@ function mapMessage(
   return state.messages.map((m) => (m.id === messageId ? updater(m) : m));
 }
 
-/** 控制事件（lock/unlock）：只影响 running，不进消息流。 */
-export function isTurnLockEvent(event: unknown): boolean {
-  const type = (event as { type?: string })?.type;
-  return type === "turn.lock" || type === "turn.unlock";
-}
-
 /**
  * 把一个会话级事件应用到视图状态，返回新状态（不可变）。
- * turn.lock/turn.unlock 也在此处理（走 running）。
+ *
+ * 运行态（running）的跨端同步由 @code-lite/sync 的 SyncManager 统一驱动
+ * （session.running / session.stopped 事件）；本 reducer 只负责会话内视图状态：
+ * conversation.turn.started 置 running=true，terminal 事件置 running=false。
  */
 export function reduceAgentEvent(state: SessionViewState, event: AgentEvent): SessionViewState {
-  const type = (event as { type: string }).type;
-
-  if (type === "turn.lock") {
-    return { ...state, running: true };
-  }
-  if (type === "turn.unlock") {
-    return { ...state, running: false };
-  }
-
   if (event.type === "conversation.turn.started") {
     const existing = state.messages;
     const hasUser = existing.some((m) => m.id === event.userMessage.id);

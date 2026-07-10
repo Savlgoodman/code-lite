@@ -364,6 +364,12 @@ class RemoteBridge:
                 await peer.send_json(_envelope("result", requestId=request_id, payload={"ok": True}))
             elif method in handlers:
                 handler = handlers[method]
+                # 远端发起的 turn.start 注入 _startedBy 标记供 sync 协议识别来源
+                if method == "turn.start":
+                    rpc_payload = {**rpc_payload, "_startedBy": "remote"}
+                # 远端发起的配置更新注入 _changedBy 标记
+                if method == "conversation.config.update":
+                    rpc_payload = {**rpc_payload, "_changedBy": "remote"}
                 # subscribe 与 turn.start 需要 tasks 参数（订阅状态）；其余 handler 只需 4 参。
                 # 见 docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md 第 1.1 节。
                 # tasks 用 peer 独立的 pump_tasks，保证多设备互不串台（第 4.3 节）。

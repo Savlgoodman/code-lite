@@ -64,10 +64,13 @@ export type WireMethod =
   | "remote.peer.authorize"
   | "remote.peer.kick";
 
-/** 后端 -> 客户端的控制信令（见设计文档 7.2 control）。 */
+/**
+ * 后端 -> 客户端的控制信令（见设计文档 7.2 control）。
+ *
+ * 注：会话运行态（原 turn.lock/turn.unlock）已迁移到 @code-lite/sync 统一同步协议，
+ * 通过 session.running / session.stopped 同步事件传输，不再走 control 信令。
+ */
 export type WireControlType =
-  | "turn.lock"
-  | "turn.unlock"
   | "remote.revoked"
   | "host.online"
   | "host.offline"

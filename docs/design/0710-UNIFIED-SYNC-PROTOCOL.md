@@ -254,11 +254,50 @@ class SyncManager {
 ## 实现步骤
 
 1. ✅ 设计文档（本文档）
-2. 创建 `@code-lite/sync` 包结构
-3. 实现 `types.ts` 和 `manager.ts`
-4. 后端集成：在 `remote_bridge.py` 和 `ws.py` 中添加同步事件广播
-5. 前端集成：在 `chat-core` 中使用 `SyncManager`
-6. 测试双端同步功能
+2. ✅ 创建 `@code-lite/sync` 包结构
+3. ✅ 实现 `types.ts` / `manager.ts` / `state-tracker.ts` / `config-syncer.ts` / `constants.ts`
+4. ✅ 后端集成：`turns.py`（运行态）+ `ws.py`/`conversations.py`（配置）广播 sync 事件；`remote_bridge.py` 注入来源标记
+5. ✅ 前端集成：桌面端 `ChatPage` 与远端 `App.tsx` 均通过 `SyncManager.feedEvent` 接管运行态与配置同步
+6. ✅ 清理旧协议：移除 `turn.lock`/`turn.unlock` 与 `conversation.config.updated` 事件
+7. ✅ 验证：三端 TypeScript 编译 + 前端构建 + 后端 14 项测试全部通过
+
+## 实现说明（最终落地）
+
+### 线路机制：sync 事件嵌入 AgentEvent
+
+同步事件不新增信封类型，而是复用现有的 `event` 分发通道，以特殊的 AgentEvent 承载：
+
+```json
+{ "type": "sync", "syncType": "session.running", "syncPayload": { ... } }
+```
+
+- 后端 `sync_protocol.create_sync_event()` 构造，`event_bus.publish()` 广播
+- 中继层照常透传（不解析 payload）
+- 前端在已有的 `onEvent` 回调里识别 `type === "sync"`，交给 `SyncManager.feedEvent()`
+- 这样无需改动 Transport 层，本地端和远端零差异
+
+### 频道策略
+
+- **运行态**（session.running/stopped）：同时广播到会话频道 + 全局频道 `*`
+  - 会话频道 → 会话内视图锁定/解锁输入框
+  - 全局频道 → 会话列表页显示/取消"运行中"标记
+- **配置**（config.batch）：`broadcast_to_all` 广播到会话频道 + 全局频道
+
+### 来源标记
+
+远端发起的操作经 `remote_bridge.py` 注入内部标记（`_startedBy: "remote"` / `_changedBy: "remote"`），
+后端据此在 sync 事件的 `startedBy` / `changedBy` 字段标注来源。这些标记是 payload 顶层字段，
+不进入持久化的 config。
+
+### 双向终止
+
+`SyncManager.cancelSession()` 走 `turn.cancel` RPC，任一端均可调用；后端终止 turn 后在 finally 块
+广播 `session.stopped`，双端同步恢复空闲。
+
+### SyncTransportAdapter
+
+`SyncManager` 不依赖完整 `Transport` 接口，只需 `onEvent` + `request` 两个方法（`SyncTransportAdapter`），
+因此桌面端 `LocalTransport` 和远端 `RelayTransport` 无需改造即可直接接入。
 
 ## 扩展性考虑
 

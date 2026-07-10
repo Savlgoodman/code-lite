@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,11 @@ from code_lite_backend.schemas.agent import (
 )
 from code_lite_backend.services.model_config import ModelConfigError
 from code_lite_backend.services.runtime import AppServices
+from code_lite_backend.services.event_bus import GLOBAL_CHANNEL
+from code_lite_backend.services.sync_protocol import (
+    create_sync_event,
+    SyncEvents,
+)
 from code_lite_backend.storage.attachments import (
     ALLOWED_IMAGE_MIME_TYPES,
     MAX_IMAGE_BYTES_PER_TURN,
@@ -697,14 +703,21 @@ async def prepare_and_start_turn(
             if not completed:
                 logger.warning("run_turn_task: turn %s discarded (not completed)", turn_id)
                 services.conversation_recorder.discard_turn(conversation_id)
-            # 显式广播 turn.unlock（0710 第 5.3 节）：让只订阅了本会话频道、
-            # 但不解析 terminal 事件的订阅者也能准确解锁输入框、显示"空闲"。
-            # 与 turn.lock 对称，走同一会话频道。terminal 事件仍是最终状态真相源。
-            publish({
-                "type": "turn.unlock",
+            # 广播 sync session.stopped（0710 统一同步协议）：解锁输入框、恢复空闲。
+            # 会话频道供会话内视图，全局频道供会话列表页取消"运行中"标记。
+            stopped_event = create_sync_event(SyncEvents.SESSION_STOPPED, {
                 "conversationId": conversation_id,
                 "turnId": turn_id,
+                "stoppedBy": "auto",
+                "reason": "completed" if completed else "error",
+                "stoppedAt": int(time.time() * 1000),
             })
+            publish(stopped_event)
+            if event_bus is not None:
+                try:
+                    event_bus.publish(GLOBAL_CHANNEL, stopped_event)
+                except Exception:
+                    logger.exception("turn %s: global stopped publish failed", turn_id)
 
     # 会话级串行互锁 + 启动后台 turn，全部同步完成（0709 第 6 节、5.1.1）。
     # 必须同步：不能推迟到惰性生成器里，否则返回响应到开始消费之间会出现
@@ -720,14 +733,17 @@ async def prepare_and_start_turn(
     except Exception:
         raise
 
-    # 广播 turn.lock：所有订阅者据此禁用输入框、显示"另一端正在运行"（0709 设计 6.1）。
-    # turn.unlock 由 terminal 事件（agent.run.completed/failed）隐式表达，无需单独广播。
+    # 广播 sync session.running（0710 统一同步协议）：所有订阅者据此禁用输入框、显示运行中。
+    # 会话频道供会话内视图，全局频道供会话列表页显示"运行中"标记。
     if event_bus is not None:
-        event_bus.publish(conversation_id, {
-            "type": "turn.lock",
+        running_event = create_sync_event(SyncEvents.SESSION_RUNNING, {
             "conversationId": conversation_id,
             "turnId": turn_id,
+            "startedBy": str(body.get("_startedBy") or "host"),
+            "startedAt": int(time.time() * 1000),
         })
+        event_bus.publish(conversation_id, running_event)
+        event_bus.publish(GLOBAL_CHANNEL, running_event)
 
     return TurnStartOutcome(
         conversation_id=conversation_id,

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from code_lite_backend.api.dependencies import get_services
 from code_lite_backend.services.runtime import AppServices
+from code_lite_backend.services.sync_protocol import broadcast_to_all, SyncEvents
 
 
 router = APIRouter()
@@ -208,16 +209,13 @@ async def update_conversation_config(
         updates["contextUsage"] = context_usage
 
     updated = services.conversation_store.save_session(conversation_id, updates)
-    # 广播配置变更事件到会话频道（0709 设计 5.3）：其他订阅者选择器实时跟随
+    # 配置变更走统一 sync 协议（0710）：其他订阅者选择器实时跟随。
     if services.event_bus is not None and isinstance(config, dict):
-        services.event_bus.publish(
-            conversation_id,
-            {
-                "type": "conversation.config.updated",
-                "conversationId": conversation_id,
-                "config": config,
-            },
-        )
+        broadcast_to_all(services.event_bus, conversation_id, SyncEvents.CONFIG_BATCH, {
+            "conversationId": conversation_id,
+            "changes": config,
+            "changedBy": "host",
+        })
     return JSONResponse({"session": updated})
 
 

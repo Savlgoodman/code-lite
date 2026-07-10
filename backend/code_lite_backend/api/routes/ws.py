@@ -10,6 +10,11 @@ from code_lite_backend.api.routes.conversations import create_conversation_recor
 from code_lite_backend.api.routes.turns import prepare_and_start_turn
 from code_lite_backend.services.event_bus import GLOBAL_CHANNEL
 from code_lite_backend.services.runtime import AppServices
+from code_lite_backend.services.sync_protocol import (
+    broadcast_to_all,
+    create_sync_event,
+    SyncEvents,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -276,11 +281,14 @@ async def _handle_conversation_config_update(
         return
     updates = {**session, "config": config}
     updated = services.conversation_store.save_session(conversation_id, updates)
+    changed_by = str(payload.get("_changedBy") or "host")
+    # 配置变更走统一 sync 协议（0710）：会话频道供选择器跟随，全局频道备用。
     if services.event_bus is not None:
-        services.event_bus.publish(
-            conversation_id,
-            {"type": "conversation.config.updated", "conversationId": conversation_id, "config": config},
-        )
+        broadcast_to_all(services.event_bus, conversation_id, SyncEvents.CONFIG_BATCH, {
+            "conversationId": conversation_id,
+            "changes": config,
+            "changedBy": changed_by,
+        })
     await _send(ws, _envelope("result", requestId=request_id, payload={"session": updated}))
 
 

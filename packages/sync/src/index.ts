@@ -50,7 +50,16 @@ export type {
 
 // 核心类导出
 export { SyncManager } from "./manager";
-export type { SyncManagerOptions } from "./manager";
+export type {
+  SyncManagerOptions,
+  SyncTransportAdapter,
+  SessionRunningHandler,
+  SessionStoppedHandler,
+  SessionStateHandler,
+  ConfigChangeHandler,
+  ControlCancelHandler,
+  PresenceHandler,
+} from "./manager";
 
 export { StateTracker } from "./state-tracker";
 export type { StateChangeHandler } from "./state-tracker";

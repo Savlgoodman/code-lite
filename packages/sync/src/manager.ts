@@ -2,18 +2,23 @@
  * SyncManager：统一的双端同步管理器
  *
  * 核心职责：
- * 1. 通过 Transport 监听同步事件并分发到各处理器
- * 2. 提供命令式 API 向另一端广播状态变更
+ * 1. 监听传输层事件并识别同步事件（type: "sync"）
+ * 2. 提供命令式 API 发起控制命令（cancel / syncConfig）
  * 3. 维护本地同步状态（RunningState / ConfigState / Presence）
  *
  * 本地端和远程端使用同一个类，仅 role 不同。
  * Remote 端经中继转发，对 SyncManager 完全透明。
  *
+ * 设计要点：
+ * - 不强依赖 Transport 接口全集，只需 onEvent + request 两个方法
+ * - 接受任何实现了 SyncTransportAdapter 的对象（LocalTransport / RelayTransport 都可）
+ * - 后端 sync 事件通过现有 event pump 自动分发到前端
+ *
  * 见 docs/design/0710-UNIFIED-SYNC-PROTOCOL.md
  */
 
-import type { Transport, EventHandler } from "@code-lite/transport";
 import type { AgentEvent } from "@code-lite/protocol";
+import { isSyncEvent, extractSyncPayload } from "./constants";
 import type {
   SyncRole,
   SyncMessageType,
@@ -33,24 +38,37 @@ import type {
 
 // ─── Handler types ─────────────────────────────────────────────
 
-type SessionRunningHandler = (payload: SessionRunningPayload) => void;
-type SessionStoppedHandler = (payload: SessionStoppedPayload) => void;
-type SessionStateHandler = (payload: SessionStatePayload) => void;
-type ConfigChangeHandler = (payload: ConfigChangePayload) => void;
-type ControlCancelHandler = (payload: ControlCancelPayload) => void;
-type PresenceHandler = (payload: PresencePayload) => void;
+export type SessionRunningHandler = (payload: SessionRunningPayload) => void;
+export type SessionStoppedHandler = (payload: SessionStoppedPayload) => void;
+export type SessionStateHandler = (payload: SessionStatePayload) => void;
+export type ConfigChangeHandler = (payload: ConfigChangePayload) => void;
+export type ControlCancelHandler = (payload: ControlCancelPayload) => void;
+export type PresenceHandler = (payload: PresencePayload) => void;
+
+// ─── Transport 适配器（仅需两个方法） ────────────────────────────
+
+/**
+ * SyncManager 对传输层的最小要求。
+ * LocalTransport 和 RelayTransport 都满足此接口。
+ */
+export interface SyncTransportAdapter {
+  /** 注册事件监听，返回取消函数 */
+  onEvent(handler: (event: AgentEvent, meta: { channel: string; seq?: number }) => void): () => void;
+  /** 发送 RPC 请求 */
+  request<T = unknown>(method: string, payload?: unknown): Promise<T>;
+}
 
 // ─── SyncManager Options ───────────────────────────────────────
 
 export interface SyncManagerOptions {
-  transport: Transport;
+  transport: SyncTransportAdapter;
   role: SyncRole;
 }
 
 // ─── SyncManager ───────────────────────────────────────────────
 
 export class SyncManager {
-  private readonly transport: Transport;
+  private readonly transport: SyncTransportAdapter;
   private readonly role: SyncRole;
   private readonly state: SyncState;
 
@@ -106,11 +124,11 @@ export class SyncManager {
     return this.state.configs.get(conversationId);
   }
 
-  // ─── 主动广播 ──────────────────────────────────────────────
+  // ─── 主动操作 ──────────────────────────────────────────────
 
   /**
-   * 通知会话开始运行（由发起 turn 的一端调用）。
-   * 后端在 turn.start 成功后广播此事件到全局频道。
+   * 通知会话开始运行（本地乐观更新）。
+   * 实际的跨端同步由后端 turn.start 广播 sync 事件完成。
    */
   notifySessionRunning(conversationId: string, turnId: string): void {
     const payload: SessionRunningPayload = {
@@ -119,18 +137,13 @@ export class SyncManager {
       startedBy: this.role,
       startedAt: Date.now(),
     };
-    this.state.running.set(conversationId, {
-      ...payload,
-      status: "running",
-    });
-    // 在后端场景下由 event_bus 广播，前端场景下由 Transport 发送。
-    // 这里的方法主要用于前端侧本地状态更新 + 通知 UI。
-    this.dispatch("session.running", payload);
+    this.state.running.set(conversationId, { ...payload, status: "running" });
+    for (const h of this.sessionRunningHandlers) h(payload);
   }
 
   /**
-   * 通知会话停止运行。
-   * 后端在 turn 结束/取消后广播此事件。
+   * 通知会话停止运行（本地乐观更新）。
+   * 实际的跨端同步由后端 turn 结束后广播 sync 事件完成。
    */
   notifySessionStopped(
     conversationId: string,
@@ -145,16 +158,13 @@ export class SyncManager {
       reason,
       stoppedAt: Date.now(),
     };
-    const existing = this.state.running.get(conversationId);
-    if (existing) {
-      existing.status = reason === "cancelled" ? "cancelled" : reason === "completed" ? "completed" : "error";
-    }
-    this.dispatch("session.stopped", payload);
+    this.state.running.delete(conversationId);
+    for (const h of this.sessionStoppedHandlers) h(payload);
   }
 
   /**
    * 发送取消请求（双向终止）。
-   * 实际取消通过 Transport.request("turn.cancel") 走 RPC。
+   * 任一端均可调用，后端收到后终止 turn 并广播 session.stopped。
    */
   async cancelSession(conversationId: string, turnId?: string): Promise<void> {
     const running = this.state.running.get(conversationId);
@@ -169,12 +179,12 @@ export class SyncManager {
 
   /**
    * 同步配置变更。
-   * 调用后端 RPC 更新配置，后端成功后广播事件到频道。
+   * 调用后端 RPC 更新配置，后端成功后广播 config.batch 事件到频道。
    */
   async syncConfig(conversationId: string, changes: Partial<SessionConfig>): Promise<void> {
     await this.transport.request("conversation.config.update", {
       conversationId,
-      ...changes,
+      config: changes,
     });
   }
 
@@ -210,18 +220,24 @@ export class SyncManager {
     return () => this.presenceHandlers.delete(handler);
   }
 
+  // ─── 外部喂入事件（供已有 onEvent 的应用层调用） ────────────────
+
+  /**
+   * 手动喂入一个 AgentEvent 给 SyncManager 处理。
+   * 适用于应用层已有自己的 onEvent 回调，想复用 SyncManager 的场景：
+   * 不需要调 start()，只需在收到事件时调用 feedEvent。
+   */
+  feedEvent(event: AgentEvent): void {
+    if (!isSyncEvent(event)) return;
+    const extracted = extractSyncPayload(event);
+    if (!extracted) return;
+    this.handleSyncEvent(extracted.type as SyncMessageType, extracted.payload);
+  }
+
   // ─── 内部事件分发 ──────────────────────────────────────────
 
-  private readonly handleEvent: EventHandler = (event: AgentEvent, meta) => {
-    // 同步事件通过 AgentEvent 的 type 字段传输。
-    // 后端将同步事件包装为 AgentEvent 格式广播到频道。
-    const syncType = (event as unknown as { syncType?: SyncMessageType }).syncType;
-    if (!syncType) return;
-
-    const payload = (event as unknown as { syncPayload?: unknown }).syncPayload;
-    if (payload == null) return;
-
-    this.handleSyncEvent(syncType, payload);
+  private readonly handleEvent = (event: AgentEvent, _meta: { channel: string; seq?: number }) => {
+    this.feedEvent(event);
   };
 
   private handleSyncEvent(type: SyncMessageType, payload: unknown): void {
@@ -234,10 +250,7 @@ export class SyncManager {
       }
       case "session.stopped": {
         const p = payload as SessionStoppedPayload;
-        const existing = this.state.running.get(p.conversationId);
-        if (existing) {
-          existing.status = p.reason === "cancelled" ? "cancelled" : p.reason === "completed" ? "completed" : "error";
-        }
+        this.state.running.delete(p.conversationId);
         for (const h of this.sessionStoppedHandlers) h(p);
         break;
       }
@@ -252,7 +265,9 @@ export class SyncManager {
       case "config.batch": {
         const p = payload as ConfigBatchPayload;
         const existing = this.state.configs.get(p.conversationId) ?? {};
-        Object.assign(existing, p.changes ?? { [type.replace("config.", "")]: (payload as Record<string, unknown>)[type.replace("config.", "")] });
+        if (p.changes) {
+          Object.assign(existing, p.changes);
+        }
         this.state.configs.set(p.conversationId, existing);
         for (const h of this.configChangeHandlers) h(payload as ConfigChangePayload);
         break;
@@ -279,11 +294,5 @@ export class SyncManager {
         break;
       }
     }
-  }
-
-  private dispatch(_type: SyncMessageType, _payload: unknown): void {
-    // 前端侧：本地状态已更新，UI 通过 handlers 获取通知。
-    // 后端侧由 event_bus.publish() 广播，不经此方法。
-    // 此方法仅用于本地端的乐观更新。
   }
 }

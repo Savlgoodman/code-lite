@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { AgentEvent, MessageAttachment, Session, SessionCapabilities, UserContentBlock } from "../types";
 import { LocalTransport } from "./localTransport";
+import { SyncManager } from "@code-lite/sync";
 
 // 共享 WS 传输：本地桌面前端的事件源与命令通道（0709 阶段二）。
 let sharedTransport: LocalTransport | null = null;
@@ -11,6 +12,16 @@ export function getLocalTransport(): LocalTransport {
     sharedTransport = new LocalTransport();
   }
   return sharedTransport;
+}
+
+// 共享 SyncManager（role=host）：统一处理运行态与配置的双端同步。
+let sharedSyncManager: SyncManager | null = null;
+
+export function getSyncManager(): SyncManager {
+  if (!sharedSyncManager) {
+    sharedSyncManager = new SyncManager({ transport: getLocalTransport(), role: "host" });
+  }
+  return sharedSyncManager;
 }
 
 interface BackendStatus {
