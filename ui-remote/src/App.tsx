@@ -7,7 +7,10 @@ import {
   reduceAgentEvent,
   sessionViewFromSnapshot,
   emptySessionView,
+  groupModelsByFamily,
+  buildModelId,
   type SessionViewState,
+  type ModelGrouping,
 } from "@code-lite/chat-core";
 import { RelayTransport } from "./services/RelayTransport";
 
@@ -17,21 +20,21 @@ const LS_RELAY_URL = "code-lite-relay-url";
 const LS_PAIR_KEY = "code-lite-pair-key";
 const GLOBAL_CHANNEL = "*";
 
-/** 从 capabilities 中提取默认模型与思考强度 */
-function buildDefaultsFromCaps(caps: SessionCapabilities) {
-  const currentModel = caps.models.find((m) => m.isCurrent) ?? caps.models[0];
-  const modelId = currentModel?.id ?? "";
-  const modelLabel = currentModel?.label ?? "";
-  const effortOpt = caps.configOptions.find((o) => o.id === "reasoning_effort" || o.id === "effort");
-  const reasoningEffort = effortOpt?.currentValue ? String(effortOpt.currentValue) : "medium";
-  return { modelId, modelLabel, reasoningEffort };
+/** 会话运行配置：模型族 + 思考强度（二级联动）*/
+interface SessionConfig {
+  familyId: string; // 当前选中的模型族（isGrouped=false 时即模型 id）
+  effort: string; // 当前选中的思考强度（isGrouped=false 时为空）
+  grouping: ModelGrouping; // 分组结构（families 列表 + 当前值）
 }
 
-/** 会话运行配置（模型+思考强度等）*/
-interface SessionConfig {
-  modelId: string;
-  modelLabel: string;
-  reasoningEffort: string;
+/** 从 capabilities 构建默认运行配置 */
+function buildConfigFromCaps(caps: SessionCapabilities): SessionConfig {
+  const grouping = groupModelsByFamily(caps.models);
+  return {
+    familyId: grouping.currentFamilyId,
+    effort: grouping.currentEffort,
+    grouping,
+  };
 }
 
 async function computeRoomId(pairKey: string): Promise<string> {
@@ -58,8 +61,7 @@ export function App() {
   // 每个会话一份视图状态，由 snapshot + 事件 reduce 得到（复用 chat-core，与桌面同源）。
   const [views, setViews] = useState<Record<string, SessionViewState>>({});
   const [draft, setDraft] = useState("");
-  // 会话能力（模型列表、configOptions 等）与当前选择的运行配置。
-  const [capsBySession, setCapsBySession] = useState<Record<string, SessionCapabilities>>({});
+  // 每个会话的运行配置（模型族+思考强度分组，由 session.initialize 的 capabilities 构建）。
   const [configBySession, setConfigBySession] = useState<Record<string, SessionConfig>>({});
 
   const transportRef = useRef<RelayTransport | null>(null);
@@ -151,11 +153,10 @@ export function App() {
     // 初始化 ACP session 拿 capabilities（模型列表、configOptions、上下文窗口）。
     try {
       const caps = await transport.request<SessionCapabilities>("session.initialize", { conversationId: session.id });
-      setCapsBySession((prev) => ({ ...prev, [session.id]: caps }));
       // 初始化默认运行配置（首次进入时取 ACP 返回的当前值）
       setConfigBySession((prev) => {
         if (prev[session.id]) return prev; // 已有配置则不覆盖
-        return { ...prev, [session.id]: buildDefaultsFromCaps(caps) };
+        return { ...prev, [session.id]: buildConfigFromCaps(caps) };
       });
     } catch (e) {
       console.warn("session.initialize failed (capabilities unavailable)", e);
@@ -180,15 +181,22 @@ export function App() {
     setDraft("");
     const turnId = `turn-${Date.now()}`;
     const cfg = id ? configBySession[id] : undefined;
+    // 组回完整 modelId：分组模式 "family[effort]"，否则直接用 familyId（即模型 id）。
+    const modelId = cfg
+      ? cfg.grouping.isGrouped
+        ? buildModelId(cfg.familyId, cfg.effort)
+        : cfg.familyId
+      : "";
+    const modelLabel = cfg?.grouping.families.find((f) => f.familyId === cfg.familyId)?.label;
     // turn.start 携带完整运行配置（模型+思考强度），与桌面版一致。
     try {
       await transport.request("turn.start", {
         conversationId: id,
         input: text,
         turnId,
-        ...(cfg?.modelId ? { modelId: cfg.modelId } : {}),
-        ...(cfg?.modelLabel ? { modelLabel: cfg.modelLabel } : {}),
-        ...(cfg?.reasoningEffort ? { reasoningEffort: cfg.reasoningEffort } : {}),
+        ...(modelId ? { modelId } : {}),
+        ...(modelLabel ? { modelLabel } : {}),
+        ...(cfg?.grouping.isGrouped && cfg.effort ? { reasoningEffort: cfg.effort } : {}),
       });
     } catch (e) {
       console.error("turn.start failed", e);
@@ -198,15 +206,29 @@ export function App() {
   const activeView = activeSessionId ? views[activeSessionId] : null;
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? activeView?.session ?? null;
   const activeRunning = activeView?.running ?? false;
-  const activeCaps = activeSessionId ? capsBySession[activeSessionId] : undefined;
   const activeConfig = activeSessionId ? configBySession[activeSessionId] : undefined;
 
-  const setActiveConfig = (patch: Partial<SessionConfig>) => {
+  // 切换模型族：effort 重置为该族支持的首个（或保留当前若仍受支持）。
+  const changeFamily = (familyId: string) => {
     if (!activeSessionId) return;
-    setConfigBySession((prev) => ({
-      ...prev,
-      [activeSessionId]: { ...(prev[activeSessionId] ?? { modelId: "", modelLabel: "", reasoningEffort: "medium" }), ...patch },
-    }));
+    setConfigBySession((prev) => {
+      const cfg = prev[activeSessionId];
+      if (!cfg) return prev;
+      const fam = cfg.grouping.families.find((f) => f.familyId === familyId);
+      const nextEffort = fam && fam.efforts.length > 0
+        ? (fam.efforts.includes(cfg.effort) ? cfg.effort : fam.efforts[0])
+        : "";
+      return { ...prev, [activeSessionId]: { ...cfg, familyId, effort: nextEffort } };
+    });
+  };
+
+  const changeEffort = (effort: string) => {
+    if (!activeSessionId) return;
+    setConfigBySession((prev) => {
+      const cfg = prev[activeSessionId];
+      if (!cfg) return prev;
+      return { ...prev, [activeSessionId]: { ...cfg, effort } };
+    });
   };
 
   // ── 配对页 ──
@@ -279,34 +301,31 @@ export function App() {
           <div ref={messagesEndRef} />
         </div>
         <div className="chat-bottom-bar">
-          {activeCaps && activeConfig && (
+          {activeConfig && activeConfig.grouping.families.length > 0 && (
             <div className="chat-config-bar">
               <div className="config-item">
                 <label>模型</label>
-                <select
-                  value={activeConfig.modelId}
-                  onChange={(e) => {
-                    const m = activeCaps.models.find((x) => x.id === e.target.value);
-                    setActiveConfig({ modelId: e.target.value, modelLabel: m?.label ?? e.target.value });
-                  }}
-                >
-                  {activeCaps.models.map((m) => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
+                <select value={activeConfig.familyId} onChange={(e) => changeFamily(e.target.value)}>
+                  {activeConfig.grouping.families.map((f) => (
+                    <option key={f.familyId} value={f.familyId}>{f.label}</option>
                   ))}
                 </select>
               </div>
-              <div className="config-item">
-                <label>思考</label>
-                <select
-                  value={activeConfig.reasoningEffort}
-                  onChange={(e) => setActiveConfig({ reasoningEffort: e.target.value })}
-                >
-                  {(activeCaps.configOptions.find((o) => o.id === "reasoning_effort" || o.id === "effort")?.values ?? ["low", "medium", "high", "max"]).map((v) => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
-              </div>
-              {activeView?.contextUsage && (activeView.contextUsage as any).contextWindowTokens ? (
+              {activeConfig.grouping.isGrouped && (() => {
+                const fam = activeConfig.grouping.families.find((f) => f.familyId === activeConfig.familyId);
+                if (!fam || fam.efforts.length === 0) return null;
+                return (
+                  <div className="config-item">
+                    <label>思考</label>
+                    <select value={activeConfig.effort} onChange={(e) => changeEffort(e.target.value)}>
+                      {fam.efforts.map((v) => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
+              {activeView?.contextUsage && (activeView.contextUsage as { contextWindowTokens?: number }).contextWindowTokens ? (
                 <div className="config-item context-usage">
                   <ContextMeter usage={activeView.contextUsage} />
                 </div>
