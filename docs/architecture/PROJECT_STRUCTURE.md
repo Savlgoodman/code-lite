@@ -1,388 +1,327 @@
 # 项目目录结构设计
 
-本文档定义 code-lite 的目标仓库结构。当前仓库仍保留部分早期原型命名，后续迁移时应保持小步、可验证，不一次性重命名所有运行时代码。
+> 更新于 2026-07-10：双端统一同步协议大重构完成
 
 ## 根目录结构
 
 ```text
 code-lite/
-  docs/
-  ui/
-  src-tauri/
-  backend/
-  packages/
-  scripts/
-  demo/
-  tests/
-  assets/
-  data/
-  .gitignore
+  backend/           Python Agent Hub（sidecar）
+  ui/                桌面前端（Tauri WebView）
+  ui-remote/         远端前端（任意设备浏览器）
+  proxy_server/      中继服务器（可部署在公网）
+  packages/          跨层共享协议包
+  src-tauri/         Tauri 桌面壳（Rust）
+  scripts/           开发、打包、版本脚本
+  docs/              产品、架构、设计文档
+  data/              运行时数据（不提交 git）
+  demo/              ACP 探针和原型
+  ref/               参考资料（VibeX 等）
 ```
 
-## 目录职责
+## 共享协议包 `packages/`
 
-### `docs/`
-
-产品和工程文档。
-
-核心入口：
+所有跨层共享的协议、类型和纯逻辑都集中在这里。**不含 React 依赖**。
 
 ```text
-docs/
-  README.md
-  architecture/
-    ARCHITECTURE.md
-    PROJECT_STRUCTURE.md
-  design/
-    0702-REMOTE-SYNC.md
-    0703-AGENT-ACP-IMPLEMENTATION.md
-    0703-AGENT-UNIFIED-ACP.md
-    0703-RUNTIME-MODEL-PROVIDER.md
-  development/
-    DEVELOPMENT_WORKFLOW.md
-  guides/
-    PRD.md
-    UI_DEVELOPMENT.md
-    BUILD_AND_RELEASE.md
-    RELEASE_AND_UPDATE.md
-  refactor/
-    0703-RUNTIME-DATA-CHAT-UI.md
-  research/
-    0702-AGENT-ACP-RESEARCH.md
-    0703-BACKEND-ACP-RESEARCH.md
+packages/
+  protocol/          AgentEvent 类型定义 + 线协议信封
+    src/
+      domain.ts      AgentEvent union、Session、ChatMessage、SessionCapabilities
+      wire.ts        WireEnvelope、WireMethod、WireControlType
+      index.ts       导出入口
+    package.json     @code-lite/protocol
+
+  transport/         WebSocket 传输抽象
+    src/
+      transport.ts   Transport 接口、TransportStatus、TransportError
+      ws-transport.ts WsTransport 基类（统一 connect/request/subscribe/onEvent）
+      index.ts       导出入口
+    package.json     @code-lite/transport（依赖 protocol）
+
+  sync/              双端统一同步协议
+    src/
+      types.ts       同步消息类型（session.running / config.batch / presence.*）
+      manager.ts     SyncManager 核心类（feedEvent + 事件监听 + 主动操作）
+      state-tracker.ts 运行态追踪器
+      config-syncer.ts 配置同步器
+      constants.ts   SyncEvents 常量 + isSyncEvent / extractSyncPayload
+      index.ts       导出入口
+    package.json     @code-lite/sync（依赖 protocol + transport）
+
+  chat-core/         纯 reducer + 共享状态层（无 React 依赖）
+    src/
+      conversationClient.ts  ConversationClient 框架无关状态层
+      sessionReducer.ts      reduceAgentEvent（单会话视图态 reducer）
+      conversationList.ts    applyConversationListEvent（列表 reducer）
+      messageReducer.ts      updateMessage / upsertToolCall / mergeMessagePlan
+      modelGrouping.ts       groupModelsByFamily（模型族/思考强度二级联动）
+      planSnapshots.ts       plan 快照工具
+      index.ts               导出入口
+    package.json     @code-lite/chat-core（依赖 protocol + sync + transport）
 ```
 
-分类和命名规则以 `docs/README.md` 为准。历史维修、nanobot 专项和 native SDK 直连文档不再作为产品主方向入口。新增文档应优先围绕 ACP runtime、远程同步、权限审批、会话事件和运行时配置展开。
+## 桌面前端 `ui/`
 
-### `ui/`
-
-桌面前端 UI 源码目录，当前采用 React + Vite。
-
-建议结构：
+React + Vite + Tauri WebView。通过 `@code-lite/*` 别名引用 packages。
 
 ```text
 ui/
-  AGENTS.md
   src/
-    App.tsx
     pages/
-      ChatPage.tsx
-      SettingsPage.tsx
-      RemotePage.tsx
+      ChatPage.tsx           主页面：会话编排 + 桌面独有逻辑（~1300 行）
+                             - draft session 管理
+                             - per-session capabilities/config 加载
+                             - 图片附件上传
+                             - codex/fast mode 特殊处理
+                             - 状态全部来自 ConversationClient
+      OverviewPage.tsx       总览页
+      SettingsPage.tsx       设置页（远端控制、模型配置）
+      settings/
+        RemoteControlSettings.tsx  远端控制配置（pair key、relay URL）
     layout/
-      AppTitlebar.tsx
-      Sidebar.tsx
-    components/
-      MessageRenderer.tsx
-      RuntimeBadge.tsx
+      Sidebar.tsx            侧栏（会话列表、搜索、归档）
+      AppTitlebar.tsx        标题栏
     features/
       chat/
-        ApprovalCard.tsx
-        ChatComposer.tsx
-        ConversationHeader.tsx
-        MessageList.tsx
-        ToolCallViews.tsx
-        FileChangeList.tsx
-        messageTools.ts
-      runtime/
-        RuntimePicker.tsx
-        RuntimeStatusPanel.tsx
-      remote/
-        RemoteSessionPanel.tsx
-        ViewerList.tsx
-    lib/
-      chatState.ts
-      formatters.ts
-      eventStream.ts
+        ChatWorkspace.tsx    主工作区容器
+        ChatComposer.tsx     输入框 + 附件 + 审批/输入卡片
+        MessageList.tsx      消息流渲染
+        ToolCallViews.tsx    工具调用视图（Bash/Edit/Read/Glob/Grep/Write）
+        ApprovalCard.tsx     审批卡片
+        InputRequestCard.tsx 输入请求卡片
+        ConversationHeader.tsx 会话头部（标题、模型选择器、思考强度）
+        ContextRing.tsx      上下文用量环
+        PlanProgressPanel.tsx Plan 进度面板
+        messageTools.ts      消息相关工具函数
+        draftImages.ts       图片附件状态管理
+        chatTypes.ts         本地类型
     services/
-      agentClient.ts
-      conversationStore.ts
-      remoteClient.ts
-      settingsClient.ts
-    styles.css
-    types.ts
+      agentClient.ts         getConversationClient 单例 + ensureBackend
+      localTransport.ts      LocalWsTransport（直通 WsTransport 子类）
+      useConversations.ts    useSyncExternalStore hook（React 绑定）
+      conversationStore.ts   会话 API（现在全走 WS RPC）
+      settingsStore.ts       设置 API
+      billingStore.ts        计费 API
+    lib/
+      chatState.ts           StoredState + normalizeStoredState
+      formatters.ts          格式化工具
+    types.ts                 前端类型定义
+    App.tsx                  顶层路由
   package.json
-  tsconfig.json
-  vite.config.ts
+  tsconfig.json              paths 映射 @code-lite/* → ../packages/*/src
+  vite.config.ts             alias 映射 @code-lite/*
 ```
 
-职责：
+## 远端前端 `ui-remote/`
 
-1. `App.tsx` 只组合全局 layout 和当前 page，不承载业务状态。
-2. `pages/` 放页面级状态、effect 和业务编排。
-3. `layout/` 放桌面壳稳定布局。
-4. `features/chat/` 放对话、消息、工具调用、文件变更和审批组件。
-5. `features/runtime/` 放 agent runtime 选择和能力展示。
-6. `features/remote/` 放远程连接、观看者和授权状态。
-7. `components/` 放跨功能复用组件。
-8. `lib/` 放纯函数、格式化和事件状态工具。
-9. `services/` 放 Tauri/backend 通信适配。
-10. `ui/AGENTS.md` 记录 UI 模块的色彩、样式、组件拆分和交互规范。
-
-### `src-tauri/`
-
-Tauri 应用外壳和本地桌面能力目录。
-
-建议结构：
+React + Vite。与桌面端**完全同源**——共享 `ConversationClient` + `WsTransport` 基类。
 
 ```text
-src-tauri/
+ui-remote/
   src/
-    main.rs
-    lib.rs
-    commands/
-      backend.rs
-      workspace.rs
-      window.rs
-    sidecar/
-      backend_process.rs
-      protocol.rs
-    security/
-      permissions.rs
-      audit.rs
-    config/
-  capabilities/
-  binaries/
-  tauri.conf.json
-  Cargo.toml
+    App.tsx                  远端工作台
+                             - 配对页（relay URL + pair key）
+                             - 会话列表页（显示运行态 + 新建按钮）
+                             - 会话页（消息流 + 模型选择器 + 终止按钮）
+                             - 状态来自 ConversationClient（与桌面同源）
+    services/
+      RelayTransport.ts      RelayWsTransport（中继 WsTransport 子类）
+                             - 裹/拆 {type:"msg"} 外层
+                             - hello/ready 握手
+                             - 心跳 + host.online/offline
+      useConversations.ts    useSyncExternalStore hook
+    main.tsx                 入口
+    styles.css               样式
+  package.json
+  tsconfig.json              paths 映射 @code-lite/*
+  vite.config.ts             alias 映射
 ```
 
-职责：
+## 中继服务器 `proxy_server/`
 
-1. 暴露给 UI 的 Tauri 命令。
-2. Python backend sidecar 生命周期管理。
-3. 打包和安装态资源管理。
-4. 本地 workspace 选择和桌面集成。
-5. 后续承载更强的本地权限边界、系统命令网关和审计落盘。
+FastAPI WebSocket 中继，可在公网部署。不解析业务 payload。
 
-### `backend/`
+```text
+proxy_server/
+  main.py                FastAPI 应用
+                         - /ws 端点（接受 host 和 remote 连接）
+                         - RoomRegistry（roomId = SHA256(pairKey)）
+                         - hello/ready 握手
+                         - 盲转发 msg 帧
+                         - 心跳 20s ping/pong
+                         - /health 管理端点
+```
 
-Python Agent Hub，最终作为 sidecar 随 Tauri 应用分发。
-
-当前目录仍使用 `code_lite_backend` 历史包名，目标职责已经转向 code-lite。后续可择机迁移为 `code_lite_backend`。
-
-建议目标结构：
+## Python Backend `backend/`
 
 ```text
 backend/
   code_lite_backend/
-    main.py
-    app.py
+    main.py              uvicorn 入口
+    app.py               FastAPI 应用构建 + 生命周期钩子
+    
     api/
-      router.py
-      dependencies.py
+      router.py          路由注册
+      dependencies.py    get_services 依赖注入
       routes/
-        health.py
-        conversations.py
-        turns.py
-        approvals.py
-        settings.py
-        remote.py
-        runtimes.py
+        ws.py            /api/ws WebSocket 端点（所有 RPC handler 共用）
+                         - subscribe / unsubscribe
+                         - turn.start / turn.cancel
+                         - conversation.list / get / create / archive / delete
+                         - conversation.config.update
+                         - session.initialize
+                         - approval.decision / input.response
+                         - diff.get
+                         - remote.config.* / remote.peer.*
+        turns.py         turn 生命周期
+                         - prepare_and_start_turn
+                         - run_turn_task（turn 执行 + 事件广播）
+                         - turn.lock / turn.unlock（串行互锁）
+        conversations.py HTTP 会话 API（部分已被 WS RPC 取代）
+        sessions.py      session.initialize_core（capabilities）
+        approvals.py     审批 API
+        settings.py      运行时配置 API
+    
     agents/
-      registry.py
-      base.py
-      router.py
       acp/
-        adapter.py
-        client.py
-        mapper.py
-        approvals.py
-        capabilities.py
+        adapter.py       AcpAgentAdapter（通用 ACP 主线）
+                         - stream_turn / cancel_turn
+                         - ACP stdio client 管理
+        client.py        ACP 子进程 client
+        approvals.py     审批适配
+        capabilities.py  capabilities 提取
+        mapper.py        AgentEvent 映射
       runtimes/
-        descriptors.py
-      nanobot/
-        adapter.py
-        events.py
-        hooks.py
+        descriptors.py   RuntimeDescriptor 注册
+        profiles.py      runtime profile（config / fast mode）
+      claude_code/       Claude Code descriptor
+      codex/             Codex descriptor
+      nanobot/           legacy 兼容
+    
     core/
-      config.py
-      encoding.py
-      json_utils.py
-      paths.py
+      config.py          配置加载
+      encoding.py        编码工具
+      paths.py           路径工具
+    
     schemas/
-      agent.py
-      events.py
-      approvals.py
-      remote.py
-      settings.py
+      agent.py           Pydantic 模型（AgentEvent / AgentRunRequest）
+      events.py          事件 schema
+      approvals.py       审批 schema
+    
     services/
-      event_bus.py
-      conversations.py
-      approvals.py
-      remote_sessions.py
-      runtime_config.py
-      model_config.py
+      event_bus.py       SessionEventBus（进程内 pub/sub）
+                         - 按 conversationId 分频道
+                         - publish 向频道所有订阅者 fan-out
+      conversation_recorder.py  活动态会话状态管理
+                         - turn 执行时更新 session.json
+                         - status: running / idle / error / approval
+      remote_bridge.py   远端桥接
+                         - 主动 dial out 到 relay（NAT 穿透）
+                         - 多 peer 多路复用（_PeerSession）
+                         - 权限模型（pending / viewer / operator）
+                         - 注入 _startedBy / _changedBy 来源标记
+      sync_protocol.py   同步协议辅助
+                         - SyncEvents 常量
+                         - create_sync_event / broadcast_to_all
+      runtime_config.py  运行时配置
+      model_config.py    模型配置
+    
     storage/
-      conversations.py
-      events.py
-      audit.py
-      settings.py
-  tests/
-  pyproject.toml
+      conversations.py   ConversationStore
+                         - session.json / messages.json 读写
+                         - list_sessions / get_conversation
+                         - 原子写入（atomic_write_json）
+      event_store.py     事件持久化
+      attachments.py     附件存储
+  
+  tests/                 后端测试
+    test_turn_lifecycle.py
+    test_ws_event_bus.py
+    ...
+  
+  pyproject.toml         依赖管理（uv）
 ```
 
-职责：
-
-1. 提供本地 backend API 和流式事件接口。
-2. 通过通用 ACP adapter 和 runtime descriptor 隔离 Codex、Claude Code、opencode。
-3. 将 runtime 私有事件映射为统一 `AgentEvent`。
-4. 管理会话、事件序号、审计日志和运行时配置。
-5. 为远程同步提供快照、增量事件和权限控制。
-6. 对敏感配置和会话导出做脱敏处理。
-
-### `packages/`
-
-跨层共享协议和生成类型目录。
-
-建议结构：
+## Tauri 桌面壳 `src-tauri/`
 
 ```text
-packages/
-  protocol/
-    schema/
-      agent-event.schema.json
-      approval.schema.json
-      runtime.schema.json
-      remote.schema.json
-    typescript/
-    python/
-    rust/
+src-tauri/
+  src/
+    main.rs              入口
+    lib.rs               Tauri command 注册
+    commands/            Tauri command 实现
+      backend.rs         ensure_backend（启动/监控 sidecar）
+  tauri.conf.json        Tauri 配置
+  Cargo.toml             Rust 依赖
 ```
 
-可能用途：
+## 运行时数据 `data/`
 
-1. 共享 `AgentEvent` JSON Schema。
-2. 共享审批对象和远程连接对象定义。
-3. 共享 runtime descriptor。
-4. 生成 TypeScript、Python 或 Rust 类型。
-
-### `demo/`
-
-原型和 SDK 探针目录。
-
-现有内容：
-
-1. `acp-demo/`：ACP mock、Python SDK probe 和 Codex ACP smoke。
-2. `nanobot-demo/`：早期 legacy adapter 和审批 demo，保留作兼容资料。
-3. `agent-sdk-research/`：旧 native SDK 调研脚本，保留作历史探针，不作为主路线。
-
-后续可新增：
+不提交到 git。
 
 ```text
-demo/
-  claude_code_acp_probe.py
-  opencode_acp_probe.py
-  remote_sync_probe.py
+data/
+  record/                会话目录
+    <conversation_id>/
+      session.json       会话元数据（config / status / archived）
+      messages.json      消息流
+      native-session.json native ACP session 绑定
+  config/
+    app_config.json      全局配置
+    agent_runtimes.json  runtime 注册
+    remote_bridge.json   远端中继配置（pair_key / relay_url）
+  runtimes/
+    acp/                 ACP runtime 二进制
+  events/                事件日志
+  logs/                  运行日志
+  cache/                 缓存
 ```
 
-demo 可以调用模型或启动 runtime 的脚本必须在 README 中明确说明风险、环境变量和是否会写 workspace。
-
-### `scripts/`
-
-开发、打包、版本和验证脚本目录。
-
-建议结构：
+## 开发工具 `scripts/`
 
 ```text
 scripts/
-  dev/
-  build/
-  package/
-  verify/
-  migration/
+  sync-ui-deps.ps1       同步 ui 依赖（npm ci）
+  dev-tauri.ps1          启动 Tauri 开发环境
+  package-windows.ps1    Windows 打包
+  set-version.ps1        版本同步
 ```
 
-可能脚本：
-
-1. 启动 UI 和 backend 开发环境。
-2. 构建 Python sidecar。
-3. 打包 Tauri 应用。
-4. 校验 protocol schema。
-5. 运行 lint、测试和静态检查。
-6. 执行命名迁移和版本同步。
-
-### `tests/`
-
-跨层集成测试和测试夹具目录。
-
-建议结构：
+## 文档 `docs/`
 
 ```text
-tests/
-  fixtures/
-  integration/
-  e2e/
-  remote/
+docs/
+  README.md              文档入口
+  architecture/
+    ARCHITECTURE.md      总体架构（双端统一同步协议）
+    PROJECT_STRUCTURE.md 本文件
+  design/                专项设计文档（按日期编号）
+    0709-REMOTE-CONTROL-DUAL-SYNC.md    远端双端同步（阶段一）
+    0710-REMOTE-CONTROL-PROTOCOL-FIX.md 远端协议修复
+    0710-UNIFIED-SYNC-PROTOCOL.md       统一同步协议设计
+    0710-DUAL-END-UNIFICATION-REFACTOR.md 双端统一大重构方案
+    ...
+  development/           开发工作流
+  guides/                使用指南（PRD、构建发布、UI 开发）
+  refactor/              重构记录
+  research/              技术调研（ACP、backend）
 ```
 
-单元测试应尽量靠近具体实现。根目录 `tests/` 主要放跨模块、跨语言或端到端测试。
+## 目录职责边界
 
-### `assets/`
-
-产品静态资源目录。
-
-建议结构：
-
-```text
-assets/
-  icons/
-  branding/
-  screenshots/
-```
-
-不要把用户仓库、模型输出、会话记录、日志、下载缓存或远程令牌放在这里。
-
-## 运行时数据
-
-运行时数据不应提交到 git。
-
-目标本地运行时目录：
-
-```text
-data/
-  config/
-    app_config.json
-    agent_runtimes.json
-  record/
-  events/
-  runtimes/
-    acp/
-  logs/
-  remote/
-  cache/
-```
-
-兼容期可能仍存在：
-
-```text
-data/
-  config/
-    nanobot_config.json
-```
-
-`record/` 是当前已落地的会话 JSON 目录名，后续如迁移到 `conversations/`，应提供兼容读取和一次性迁移。`nanobot_config.json` 属于 legacy 兼容配置，不能再作为新功能主配置。
-
-## 初始目录创建策略
-
-推荐第一阶段按这个顺序推进：
-
-1. 固化 `AgentEvent`、`SessionCapabilities`、`RuntimeDescriptor` 和审批对象 schema。
-2. 在现有 backend 包名下完善通用 `agents/acp/`。
-3. 完成 Codex ACP 原型。
-4. 补齐 Claude Code、opencode descriptor、preflight 和 smoke demo。
-5. 建立 `remote` API 和只读事件订阅。
-6. 将 UI 增加 runtime 状态和远程观看入口。
-7. 验证链路稳定后，再规划包名和产物名迁移。
-
-## 命名迁移建议
-
-从旧原型迁移到 code-lite 时，建议分批处理：
-
-1. 文档和 UI 文案。
-2. package name、Tauri product name、窗口标题和发布产物名。
-3. Python 包名和 Rust crate 名。
-4. 运行时目录名和旧数据迁移，例如从早期 `~/.repair-agent` 迁移到 `~/.code-lite`。
-5. 旧配置自动迁移和兼容读取。
-
-每批迁移都应单独验证，避免把产品改名和业务功能变更混在一起。
+| 职责 | 归属 | 说明 |
+|------|------|------|
+| AgentEvent 类型 | `packages/protocol` | 双端共享类型定义 |
+| WebSocket 传输 | `packages/transport` | WsTransport 基类 + 两个子类 |
+| 双端同步协议 | `packages/sync` | SyncManager + 事件类型 |
+| 纯 reducer | `packages/chat-core` | reduceAgentEvent（无 React） |
+| 状态层 + React 绑定 | `packages/chat-core` + `ui*/services` | ConversationClient + useConversations |
+| 桌面独有逻辑 | `ui/pages/ChatPage` | draft session、caps、图片、fast mode |
+| 远端独有逻辑 | `ui-remote/App.tsx` | 配对页、host.online/offline |
+| RPC handler | `backend/api/routes/ws.py` | 所有 WS RPC 共用 |
+| 事件总线 | `backend/services/event_bus.py` | 进程内 pub/sub |
+| 远端桥接 | `backend/services/remote_bridge.py` | 主动 dial out + peer 管理 |
+| 同步协议广播 | `backend/services/sync_protocol.py` | sync 事件构造 + 广播 |
+| 会话存储 | `backend/storage/conversations.py` | session.json + messages.json |
+| 中继服务器 | `proxy_server/main.py` | 盲转发 + 房间注册 |
