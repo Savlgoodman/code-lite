@@ -4,6 +4,7 @@ import type { Session } from "@code-lite/protocol";
 import { useConversationState } from "../useConversations";
 import { connectionManager } from "../services/ConnectionManager";
 import { ChatPage } from "../ChatPage";
+import { AgentIcon } from "../components/AgentIcon";
 
 export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSessionId }: {
   connected: boolean;
@@ -83,6 +84,7 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
                     className="session-item"
                     onClick={() => setActiveSessionId(session.id)}
                   >
+                    <AgentIcon agent={session.agent} />
                     <span className="session-title">{session.title || "无标题"}</span>
                     <span className={`status-dot ${session.status === "running" ? "running" : "idle"}`} />
                   </li>

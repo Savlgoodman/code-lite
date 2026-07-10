@@ -161,6 +161,43 @@ html, body, #root {
   font-weight: 500;
 }
 
+/* Agent 图标（会话列表） */
+.session-agent-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1;
+  color: var(--muted);
+  margin-right: 8px;
+}
+
+.session-agent-icon-mask {
+  width: 14px;
+  height: 14px;
+  display: block;
+  background: currentColor;
+  mask: var(--agent-icon-url) center / contain no-repeat;
+  -webkit-mask: var(--agent-icon-url) center / contain no-repeat;
+}
+
+.session-agent-icon-img {
+  width: 14px;
+  height: 14px;
+  display: block;
+  object-fit: contain;
+}
+
+.session-agent-icon.agent-claude_code { color: #d97757; }
+.session-agent-icon.agent-codex { color: var(--text); }
+.session-agent-icon.agent-opencode { color: #211e1e; }
+.session-agent-icon.agent-nanobot { color: #3d6f9f; }
+
 .session-title {
   font-size: 14px;
   color: var(--text);
