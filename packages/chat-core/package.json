@@ -9,6 +9,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@code-lite/protocol": "0.1.4"
+    "@code-lite/protocol": "0.1.4",
+    "@code-lite/sync": "0.1.4",
+    "@code-lite/transport": "0.1.4"
   }
 }
