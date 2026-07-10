@@ -410,6 +410,66 @@ html, body, #root {
   opacity: 0.4;
 }
 
+.config-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.config-chip svg {
+  flex-shrink: 0;
+}
+
+.config-model {
+  color: var(--text);
+}
+
+/* accessMode 配色（与桌面端 access-mode-tone-* 一致） */
+.config-chip.access-mode-tone-codex-full-access { color: #db4f1d; }
+.config-chip.access-mode-tone-claude-bypass-permissions { color: #a6322a; }
+.config-chip.access-mode-tone-claude-accept-edits { color: #6f3fb5; }
+.config-chip.access-mode-tone-claude-plan { color: #1478c8; }
+.config-chip.access-mode-tone-claude-auto { color: #0d766e; }
+.config-chip.access-mode-tone-claude-dont-ask { color: #8a5a16; }
+
+/* 思考深度配色：xhigh 橙 / max 红 / ultra 紫（流光） */
+.config-chip.effort-tone-xhigh { color: #e07b1a; font-weight: 600; }
+.config-chip.effort-tone-max { color: #d63b30; font-weight: 600; }
+
+.config-chip.effort-tone-ultra {
+  position: relative;
+  font-weight: 700;
+  color: #8b3fd6;
+}
+
+.config-chip.effort-tone-ultra::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 0%, transparent 30%,
+    rgba(216, 180, 255, 0.95) 50%,
+    transparent 70%, transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 48% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  pointer-events: none;
+  animation: effort-ultra-shimmer 2.8s ease-in-out infinite;
+}
+
+@keyframes effort-ultra-shimmer {
+  0% { background-position: -60% 0; }
+  60%, 100% { background-position: 200% 0; }
+}
+
 /* 底部输入区 */
 .chat-input-area {
   padding: 8px 12px;

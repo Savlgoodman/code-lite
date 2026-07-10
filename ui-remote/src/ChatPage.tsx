@@ -6,6 +6,7 @@ import { connectionManager } from "./services/ConnectionManager";
 import { useSessionConfig } from "./hooks/useSessionConfig";
 import { MessageBubble } from "./components/MessageBubble";
 import { ConfigSheet } from "./components/ConfigSheet";
+import { ConfigBar } from "./components/ConfigBar";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -278,8 +279,10 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
     || config?.familyId
     || "-";
 
-  const effortLabel = config?.effort || "-";
+  const effort = config?.effort || "";
+  const effortLabel = effort || "-";
 
+  const accessModeId = config?.accessMode || "";
   const accessModeLabel = (() => {
     if (!config) return "-";
     const matched = config.modes.find((m) => m.id === config.accessMode);
@@ -341,13 +344,14 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       {/* 底部输入区（含配置栏） */}
       <div ref={composerRef}>
         {/* 顶部信息栏 (输入框上方边缘) */}
-        <div className="chat-config-bar">
-          <span>{accessModeLabel}</span>
-          <span className="config-bar-sep">·</span>
-          <span>{modelLabel}</span>
-          <span className="config-bar-sep">·</span>
-          <span>{effortLabel}</span>
-        </div>
+        <ConfigBar
+          agent={session.agent}
+          accessModeId={accessModeId}
+          accessModeLabel={accessModeLabel}
+          modelLabel={modelLabel}
+          effort={effort}
+          effortLabel={effortLabel}
+        />
 
       {/* 底部输入区 */}
       <footer className="chat-input-area">
