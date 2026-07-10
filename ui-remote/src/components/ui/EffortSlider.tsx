@@ -89,12 +89,13 @@ export function EffortSlider({ value, options, onChange }: EffortSliderProps) {
       >
         {/* 纯色填充：到滑块中心；最高挡由 CSS 覆盖为整槽 */}
         <div className="effort-fill">
-          {/* 渐变 + 流体光 + 星光，仅最高挡可见 */}
-          <div className="effort-grad" />
-          <div className="effort-flow" />
-          <div className="effort-sparkle" />
+          {/* 渐变星河，仅最高挡从右向左液态填满 */}
+          <div className="effort-galaxy">
+            <div className="effort-grad" />
+            <div className="effort-sparkle" />
+          </div>
         </div>
-        {/* 右端漏光，仅最高挡可见 */}
+        {/* 右端灯带漏光，仅最高挡可见 */}
         <div className="effort-leak" />
         {options.map((opt, i) => {
           const tickRatio = count > 1 ? i / (count - 1) : 0;
