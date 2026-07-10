@@ -547,17 +547,47 @@ html, body, #root {
   background: var(--panel);
   border-radius: 16px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border-left: 4px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.device-card:active {
+  background: var(--hover);
+}
+
+.device-card.active {
+  border-left-color: var(--green);
 }
 
 .device-info {
   flex: 1;
+  min-width: 0;
+}
+
+.device-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .device-info h3 {
   font-size: 16px;
   font-weight: 600;
-  margin: 0 0 4px 0;
+  margin: 0;
   color: var(--text);
+}
+
+.device-active-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--green);
+  background: rgba(18, 132, 90, 0.1);
+  padding: 2px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
 }
 
 .device-url,
@@ -567,13 +597,18 @@ html, body, #root {
   margin: 2px 0;
 }
 
-.device-status {
-  margin-left: 16px;
+.device-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+  flex-shrink: 0;
 }
 
 .status-indicator {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .status-indicator.online {
@@ -582,6 +617,22 @@ html, body, #root {
 
 .status-indicator.offline {
   color: var(--subtle);
+}
+
+.device-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  color: var(--muted);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.device-delete-btn:active {
+  background: var(--hover);
+  color: var(--orange);
 }
 
 .floating-action-button {
@@ -605,6 +656,46 @@ html, body, #root {
 
 .floating-action-button:active {
   transform: scale(0.95);
+}
+
+/* ── 6b. Add Device Sheet ─────────────────── */
+
+.form-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 15px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  border-color: var(--muted);
+}
+
+.form-input::placeholder {
+  color: var(--subtle);
+}
+
+.test-result {
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.test-result.success {
+  color: var(--green);
+  background: rgba(18, 132, 90, 0.08);
+}
+
+.test-result.fail {
+  color: var(--orange);
+  background: rgba(232, 93, 42, 0.08);
 }
 
 /* ── 7. Settings Tab ──────────────────────── */

@@ -27,6 +27,7 @@ export class ConnectionManager {
   private sync: SyncManager | null = null;
   private transport: RelayTransport | null = null;
   private config: ConnectionConfig | null = null;
+  private onHostStatusChange: ((online: boolean) => void) | null = null;
 
   async loadStoredConfig(): Promise<ConnectionConfig | null> {
     // 优先从 Capacitor Preferences 读取 (Android 持久化)
@@ -107,7 +108,7 @@ export class ConnectionManager {
       roomId,
       onHostStatusChange: (online) => {
         console.log("[ConnectionManager] Host status:", online);
-        // TODO: 通知 UI 层更新连接状态
+        this.onHostStatusChange?.(online);
       },
     });
 
@@ -150,9 +151,13 @@ export class ConnectionManager {
   isConnected(): boolean {
     return this.client !== null;
   }
+
+  setHostStatusCallback(cb: (online: boolean) => void): void {
+    this.onHostStatusChange = cb;
+  }
 }
 
-async function computeRoomId(pairKey: string): Promise<string> {
+export async function computeRoomId(pairKey: string): Promise<string> {
   // 简易 SHA256 实现 (实际应使用 crypto.subtle.digest)
   const encoder = new TextEncoder();
   const data = encoder.encode(pairKey);
