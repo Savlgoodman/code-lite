@@ -85,6 +85,11 @@ html, body, #root {
 }
 
 /* Tab 页面容器 */
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
 .tab-page {
   padding: 16px;
   padding-bottom: 80px;
