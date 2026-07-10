@@ -14,10 +14,12 @@ import { Preferences } from "@capacitor/preferences";
 
 const LS_RELAY_URL = "code-lite-relay-url";
 const LS_PAIR_KEY = "code-lite-pair-key";
+const LS_DEVICE_NAME = "code-lite-device-name";
 
 export interface ConnectionConfig {
   relayUrl: string;
   pairKey: string;
+  deviceName?: string;
 }
 
 export class ConnectionManager {
@@ -30,16 +32,25 @@ export class ConnectionManager {
     // 优先从 Capacitor Preferences 读取 (Android 持久化)
     const urlResult = await Preferences.get({ key: LS_RELAY_URL });
     const keyResult = await Preferences.get({ key: LS_PAIR_KEY });
+    const nameResult = await Preferences.get({ key: LS_DEVICE_NAME });
 
     if (urlResult.value && keyResult.value) {
-      return { relayUrl: urlResult.value, pairKey: keyResult.value };
+      return {
+        relayUrl: urlResult.value,
+        pairKey: keyResult.value,
+        deviceName: nameResult.value || undefined,
+      };
     }
 
     // 降级到 localStorage (Web 调试用)
     const lsUrl = localStorage.getItem(LS_RELAY_URL);
     const lsKey = localStorage.getItem(LS_PAIR_KEY);
     if (lsUrl && lsKey) {
-      return { relayUrl: lsUrl, pairKey: lsKey };
+      return {
+        relayUrl: lsUrl,
+        pairKey: lsKey,
+        deviceName: localStorage.getItem(LS_DEVICE_NAME) || undefined,
+      };
     }
 
     return null;
@@ -50,16 +61,22 @@ export class ConnectionManager {
     // 双写: Capacitor Preferences + localStorage
     await Preferences.set({ key: LS_RELAY_URL, value: config.relayUrl });
     await Preferences.set({ key: LS_PAIR_KEY, value: config.pairKey });
+    await Preferences.set({ key: LS_DEVICE_NAME, value: config.deviceName ?? "" });
     localStorage.setItem(LS_RELAY_URL, config.relayUrl);
     localStorage.setItem(LS_PAIR_KEY, config.pairKey);
+    if (config.deviceName) {
+      localStorage.setItem(LS_DEVICE_NAME, config.deviceName);
+    }
   }
 
   async clearConfig(): Promise<void> {
     this.config = null;
     await Preferences.remove({ key: LS_RELAY_URL });
     await Preferences.remove({ key: LS_PAIR_KEY });
+    await Preferences.remove({ key: LS_DEVICE_NAME });
     localStorage.removeItem(LS_RELAY_URL);
     localStorage.removeItem(LS_PAIR_KEY);
+    localStorage.removeItem(LS_DEVICE_NAME);
   }
 
   getConfig(): ConnectionConfig | null {

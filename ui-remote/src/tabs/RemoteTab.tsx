@@ -5,8 +5,9 @@ import { useConversationState } from "../useConversations";
 import { connectionManager } from "../services/ConnectionManager";
 import { ChatPage } from "../ChatPage";
 
-export function RemoteTab({ connected, activeSessionId, setActiveSessionId }: {
+export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSessionId }: {
   connected: boolean;
+  deviceName: string;
   activeSessionId: string | null;
   setActiveSessionId: (id: string | null) => void;
 }) {
@@ -30,9 +31,12 @@ export function RemoteTab({ connected, activeSessionId, setActiveSessionId }: {
     setExpandedProjects((prev) => ({ ...prev, [name]: !prev[name] }));
   };
 
+  const title = deviceName ? `${deviceName} 的远程会话` : "远程会话";
+
   if (!connected) {
     return (
       <div className="tab-page">
+        <h2 className="page-title">{title}</h2>
         <div className="empty-state">
           <div className="empty-icon">◎</div>
           <h2>未连接</h2>
@@ -45,6 +49,7 @@ export function RemoteTab({ connected, activeSessionId, setActiveSessionId }: {
   if (sessions.length === 0) {
     return (
       <div className="tab-page">
+        <h2 className="page-title">{title}</h2>
         <div className="empty-state">
           <div className="empty-icon">☺</div>
           <h2>收件箱为空</h2>
@@ -56,11 +61,13 @@ export function RemoteTab({ connected, activeSessionId, setActiveSessionId }: {
 
   return (
     <div className="tab-page">
+      <h2 className="page-title">{title}</h2>
       <div className="session-list">
         {Object.entries(projects).map(([project, projectSessions]) => {
           const isExpanded = expandedProjects[project] ?? true;
-          const visibleSessions = projectSessions.slice(0, 5);
-          const hasMore = projectSessions.length > 5;
+          const LIMIT = 5;
+          const visibleSessions = isExpanded ? projectSessions : projectSessions.slice(0, LIMIT);
+          const hasMore = projectSessions.length > LIMIT;
 
           return (
             <div key={project} className="project-group">
@@ -79,9 +86,14 @@ export function RemoteTab({ connected, activeSessionId, setActiveSessionId }: {
                     <span className={`status-dot ${session.status === "running" ? "running" : "idle"}`} />
                   </li>
                 ))}
+                {hasMore && !isExpanded && (
+                  <li className="session-item more" onClick={() => toggleProject(project)}>
+                    <span>展开全部 ({projectSessions.length})</span>
+                  </li>
+                )}
                 {hasMore && isExpanded && (
                   <li className="session-item more" onClick={() => toggleProject(project)}>
-                    <span>展开更多 ({projectSessions.length - 5}+)</span>
+                    <span>收起</span>
                   </li>
                 )}
               </ul>
