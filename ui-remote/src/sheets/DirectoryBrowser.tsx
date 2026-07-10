@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUp, Folder, FolderPlus, HardDrive, Loader2, Check, X } from "lucide-react";
 import type { ConversationClient, DirectoryListing } from "@code-lite/chat-core";
+import { Sheet, Button } from "../components/ui";
 
 interface DirectoryBrowserProps {
   client: ConversationClient | null;
@@ -63,16 +64,10 @@ export function DirectoryBrowser({ client, initialPath, onSelect, onClose }: Dir
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-sheet dir-browser" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>选择目录</h2>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
-
-        {/* 当前路径 + 上级 + 新建文件夹 */}
-        <div className="dir-browser-path">
+  const beforeBody = (
+    <>
+      {/* 当前路径 + 上级 + 新建文件夹 */}
+      <div className="dir-browser-path">
           <button
             className="dir-up-btn"
             disabled={!listing?.parent || loading}
@@ -130,46 +125,54 @@ export function DirectoryBrowser({ client, initialPath, onSelect, onClose }: Dir
               <X size={16} />
             </button>
           </div>
-        )}
+      )}
+    </>
+  );
 
-        <div className="modal-body dir-browser-body">
-          {loading ? (
-            <div className="dir-browser-loading"><Loader2 size={18} className="spin" /> 加载中…</div>
-          ) : error ? (
-            <div className="dir-browser-error">{error}</div>
-          ) : (
-            <ul className="dir-list">
-              {/* 盘符（Windows，仅在有的时候显示） */}
-              {listing?.drives.map((d) => (
-                <li key={d.path} className="dir-item" onClick={() => load(d.path)}>
-                  <HardDrive size={16} />
-                  <span>{d.name}</span>
-                </li>
-              ))}
-              {listing?.entries.length === 0 && listing.drives.length === 0 && (
-                <li className="dir-empty">此目录下没有子文件夹</li>
-              )}
-              {listing?.entries.map((entry) => (
-                <li key={entry.path} className="dir-item" onClick={() => load(entry.path)}>
-                  <Folder size={16} />
-                  <span>{entry.name}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose}>取消</button>
-          <button
-            className="btn-primary"
+  return (
+    <Sheet
+      title="选择目录"
+      onClose={onClose}
+      className="dir-browser"
+      bodyClassName="dir-browser-body"
+      beforeBody={beforeBody}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>取消</Button>
+          <Button
+            variant="primary"
             disabled={!listing?.path}
             onClick={() => listing?.path && onSelect(listing.path)}
           >
             <Check size={16} /> 选此目录
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </>
+      }
+    >
+      {loading ? (
+        <div className="dir-browser-loading"><Loader2 size={18} className="spin" /> 加载中…</div>
+      ) : error ? (
+        <div className="dir-browser-error">{error}</div>
+      ) : (
+        <ul className="dir-list">
+          {/* 盘符（Windows，仅在有的时候显示） */}
+          {listing?.drives.map((d) => (
+            <li key={d.path} className="dir-item" onClick={() => load(d.path)}>
+              <HardDrive size={16} />
+              <span>{d.name}</span>
+            </li>
+          ))}
+          {listing?.entries.length === 0 && listing.drives.length === 0 && (
+            <li className="dir-empty">此目录下没有子文件夹</li>
+          )}
+          {listing?.entries.map((entry) => (
+            <li key={entry.path} className="dir-item" onClick={() => load(entry.path)}>
+              <Folder size={16} />
+              <span>{entry.name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Sheet>
   );
 }

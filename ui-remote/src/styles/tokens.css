@@ -1,0 +1,66 @@
+/* ============================================
+ * Design tokens — single source of truth
+ * 颜色 / 圆角 / 阴影 / 动效 / 层级
+ * ============================================ */
+
+:root {
+  /* ── 颜色：中性 ── */
+  --line: #dedbd7;
+  --muted: #6f747b;
+  --subtle: #8b9096;
+  --panel: #fbfbfa;
+  --sidebar: #f3f2f0;
+  --hover: #eceff3;
+  --active: #e7ebf0;
+  --bg: #f6f5f3;
+  --text: #1f2328;
+  --surface: #ffffff;
+
+  /* ── 颜色：强调 ── */
+  --accent: #1f2328;
+  --accent-pressed: #3d4148;
+  --on-accent: #ffffff;
+  --green: #12845a;
+  --green-soft: rgba(18, 132, 90, 0.1);
+  --orange: #e85d2a;
+  --orange-pressed: #c44d1e;
+  --orange-soft: rgba(232, 93, 42, 0.08);
+
+  /* ── 语义色：访问模式 / 思考强度 ── */
+  --tone-codex-full: #db4f1d;
+  --tone-claude-bypass: #a6322a;
+  --tone-claude-accept: #6f3fb5;
+  --tone-claude-plan: #1478c8;
+  --tone-claude-auto: #0d766e;
+  --tone-claude-dontask: #8a5a16;
+  --tone-effort-xhigh: #e07b1a;
+  --tone-effort-max: #d63b30;
+  --tone-effort-ultra: #8b3fd6;
+
+  /* ── 圆角 ── */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ── 阴影 ── */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-pop: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --shadow-fab: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --shadow-toast: 0 4px 20px rgba(0, 0, 0, 0.25);
+
+  /* ── 动效 ── */
+  --dur-fast: 0.15s;
+  --dur-base: 0.25s;
+  --dur-slow: 0.32s;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-page: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ── 层级 ── */
+  --z-fab: 99;
+  --z-tabbar: 100;
+  --z-chat: 150;
+  --z-modal: 200;
+  --z-toast: 300;
+}

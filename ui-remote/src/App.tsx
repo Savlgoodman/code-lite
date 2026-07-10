@@ -6,7 +6,9 @@ import { DevicesTab } from "./tabs/DevicesTab";
 import { SettingsTab } from "./tabs/SettingsTab";
 import { connectionManager } from "./services/ConnectionManager";
 import { deviceStore, type DeviceRecord } from "./services/DeviceStore";
-import { AddDeviceSheet } from "./components/AddDeviceSheet";
+import { AddDeviceSheet } from "./sheets/AddDeviceSheet";
+import { HomePager } from "./components/HomePager";
+import { ChatOverlay } from "./components/ChatOverlay";
 
 type TabId = "remote" | "ai" | "devices" | "settings";
 
@@ -16,6 +18,7 @@ interface TabItem {
   icon: React.ReactNode;
 }
 
+/** Tab 顺序即横向分页顺序（索引 = 面板位置）。 */
 const TABS: TabItem[] = [
   { id: "remote", label: "远程", icon: <Radio size={24} /> },
   { id: "ai", label: "AI", icon: <Sparkles size={24} /> },
@@ -145,18 +148,41 @@ export function App() {
     await refreshDevices();
   }, [refreshDevices]);
 
-  const showTabBar = activeSessionId === null;
+  const chatOpen = activeSessionId !== null;
+  const activeIndex = TABS.findIndex((t) => t.id === activeTab);
+
+  const panes = [
+    <RemoteTab
+      key="remote"
+      connected={connected}
+      deviceName={deviceName}
+      onOpenSession={setActiveSessionId}
+    />,
+    <AiTab key="ai" />,
+    <DevicesTab
+      key="devices"
+      devices={devices}
+      activeDeviceId={activeDeviceId}
+      onSwitch={handleSwitchDevice}
+      onDelete={handleDeleteDevice}
+      onAdd={handleAddDevice}
+      onEdit={handleEditDevice}
+    />,
+    <SettingsTab key="settings" />,
+  ];
 
   return (
     <div className="app-shell">
-      <main className={showTabBar ? "tab-content" : "tab-content full"}>
-        {activeTab === "remote" && <RemoteTab connected={connected} deviceName={deviceName} activeSessionId={activeSessionId} setActiveSessionId={setActiveSessionId} />}
-        {activeTab === "ai" && <AiTab />}
-        {activeTab === "devices" && <DevicesTab devices={devices} activeDeviceId={activeDeviceId} onSwitch={handleSwitchDevice} onDelete={handleDeleteDevice} onAdd={handleAddDevice} onEdit={handleEditDevice} />}
-        {activeTab === "settings" && <SettingsTab />}
-      </main>
+      <HomePager
+        index={activeIndex}
+        onIndexChange={(i) => setActiveTab(TABS[i].id)}
+        panes={panes}
+        behind={chatOpen}
+      />
 
-      {showTabBar && (
+      <ChatOverlay sessionId={activeSessionId} onBack={() => setActiveSessionId(null)} />
+
+      {!chatOpen && (
         <nav className="bottom-tab-bar">
           {TABS.map((tab) => (
             <button

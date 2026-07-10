@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Plus, Trash2, Pencil } from "lucide-react";
 import type { DeviceRecord } from "../services/DeviceStore";
-import { AddDeviceSheet } from "../components/AddDeviceSheet";
+import { AddDeviceSheet } from "../sheets/AddDeviceSheet";
+import { Fab, EmptyState } from "../components/ui";
 
 interface DevicesTabProps {
   devices: DeviceRecord[];
@@ -10,9 +11,11 @@ interface DevicesTabProps {
   onDelete: (id: string) => void;
   onAdd: (name: string, relayUrl: string, pairKey: string) => void;
   onEdit: (id: string, name: string, relayUrl: string, pairKey: string) => void;
+  /** 由 HomePager 注入：仅激活 Tab 渲染 FAB，避免跨页叠加 */
+  active?: boolean;
 }
 
-export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd, onEdit }: DevicesTabProps) {
+export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd, onEdit, active = true }: DevicesTabProps) {
   const [showAddSheet, setShowAddSheet] = useState(false);
   const [editingDevice, setEditingDevice] = useState<DeviceRecord | null>(null);
 
@@ -43,10 +46,7 @@ export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd,
       <h2 className="page-title">我的设备</h2>
 
       {devices.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-icon">⊞</div>
-          <p>暂无设备，点击右下角按钮添加</p>
-        </div>
+        <EmptyState icon="⊞">暂无设备，点击右下角按钮添加</EmptyState>
       ) : (
         <div className="device-list">
           {devices.map((device) => {
@@ -94,9 +94,11 @@ export function DevicesTab({ devices, activeDeviceId, onSwitch, onDelete, onAdd,
         </div>
       )}
 
-      <button className="floating-action-button" onClick={() => setShowAddSheet(true)}>
-        <Plus size={24} />
-      </button>
+      {active && (
+        <Fab onClick={() => setShowAddSheet(true)} aria-label="添加设备">
+          <Plus size={24} />
+        </Fab>
+      )}
 
       {showAddSheet && <AddDeviceSheet onClose={() => setShowAddSheet(false)} onSave={handleSave} />}
       {editingDevice && (

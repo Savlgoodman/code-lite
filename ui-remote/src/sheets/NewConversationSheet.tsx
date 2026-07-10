@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Bot, FolderOpen, ShieldCheck, Zap, ShieldAlert, Shield } from "lucide-react";
 import type { ConversationClient } from "@code-lite/chat-core";
-import { AgentIcon } from "./AgentIcon";
+import { AgentIcon } from "../components/AgentIcon";
 import { DirectoryBrowser } from "./DirectoryBrowser";
+import { Sheet, Button } from "../components/ui";
 
 interface AgentOption {
   id: string;
@@ -83,63 +84,62 @@ export function NewConversationSheet({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2><Bot size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />新建对话</h2>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
-        <div className="modal-body">
-          <div className="field">
-            <label>选择 Agent</label>
-            <div className="agent-grid">
-              {AVAILABLE_AGENTS.map((agent) => {
-                const disabled = agent.status === "planned" || agent.status === "needs_setup";
-                return (
-                  <button
-                    key={agent.id}
-                    type="button"
-                    className={`agent-card${agent.id === selectedId ? " selected" : ""}${disabled ? " disabled" : ""}`}
-                    disabled={disabled}
-                    onClick={() => setSelectedId(agent.id)}
-                  >
-                    <AgentIcon agent={{ id: agent.id, label: agent.label, runtimeId: agent.id }} />
-                    <span className="agent-card-label">{agent.label}</span>
-                    <span className={`agent-card-status ${agent.status}`}>
-                      {statusIcon(agent.status)} {statusLabel(agent.status)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+    <>
+      <Sheet
+        title={<><Bot size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />新建对话</>}
+        onClose={onClose}
+        footer={
+          <>
+            <Button variant="secondary" onClick={onClose}>取消</Button>
+            <Button variant="primary" disabled={!canCreate} onClick={handleCreate}>
+              {creating ? "创建中…" : "开始会话"}
+            </Button>
+          </>
+        }
+      >
+        <div className="field">
+          <label>选择 Agent</label>
+          <div className="agent-grid">
+            {AVAILABLE_AGENTS.map((agent) => {
+              const disabled = agent.status === "planned" || agent.status === "needs_setup";
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  className={`agent-card${agent.id === selectedId ? " selected" : ""}${disabled ? " disabled" : ""}`}
+                  disabled={disabled}
+                  onClick={() => setSelectedId(agent.id)}
+                >
+                  <AgentIcon agent={{ id: agent.id, label: agent.label, runtimeId: agent.id }} />
+                  <span className="agent-card-label">{agent.label}</span>
+                  <span className={`agent-card-status ${agent.status}`}>
+                    {statusIcon(agent.status)} {statusLabel(agent.status)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
+        </div>
 
-          <div className="field">
-            <label>工作区路径</label>
-            <div className="workspace-row">
-              <input
-                className="form-input"
-                value={workspace}
-                onChange={(e) => setWorkspace(e.target.value)}
-                placeholder="留空为普通会话（~/.code-lite/workspace）"
-                spellCheck={false}
-              />
-              <button className="workspace-browse-btn" onClick={() => setShowBrowser(true)}>
-                <FolderOpen size={16} /> 浏览
-              </button>
-            </div>
-            <span className="workspace-hint">可手动输入绝对路径，或点击浏览远端电脑目录。</span>
+        <div className="field">
+          <label>工作区路径</label>
+          <div className="workspace-row">
+            <input
+              className="form-input"
+              value={workspace}
+              onChange={(e) => setWorkspace(e.target.value)}
+              placeholder="留空为普通会话（~/.code-lite/workspace）"
+              spellCheck={false}
+            />
+            <button className="workspace-browse-btn" onClick={() => setShowBrowser(true)}>
+              <FolderOpen size={16} /> 浏览
+            </button>
           </div>
+          <span className="workspace-hint">可手动输入绝对路径，或点击浏览远端电脑目录。</span>
+        </div>
 
-          {error && <div className="test-result fail">{error}</div>}
-        </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose}>取消</button>
-          <button className="btn-primary" disabled={!canCreate} onClick={handleCreate}>
-            {creating ? "创建中…" : "开始会话"}
-          </button>
-        </div>
-      </div>
+        {error && <div className="test-result fail">{error}</div>}
+      </Sheet>
 
       {showBrowser && (
         <DirectoryBrowser
@@ -152,6 +152,6 @@ export function NewConversationSheet({
           onClose={() => setShowBrowser(false)}
         />
       )}
-    </div>
+    </>
   );
 }

@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { Folder, ArrowDownWideNarrow, Plus, FolderPlus } from "lucide-react";
 import type { Session } from "@code-lite/protocol";
-import { useConversationState } from "../useConversations";
+import { useConversationState } from "../hooks/useConversations";
 import { connectionManager } from "../services/ConnectionManager";
-import { ChatPage } from "../ChatPage";
 import { AgentIcon } from "../components/AgentIcon";
-import { NewConversationSheet } from "../components/NewConversationSheet";
+import { NewConversationSheet } from "../sheets/NewConversationSheet";
+import { Fab, EmptyState } from "../components/ui";
 
-export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSessionId }: {
+export function RemoteTab({ connected, deviceName, onOpenSession, active = true }: {
   connected: boolean;
   deviceName: string;
-  activeSessionId: string | null;
-  setActiveSessionId: (id: string | null) => void;
+  onOpenSession: (id: string) => void;
+  /** 由 HomePager 注入：仅激活 Tab 渲染 FAB，避免跨页叠加 */
+  active?: boolean;
 }) {
   const client = connectionManager.getClient();
   const { sessions } = useConversationState(client);
@@ -20,11 +21,6 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
   const [sortByTime, setSortByTime] = useState(false);
   // 新建对话弹窗：null=关闭；否则携带预填工作区路径（""=自由创建）
   const [newConvWorkspace, setNewConvWorkspace] = useState<string | null>(null);
-
-  // 如果正在查看会话，显示 ChatPage
-  if (activeSessionId) {
-    return <ChatPage sessionId={activeSessionId} onBack={() => setActiveSessionId(null)} />;
-  }
 
   // 按 workspace 分组
   const projects = sessions.reduce<Record<string, Session[]>>((acc: Record<string, Session[]>, s: Session) => {
@@ -56,10 +52,7 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
       <div className="tab-page">
         <h2 className="page-title">{title}</h2>
         <div className="page-subtitle offline">未连接</div>
-        <div className="empty-state">
-          <div className="empty-icon">◎</div>
-          <p>请在"设备"页面添加并连接一台设备</p>
-        </div>
+        <EmptyState icon="◎">请在"设备"页面添加并连接一台设备</EmptyState>
       </div>
     );
   }
@@ -71,7 +64,7 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
       onClose={() => setNewConvWorkspace(null)}
       onCreated={(id) => {
         setNewConvWorkspace(null);
-        setActiveSessionId(id);
+        onOpenSession(id);
       }}
     />
   );
@@ -81,18 +74,12 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
       <div className="tab-page">
         <h2 className="page-title">{title}</h2>
         <div className="page-subtitle">已连接</div>
-        <div className="empty-state">
-          <div className="empty-icon">☺</div>
-          <p>收件箱为空，点击右下角新建对话</p>
-        </div>
-        <button
-          className="floating-action-button"
-          onClick={() => setNewConvWorkspace("")}
-          aria-label="新建对话"
-          title="新建对话"
-        >
-          <Plus size={24} />
-        </button>
+        <EmptyState icon="☺">收件箱为空，点击右下角新建对话</EmptyState>
+        {active && (
+          <Fab onClick={() => setNewConvWorkspace("")} aria-label="新建对话" title="新建对话">
+            <Plus size={24} />
+          </Fab>
+        )}
         {newConvSheet}
       </div>
     );
@@ -135,7 +122,7 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
                   <li
                     key={session.id}
                     className="session-item"
-                    onClick={() => setActiveSessionId(session.id)}
+                    onClick={() => onOpenSession(session.id)}
                   >
                     <AgentIcon agent={session.agent} />
                     <span className="session-title">{session.title || "无标题"}</span>
@@ -157,22 +144,26 @@ export function RemoteTab({ connected, deviceName, activeSessionId, setActiveSes
           );
         })}
       </div>
-      <button
-        className={`floating-action-button fab-sort${sortByTime ? " active" : ""}`}
-        onClick={() => setSortByTime((v) => !v)}
-        aria-label={sortByTime ? "按最新活跃排序（已开启）" : "按最新活跃排序"}
-        title={sortByTime ? "按最新活跃排序（已开启）" : "按最新活跃排序"}
-      >
-        <ArrowDownWideNarrow size={24} />
-      </button>
-      <button
-        className="floating-action-button fab-new"
-        onClick={() => setNewConvWorkspace("")}
-        aria-label="新建对话"
-        title="新建对话（自由创建）"
-      >
-        <Plus size={24} />
-      </button>
+      {active && (
+        <>
+          <Fab
+            variant="secondary"
+            active={sortByTime}
+            onClick={() => setSortByTime((v) => !v)}
+            aria-label={sortByTime ? "按最新活跃排序（已开启）" : "按最新活跃排序"}
+            title={sortByTime ? "按最新活跃排序（已开启）" : "按最新活跃排序"}
+          >
+            <ArrowDownWideNarrow size={24} />
+          </Fab>
+          <Fab
+            onClick={() => setNewConvWorkspace("")}
+            aria-label="新建对话"
+            title="新建对话（自由创建）"
+          >
+            <Plus size={24} />
+          </Fab>
+        </>
+      )}
       {newConvSheet}
     </div>
   );

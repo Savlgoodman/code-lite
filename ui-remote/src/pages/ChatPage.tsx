@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ArrowLeft, ArrowDown, Send, Settings, Square } from "lucide-react";
 import type { ChatMessage, Session } from "@code-lite/protocol";
-import { useConversationState } from "./useConversations";
-import { connectionManager } from "./services/ConnectionManager";
-import { useSessionConfig } from "./hooks/useSessionConfig";
-import { MessageBubble } from "./components/MessageBubble";
-import { ConfigSheet } from "./components/ConfigSheet";
-import { ConfigBar } from "./components/ConfigBar";
+import { useConversationState } from "../hooks/useConversations";
+import { connectionManager } from "../services/ConnectionManager";
+import { useSessionConfig } from "../hooks/useSessionConfig";
+import { MessageBubble } from "../components/MessageBubble";
+import { ConfigSheet } from "../sheets/ConfigSheet";
+import { ConfigBar } from "../components/ConfigBar";
+import { EmptyState, Button } from "../components/ui";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -211,10 +212,9 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   if (!session) {
     return (
       <div className="chat-page">
-        <div className="empty-state">
-          <p>会话不存在</p>
-          <button onClick={onBack}>返回</button>
-        </div>
+        <EmptyState title="会话不存在">
+          <Button variant="secondary" onClick={onBack}>返回</Button>
+        </EmptyState>
       </div>
     );
   }
@@ -303,11 +303,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       {/* 消息流 */}
       <div className="chat-messages" ref={scrollContainerRef}>
         {messages.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon"></div>
-            <h2>开始对话</h2>
-            <p>输入你的问题，AI 将为你解答</p>
-          </div>
+          <EmptyState title="开始对话">输入你的问题，AI 将为你解答</EmptyState>
         ) : (
           messages.map((msg, i) => (
             <MessageBubble

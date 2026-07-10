@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { RelayTransport } from "../services/RelayTransport";
 import { computeRoomId } from "../services/ConnectionManager";
 import type { DeviceRecord } from "../services/DeviceStore";
+import { Sheet, Button } from "../components/ui";
 
 export interface AddDeviceSheetProps {
   initial?: DeviceRecord; // 编辑时传入，添加时省略
@@ -63,68 +64,61 @@ export function AddDeviceSheet({ initial, onClose, onSave }: AddDeviceSheetProps
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{title}</h2>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
-        <div className="modal-body">
-          <div className="field">
-            <label>设备名称</label>
-            <input
-              type="text"
-              className="form-input"
-              placeholder="如: 客厅台式机"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label>Relay 地址</label>
-            <input
-              type="url"
-              className="form-input"
-              placeholder="wss://relay.example.com"
-              value={relayUrl}
-              onChange={(e) => setRelayUrl(e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label>Pair Key</label>
-            <input
-              type="text"
-              className="form-input"
-              placeholder="输入 32 位配对密钥"
-              value={pairKey}
-              onChange={(e) => setPairKey(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-          {testResult === "success" && (
-            <div className="test-result success">✓ 连接成功</div>
-          )}
-          {testResult === "fail" && (
-            <div className="test-result fail"> 连接失败: {testError}</div>
-          )}
-        </div>
-        <div className="modal-footer">
-          <button
-            className="btn-secondary"
+    <Sheet
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <Button
+            variant="secondary"
             onClick={handleTest}
             disabled={testing || !relayUrl.trim() || !pairKey.trim()}
           >
             {testing ? "测试中..." : "测试连接"}
-          </button>
-          <button
-            className="btn-primary"
-            onClick={handleSave}
-            disabled={!allFilled}
-          >
+          </Button>
+          <Button variant="primary" onClick={handleSave} disabled={!allFilled}>
             {isEdit ? "保存修改" : "保存"}
-          </button>
-        </div>
+          </Button>
+        </>
+      }
+    >
+      <div className="field">
+        <label>设备名称</label>
+        <input
+          type="text"
+          className="form-input"
+          placeholder="如: 客厅台式机"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
       </div>
-    </div>
+      <div className="field">
+        <label>Relay 地址</label>
+        <input
+          type="url"
+          className="form-input"
+          placeholder="wss://relay.example.com"
+          value={relayUrl}
+          onChange={(e) => setRelayUrl(e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label>Pair Key</label>
+        <input
+          type="text"
+          className="form-input"
+          placeholder="输入 32 位配对密钥"
+          value={pairKey}
+          onChange={(e) => setPairKey(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
+      {testResult === "success" && (
+        <div className="test-result success">✓ 连接成功</div>
+      )}
+      {testResult === "fail" && (
+        <div className="test-result fail"> 连接失败: {testError}</div>
+      )}
+    </Sheet>
   );
 }

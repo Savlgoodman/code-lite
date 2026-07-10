@@ -1,0 +1,15 @@
+/* ============================================
+ * code-lite remote — 样式入口
+ * 黑白风格 + 功能性强调色（green / orange）
+ *
+ * 层级顺序：tokens → base → 组件 → 页面
+ * ============================================ */
+
+@import "./tokens.css";
+@import "./base.css";
+@import "./ui.css";
+@import "./navigation.css";
+@import "./lists.css";
+@import "./chat.css";
+@import "./sheets.css";
+@import "./markdown.css";
