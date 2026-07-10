@@ -4,93 +4,211 @@
 
 ## 目录结构
 
-当前 UI 采用 React + Vite，建议按职责拆分：
+当前 UI 采用 React + Vite + Tauri 2，按职责拆分：
 
 ```text
-ui/src/
-  App.tsx                 # 应用根入口，只组合全局 layout 和 page
-  pages/                  # 页面级状态和业务编排
-    ChatPage.tsx
-  layout/                 # 桌面壳布局组件
-    AppTitlebar.tsx
-    Sidebar.tsx
-  features/               # 业务功能组件
-    chat/
-      ChatComposer.tsx
-      ConversationHeader.tsx
-      MessageList.tsx
-      ToolCallViews.tsx
-      ApprovalCard.tsx
-      messageTools.ts
-  components/             # 可复用基础组件
-    MessageRenderer.tsx
-  lib/                    # 纯函数、格式化、状态工具
-    chatState.ts
-    formatters.ts
-  services/               # 后端/Tauri 通信
-    agentClient.ts
-    conversationStore.ts
-  styles.css              # 全局样式与设计 token
-  types.ts                # 共享前端类型
+ui/
+  package.json            # 前端依赖与脚本（dev/build/tauri）
+  vite.config.ts          # Vite 构建配置
+  index.html              # HTML 入口
+  AGENTS.md               # 本文档
+  src/
+    main.tsx              # React 入口，初始化主题系统
+    App.tsx               # 应用根组件（.app-shell 布局壳）
+    styles.css            # 全局 CSS 变量定义 + 主题变量（含暗黑模式）
+    types.ts              # 共享前端类型
+    lib/                  # 纯函数、格式化、状态工具
+      chatState.ts
+      formatters.ts
+    services/             # 后端/Tauri 通信
+      agentClient.ts      # Agent 流式运行、审批决策
+      conversationStore.ts # 会话列表、消息读写
+      settingsStore.ts    # 后端设置 API
+      themeStore.ts       # 主题与外观状态管理
+      localTransport.ts   # WebSocket 传输层
+    components/           # 跨功能复用基础组件
+      AgentIcon.tsx/.css  # Agent 图标（mask/image 两种模式）
+      MessageRenderer.tsx/.css # Markdown 消息渲染器
+    features/             # 领域业务组件
+      chat/
+        ChatWorkspace.tsx/.css    # 聊天工作区容器
+        ChatComposer.tsx/.css     # 输入框 + 模型/模式选择器
+        MessageList.tsx/.css      # 消息列表渲染
+        ConversationHeader.tsx/.css # 对话标题栏
+        ToolCallViews.tsx/.css    # 工具调用展示（diff/编辑/命令）
+        ApprovalCard.tsx/.css     # 审批卡片
+        AgentSelectionPanel.tsx/.css # 新建会话 Agent 选择
+        ContextRing.tsx/.css      # 上下文环（运行态指示）
+        ImagePreview.tsx/.css     # 图片预览
+        InputRequestCard.tsx/.css # 输入请求卡片
+        PlanProgressPanel.tsx/.css # 计划进度面板
+        TokenUsageModal.tsx/.css  # Token 用量弹窗
+    layout/               # 稳定布局组件
+      AppTitlebar.tsx/.css # 自定义标题栏（窗口控制）
+      Sidebar.tsx/.css    # 侧边栏（会话列表 + 导航）
+      sidebar/
+        SidebarGroupHeader.tsx/.css  # 会话分组头部
+        SidebarSessionItem.tsx/.css # 会话条目
+    pages/                # 页面级状态与业务编排
+      ChatPage.tsx        # 聊天主页面（会话管理、视图调度）
+      OverviewPage.tsx/.css # 总览页面（用量/会话概览）
+      SettingsPage.tsx    # 设置页面入口（re-export）
+      settings/           # 设置子页面
+        types.ts          # SettingsSection 类型定义
+        SettingsPage.tsx  # 设置页面容器（section 切换逻辑）
+        SettingsLayout.tsx # 设置页面布局（侧边栏导航 + 内容区）
+        SettingsPage.css  # 设置页面共享样式（最大，~1566 行）
+        AppearanceSettings.tsx     # 外观设置（主题/字体/配色）
+        AgentRuntimeSettings.tsx   # Agent Runtime 配置
+        AcpConnectionSettings.tsx  # ACP 连接管理
+        ModelProvidersSettings.tsx # 模型提供商配置
+        LogsSettings.tsx           # 日志查看器
+        ArchivedSessionsSettings.tsx # 归档会话管理
+        RemoteControlSettings.tsx/.css # 远程控制
+        AboutSettings.tsx          # 关于页面
+        components/
+          SettingsSelect.tsx       # 自定义下拉选择器
 ```
 
 拆分原则：
 
 1. `App.tsx` 不承载业务状态，只组合全局 layout 和 page。
-2. `pages/` 可以管理页面级状态、effect 和服务调用。
-3. `layout/` 只放稳定布局，例如标题栏、侧边栏。
-4. `features/` 放领域组件，例如聊天、审批、工具调用。
+2. `pages/` 管理页面级状态、effect 和服务调用。
+3. `layout/` 只放稳定布局（标题栏、侧边栏）。
+4. `features/` 放领域组件（聊天、审批、工具调用）。
 5. `components/` 放跨功能复用组件，避免混入页面业务。
 6. `lib/` 中只放无副作用工具函数。
 7. `services/` 只处理外部通信，不直接操作 React state。
 
-## 视觉风格
-
-code-lite 是桌面端多 Agent 工作台，不是营销站点。UI 应保持安静、克制、清晰，适合长时间阅读 agent 输出、审阅工具调用、查看文件变更和同步观看远程任务。
-
-风格要求：
-
-1. 优先使用信息密度适中的工作台布局，不做大 hero、宣传卡片或装饰性大图。
-2. 页面区域保持平铺和分栏，避免卡片套卡片。
-3. 卡片仅用于消息、工具调用、审批、列表项等明确边界对象。
-4. 圆角控制在 8px 左右；输入框这类核心控件可保持现有 20px 胶囊风格。
-5. 图标按钮优先使用 `lucide-react`，不要手写 SVG 图标。
-6. 不使用 emoji。
-7. 不使用渐变球、光斑、装饰性背景图。
-8. 不使用大量紫色、深蓝、棕橙或单一色系铺满界面。
-
 ## 色彩规范
 
-全局颜色优先维护在 `styles.css` 的 `:root` 变量中：
+所有颜色使用 **语义化 CSS 变量**，定义在 `styles.css` 的 `:root` 中。配色基于 Happy Hues Palette 11。
+
+### 变量定义（`styles.css`）
 
 ```css
 :root {
-  --line: #dedbd7;
-  --muted: #6f747b;
-  --subtle: #8b9096;
-  --panel: #fbfbfa;
-  --sidebar: #f3f2f0;
-  --hover: #eceff3;
-  --active: #e7ebf0;
-  --blue: #1677ff;
-  --green: #12845a;
-  --orange: #e85d2a;
-  --warning: #9f5b00;
+  /* 背景 */
+  --bg-primary: #f9f4ef;        /* 页面主背景 */
+  --bg-secondary: #eaddcf;      /* 卡片/面板背景 */
+  --bg-tertiary: #f3f2f0;       /* 侧边栏背景 */
+  --bg-elevated: #fbfbfa;       /* 输入框/浮层/模态框 */
+  --bg-elevated-alpha: rgba(251, 251, 250, 0.94); /* 半透明抬高背景（标题栏） */
+
+  /* 文本 */
+  --text-primary: #020826;      /* 标题、主文本 */
+  --text-secondary: #716040;    /* 正文 */
+  --text-tertiary: #8b9096;     /* 辅助说明 */
+  --text-muted: #6f747b;        /* 占位符、弱化文本 */
+  --text-inverse: #fffffe;      /* 深色背景上的文字 */
+
+  /* 边框 */
+  --border-primary: #dedbd7;
+  --border-secondary: #e4e0dc;
+  --border-tertiary: #eeebe7;
+
+  /* 交互 */
+  --accent-primary: #8c7851;    /* 按钮、链接 */
+  --accent-secondary: #eaddcf;
+  --accent-danger: #f25042;     /* 删除、危险操作 */
+
+  /* 状态 */
+  --color-success: #12845a;
+  --color-warning: #9f5b00;
+  --color-info: #1677ff;
+  --color-error: #f25042;
+
+  /* 交互遮罩 */
+  --hover-overlay: rgba(2, 8, 38, 0.06);
+  --active-overlay: rgba(2, 8, 38, 0.08);
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(32, 36, 43, 0.05);
+  --shadow-md: 0 14px 36px rgba(32, 36, 43, 0.14);
+  --shadow-lg: 0 18px 50px rgba(30, 35, 42, 0.08);
+
+  /* 字体 */
+  --font-family-base: Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  --font-family-mono: Consolas, "Cascadia Mono", "SFMono-Regular", ui-monospace, monospace;
+  --font-size-base: 14px;
+  --font-size-sm: 12px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  /* 过渡 */
+  --transition-fast: 0.1s ease;
+  --transition-base: 0.15s ease;
+  --transition-slow: 0.22s ease;
 }
 ```
 
-使用原则：
+### 暗黑模式（`[data-theme="dark"]`）
 
-1. 背景以 `--panel`、`--sidebar` 和白色为主。
-2. 边框以 `--line` 或浅灰色为主。
-3. 主文本使用接近 `#20242b` 的深灰，不使用纯黑大面积铺开。
-4. 次级文本使用 `--muted` 或 `--subtle`。
-5. 状态色只用于状态表达：
-   - `--blue`：运行中或主动状态。
-   - `--green`：完成或成功。
-   - `--orange`：审批、中风险、需要注意。
-   - 红色只用于错误和失败。
+`styles.css` 中通过 `[data-theme="dark"]` 选择器覆盖上述变量，自动切换浅色/深色配色。切换由 `themeStore.ts` 的 `setThemeMode()` 控制。
+
+### 旧变量兼容（禁止新增使用，仅保留兼容）
+
+```
+--panel    → var(--bg-elevated)
+--sidebar  → var(--bg-tertiary)
+--line     → var(--border-primary)
+--muted    → var(--text-muted)
+--subtle   → var(--text-tertiary)
+--blue     → var(--color-info)
+--green    → var(--color-success)
+--orange   → var(--accent-danger)
+```
+
+### 色彩使用原则
+
+1. **所有颜色必须使用 `var(--xxx)` 引用**，禁止硬编码 hex 值。
+2. 背景以 `--bg-primary`（页面）、`--bg-elevated`（卡片/输入框）为主。
+3. 边框以 `--border-primary` / `--border-secondary` 为主。
+4. 主文本使用 `--text-primary`，次级文本使用 `--text-muted` / `--text-tertiary`。
+5. 状态色只用于状态表达（success/green、warning/orange、error/red、info/blue）。
 6. 新增颜色前先确认是否能复用现有 token。
+7. **允许保留的情况**：`rgba()` 透明度遮罩、语义状态标签色（如 `#edf8f2` 成功标签）、access-mode 功能色调。
+
+---
+
+## 主题与外观切换
+
+### 机制
+
+通过 `<html data-theme="light|dark">` 属性切换。`styles.css` 在 `:root`（浅色）和 `[data-theme="dark"]`（深色）中分别定义变量。
+
+### 状态管理（`services/themeStore.ts`）
+
+三种模式：`"light"` / `"dark"` / `"system"`（跟随操作系统 `prefers-color-scheme`）。偏好持久化到 `localStorage`（key: `code-lite-appearance`）。
+
+### Hooks
+
+```typescript
+import { useTheme, useThemeMode, useResolvedTheme, useAppearance } from "./services/themeStore";
+
+const { mode, resolved } = useTheme();    // { mode: "system", resolved: "dark" }
+const [mode, setMode] = useThemeMode();    // 双向绑定
+const resolved = useResolvedTheme();       // "light" | "dark"
+const appearance = useAppearance();        // 完整外观状态（主题+字体+字号）
+```
+
+### 字体切换
+
+通过 `--font-family-base` 和 `--font-size-base` 变量动态控制。预设字体族定义在 `themeStore.ts` 的 `FONT_PRESETS` 常量中，支持自定义字体名称输入。
 
 ## 样式写法
 
@@ -102,6 +220,55 @@ code-lite 是桌面端多 Agent 工作台，不是营销站点。UI 应保持安
 6. 表格、代码块、工具结果等长内容必须可滚动或换行。
 7. 聊天主内容宽度优先沿用 `width: min(760px, 100%)`。
 8. 底部 composer 和审批卡片应保持同宽、贴齐、层级明确。
+
+## 设置页面规范
+
+每个设置 section 必须包裹在 `<section className="settings-content-column">` 中，使用标准卡片和表单类名。
+
+### 页面结构
+
+```tsx
+<section className="settings-content-column">
+  <div className="settings-page-heading">
+    <span className="eyebrow">分类标签</span>
+    <h1>页面标题</h1>
+  </div>
+  <div className="settings-card">
+    <h3 style={{ margin: "0 0 4px", color: "var(--text-primary)", fontSize: "15px", fontWeight: 600 }}>
+      区块标题
+    </h3>
+    <p style={{ margin: "0 0 16px", color: "var(--text-muted)", fontSize: "13px" }}>
+      区块描述
+    </p>
+    {/* 表单控件 */}
+  </div>
+</section>
+```
+
+### 常用 CSS 类
+
+| 类名 | 用途 |
+|------|------|
+| `settings-content-column` | 内容列容器（限宽居中，max 1008px） |
+| `settings-page-heading` | 页头（eyebrow + 标题） |
+| `settings-card` | 白色卡片容器（border + bg + padding） |
+| `settings-field` | 表单字段（label + input 垂直排列） |
+| `settings-primary-button` | 主操作按钮 |
+| `settings-secondary-button` | 次要操作按钮 |
+| `settings-danger-button` | 危险操作按钮 |
+| `settings-select` / `SettingsSelect` | 自定义下拉选择器 |
+
+### 新增设置页面步骤
+
+1. 在 `settings/types.ts` 的 `SettingsSection` 类型中添加 ID
+2. 在 `settings/SettingsLayout.tsx` 的 `settingsMenu` 数组中添加菜单项（图标 + 标签）
+3. 在 `settings/SettingsPage.tsx` 中添加条件渲染（导入组件 + 三元表达式）
+4. 组件内部使用 `settings-card` + `settings-field` 等标准类名
+5. 如果需要独立的 CSS 文件，所有颜色必须用 `var(--xxx)`
+
+### 设置页面菜单顺序
+
+当前顺序：外观 → Agent Runtime → ACP 连接管理 → 模型提供商配置 → 日志 → 归档会话 → 远程控制 → 关于
 
 ## 组件交互规范
 

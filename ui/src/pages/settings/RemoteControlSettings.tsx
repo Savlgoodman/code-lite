@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Monitor, RefreshCw, Wifi, WifiOff, Shield, ShieldCheck, Eye, User, X } from "lucide-react";
 import { getLocalTransport } from "../../services/agentClient";
 import "./RemoteControlSettings.css";
 
@@ -45,7 +46,6 @@ export function RemoteControlSettings() {
     })();
   }, []);
 
-  // 首连确认/设备上下线事件走全局频道 presence，收到则刷新设备列表。
   useEffect(() => {
     const transport = getLocalTransport();
     const unsub = transport.onEvent((event) => {
@@ -114,123 +114,270 @@ export function RemoteControlSettings() {
     ? `${relayUrl.replace("ws://", "code-lite://pair?relay=").replace("wss://", "code-lites://pair?relay=")}&key=${config.pairKey}`
     : "";
 
-  if (loading) return <div style={{ padding: 20, color: "var(--muted)" }}>加载中...</div>;
+  if (loading) return <div style={{ padding: 20, color: "var(--text-muted)" }}>加载中...</div>;
+
+  const getRoleIcon = (role: string) => {
+    if (role === "pending") return <Shield size={14} />;
+    if (role === "operator") return <User size={14} />;
+    return <Eye size={14} />;
+  };
+
+  const getRoleLabel = (role: string) => {
+    if (role === "pending") return "待确认";
+    if (role === "operator") return "可操作";
+    return "只读";
+  };
+
+  const getRoleClass = (role: string) => {
+    if (role === "pending") return "rc-peer-role-pending";
+    if (role === "operator") return "rc-peer-role-operator";
+    return "";
+  };
 
   return (
-    <div className="remote-control-settings">
-      <h2>远程控制</h2>
+    <section className="settings-content-column">
+      <div className="settings-page-heading">
+        <span className="eyebrow">连接设置</span>
+        <h1>远程控制</h1>
+      </div>
 
-      <div className="rc-section">
-        <label className="rc-toggle">
-          <input
-            type="checkbox"
-            checked={config?.enabled || false}
-            onChange={(e) => handleToggle(e.target.checked)}
-          />
-          <span>启用远程控制</span>
-        </label>
+      {/* ─── 启用开关 ─── */}
+      <div className="settings-card">
+        <div className="settings-toggle-row">
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={config?.enabled || false}
+              onChange={(e) => handleToggle(e.target.checked)}
+            />
+            <span>启用远程控制</span>
+          </label>
+        </div>
       </div>
 
       {config?.enabled && (
         <>
-          <div className="rc-section">
-            <label className="rc-label">中继服务器地址</label>
-            <input
-              className="rc-input"
-              type="text"
-              value={relayUrl}
-              onChange={(e) => setRelayUrl(e.target.value)}
-              placeholder="ws://localhost:18766/ws"
-            />
-          </div>
+          {/* ─── 中继配置 ─── */}
+          <div className="settings-card">
+            <h3 style={{ margin: "0 0 4px", color: "var(--text-primary)", fontSize: "15px", fontWeight: 600 }}>
+              中继服务器
+            </h3>
+            <p style={{ margin: "0 0 16px", color: "var(--text-muted)", fontSize: "13px" }}>
+              配置 WebSocket 中继地址，用于桌面端与移动端之间的通信
+            </p>
 
-          <div className="rc-section">
-            <label className="rc-label">Pair Key</label>
-            <div className="rc-pair-key-row">
+            <div className="settings-field">
+              <span>中继地址</span>
               <input
-                className="rc-input rc-pair-key"
                 type="text"
-                value={config.pairKey}
-                readOnly
-                placeholder="点击下方按钮生成"
+                value={relayUrl}
+                onChange={(e) => setRelayUrl(e.target.value)}
+                placeholder="ws://localhost:18766/ws"
               />
-              <button className="rc-btn" onClick={handleGenerateKey} disabled={saving}>
-                {config.pairKey ? "重新生成" : "生成配对码"}
+            </div>
+
+            <div className="settings-field" style={{ marginTop: "12px" }}>
+              <span>Pair Key</span>
+              <div className="settings-form-grid" style={{ gridTemplateColumns: "1fr auto" }}>
+                <input
+                  type="text"
+                  value={config.pairKey}
+                  readOnly
+                  placeholder="点击下方按钮生成配对码"
+                  style={{ background: "var(--bg-tertiary)", color: "var(--text-muted)" }}
+                />
+                <button
+                  className="settings-secondary-button"
+                  onClick={handleGenerateKey}
+                  disabled={saving}
+                  type="button"
+                >
+                  <RefreshCw size={14} />
+                  {config.pairKey ? "重新生成" : "生成配对码"}
+                </button>
+              </div>
+            </div>
+
+            {config.pairKey && (
+              <div className="settings-field" style={{ marginTop: "12px" }}>
+                <span>Room ID</span>
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    background: "var(--bg-tertiary)",
+                    borderRadius: "var(--radius-md)",
+                    color: "var(--text-muted)",
+                    fontSize: "13px",
+                    fontFamily: "var(--font-family-mono)",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {config.roomId}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end" }}>
+              <button
+                className="settings-primary-button"
+                onClick={handleSave}
+                disabled={saving}
+                type="button"
+              >
+                {saving ? "保存中..." : "保存设置"}
               </button>
             </div>
           </div>
 
-          {config.pairKey && (
-            <div className="rc-section">
-              <label className="rc-label">Room ID</label>
-              <div className="rc-room-id">{config.roomId}</div>
-            </div>
-          )}
-
+          {/* ─── 配对 ── */}
           {pairUrl && (
-            <div className="rc-section">
-              <label className="rc-label">手机扫码配对</label>
-              <div className="rc-qr-placeholder">
-                {/* 这里可以集成 QR 码库 */}
-                <div className="rc-qr-text">{pairUrl}</div>
-              </div>
-              <p className="rc-hint">
-                在手机浏览器中打开 ui-remote，输入上面的中继地址和 Pair Key 进行配对
+            <div className="settings-card">
+              <h3 style={{ margin: "0 0 4px", color: "var(--text-primary)", fontSize: "15px", fontWeight: 600 }}>
+                手机配对
+              </h3>
+              <p style={{ margin: "0 0 16px", color: "var(--text-muted)", fontSize: "13px" }}>
+                在手机浏览器中打开 ui-remote，输入中继地址和 Pair Key 进行配对
               </p>
+
+              <div
+                style={{
+                  padding: "16px",
+                  background: "var(--bg-tertiary)",
+                  borderRadius: "var(--radius-md)",
+                  textAlign: "center",
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: "var(--font-family-mono)",
+                    fontSize: "11px",
+                    wordBreak: "break-all",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {pairUrl}
+                </div>
+              </div>
             </div>
           )}
 
-          <div className="rc-section">
-            <label className="rc-toggle">
-              <input
-                type="checkbox"
-                checked={config?.defaultReadonly || false}
-                onChange={(e) => handleDefaultReadonly(e.target.checked)}
-              />
-              <span>新接入设备默认只读</span>
-            </label>
-            <p className="rc-hint">
+          {/* ─── 默认权限 ─── */}
+          <div className="settings-card">
+            <div className="settings-toggle-row">
+              <label className="settings-check">
+                <input
+                  type="checkbox"
+                  checked={config?.defaultReadonly || false}
+                  onChange={(e) => handleDefaultReadonly(e.target.checked)}
+                />
+                <span>新接入设备默认只读</span>
+              </label>
+            </div>
+            <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: "12px" }}>
               开启后，新设备接入需在下方手动授予"可操作"权限；关闭则确认后默认可操作。
             </p>
           </div>
 
-          <div className="rc-section">
-            <label className="rc-label">已接入设备</label>
+          {/* ─── 已接入设备 ─── */}
+          <div className="settings-card">
+            <div className="settings-page-heading" style={{ marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <h3 style={{ margin: 0, color: "var(--text-primary)", fontSize: "15px", fontWeight: 600 }}>
+                  已接入设备
+                </h3>
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-muted)",
+                    background: "var(--bg-tertiary)",
+                    padding: "2px 8px",
+                    borderRadius: "var(--radius-full)",
+                  }}
+                >
+                  {peers.length} 台
+                </span>
+              </div>
+              <button
+                className="settings-icon-button"
+                onClick={() => void refreshPeers()}
+                type="button"
+                title="刷新设备列表"
+              >
+                <RefreshCw size={16} />
+              </button>
+            </div>
+
             {peers.length === 0 ? (
-              <p className="rc-hint">暂无设备接入</p>
+              <div className="settings-empty">暂无设备接入</div>
             ) : (
               <div className="rc-peer-list">
                 {peers.map((peer) => (
                   <div key={peer.peerId} className="rc-peer-item">
                     <div className="rc-peer-info">
-                      <span className="rc-peer-id">{peer.peerId}</span>
-                      <span className={`rc-peer-role rc-peer-role-${peer.role}`}>
-                        {peer.role === "pending" ? "待确认" : peer.role === "operator" ? "可操作" : "只读"}
-                      </span>
+                      <div className="rc-peer-icon">
+                        {getRoleIcon(peer.role)}
+                      </div>
+                      <div className="rc-peer-details">
+                        <span className="rc-peer-id">{peer.peerId}</span>
+                        <span className={`rc-peer-role ${getRoleClass(peer.role)}`}>
+                          {getRoleIcon(peer.role)}
+                          {getRoleLabel(peer.role)}
+                        </span>
+                      </div>
                     </div>
                     <div className="rc-peer-actions">
                       {peer.role === "pending" && (
                         <>
-                          <button className="rc-btn rc-btn-sm" onClick={() => handleAuthorize(peer.peerId, "operator")}>
+                          <button
+                            className="settings-secondary-button"
+                            onClick={() => handleAuthorize(peer.peerId, "operator")}
+                            type="button"
+                            style={{ fontSize: "12px", minHeight: "28px" }}
+                          >
+                            <ShieldCheck size={13} />
                             允许操作
                           </button>
-                          <button className="rc-btn rc-btn-sm" onClick={() => handleAuthorize(peer.peerId, "viewer")}>
+                          <button
+                            className="settings-secondary-button"
+                            onClick={() => handleAuthorize(peer.peerId, "viewer")}
+                            type="button"
+                            style={{ fontSize: "12px", minHeight: "28px" }}
+                          >
+                            <Eye size={13} />
                             仅只读
                           </button>
                         </>
                       )}
                       {peer.role === "viewer" && (
-                        <button className="rc-btn rc-btn-sm" onClick={() => handleAuthorize(peer.peerId, "operator")}>
+                        <button
+                          className="settings-secondary-button"
+                          onClick={() => handleAuthorize(peer.peerId, "operator")}
+                          type="button"
+                          style={{ fontSize: "12px", minHeight: "28px" }}
+                        >
+                          <User size={13} />
                           升为可操作
                         </button>
                       )}
                       {peer.role === "operator" && (
-                        <button className="rc-btn rc-btn-sm" onClick={() => handleAuthorize(peer.peerId, "viewer")}>
+                        <button
+                          className="settings-secondary-button"
+                          onClick={() => handleAuthorize(peer.peerId, "viewer")}
+                          type="button"
+                          style={{ fontSize: "12px", minHeight: "28px" }}
+                        >
+                          <Eye size={13} />
                           降为只读
                         </button>
                       )}
-                      <button className="rc-btn rc-btn-sm rc-btn-danger" onClick={() => handleKick(peer.peerId)}>
-                        踢出
+                      <button
+                        className="settings-icon-button"
+                        onClick={() => handleKick(peer.peerId)}
+                        type="button"
+                        title="踢出设备"
+                        style={{ color: "var(--accent-danger)" }}
+                      >
+                        <X size={16} />
                       </button>
                     </div>
                   </div>
@@ -238,14 +385,8 @@ export function RemoteControlSettings() {
               </div>
             )}
           </div>
-
-          <div className="rc-section">
-            <button className="rc-btn rc-btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? "保存中..." : "保存设置"}
-            </button>
-          </div>
         </>
       )}
-    </div>
+    </section>
   );
 }
