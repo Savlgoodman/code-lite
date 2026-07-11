@@ -1,11 +1,16 @@
-import { ChevronDown, LayoutList, MoreHorizontal, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { LayoutList, MoreHorizontal, SlidersHorizontal } from "lucide-react";
+
+import { AgentIcon } from "../../components/AgentIcon";
+import type { AgentSummary } from "../../types";
+import "./ConversationHeader.css";
 
 interface ConversationHeaderProps {
+  agent?: AgentSummary | null;
   isRunning: boolean;
   title: string;
 }
 
-export function ConversationHeader({ isRunning, title }: ConversationHeaderProps) {
+export function ConversationHeader({ agent, isRunning, title }: ConversationHeaderProps) {
   return (
     <section className="conversation-header">
       <div className="conversation-title">
@@ -15,10 +20,9 @@ export function ConversationHeader({ isRunning, title }: ConversationHeaderProps
         </button>
       </div>
       <div className="header-actions">
-        <button className="outline-action">
-          <ShieldCheck size={15} />
-          {isRunning ? "Agent 运行中" : "完全访问"}
-          <ChevronDown size={14} />
+        <button className="outline-action header-agent-action">
+          <AgentIcon agent={agent} className="header-agent-icon" label={agent?.label ?? "Agent"} size="sm" />
+          <span>{isRunning ? `${agent?.label ?? "Agent"} 运行中` : agent?.label ?? "Agent"}</span>
         </button>
         <button className="icon-button" aria-label="布局">
           <LayoutList size={16} />

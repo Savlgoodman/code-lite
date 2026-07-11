@@ -1,58 +1,95 @@
-import { ensureBackend } from "./agentClient";
-import type { ChatMessage, Session } from "../types";
-
-interface ListConversationsResponse {
-  sessions: Session[];
-}
+import { getLocalTransport } from "./agentClient";
+import type { ChatMessage, FileDiffArtifact, Session } from "../types";
 
 interface LoadConversationResponse {
   session: Session;
   messages: ChatMessage[];
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const baseUrl = await ensureBackend();
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Backend returned ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
-}
-
+/** 列出会话（0709 阶段二：走 WS RPC，观察者也能收到后端活动态）。 */
 export async function listConversations(): Promise<Session[]> {
-  const response = await requestJson<ListConversationsResponse>("/api/conversations");
-  return response.sessions;
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<{ sessions: Session[] }>("conversation.list", {});
+  return result.sessions;
 }
 
+/** 读取单个会话（0709 阶段二：走 WS RPC，优先返回活动态快照）。 */
 export async function loadConversation(sessionId: string): Promise<{
   messages: ChatMessage[];
   session: Session;
 }> {
-  const response = await requestJson<LoadConversationResponse>(`/api/conversations/${sessionId}`);
-  return response;
-}
-
-export async function deleteConversation(sessionId: string): Promise<void> {
-  await requestJson<{ deleted: boolean }>(`/api/conversations/${sessionId}`, {
-    method: "DELETE"
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<LoadConversationResponse>("conversation.get", {
+    conversationId: sessionId,
   });
+  return { session: result.session, messages: result.messages };
 }
 
+/** 删除会话（0710 收敛：走 WS RPC，后端广播 conversation.deleted 到全局频道）。 */
+export async function deleteConversation(sessionId: string): Promise<void> {
+  const transport = getLocalTransport();
+  await transport.connect();
+  await transport.request<{ ok: boolean }>("conversation.delete", { conversationId: sessionId });
+}
+
+/** 归档/取消归档会话（0710 收敛：走 WS RPC，后端广播到全局频道）。 */
 export async function updateConversationArchiveState(
   sessionId: string,
   archived: boolean,
 ): Promise<Session> {
-  const response = await requestJson<{ session: Session }>(`/api/conversations/${sessionId}/archive`, {
-    body: JSON.stringify({ archived }),
-    method: "PATCH"
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<{ session: Session }>("conversation.archive", {
+    conversationId: sessionId,
+    archived,
   });
-  return response.session;
+  return result.session;
+}
+
+/** 保存会话配置（0710 收敛：走 WS RPC，后端广播 config.batch sync 事件到双端）。 */
+export async function saveConversationConfig(
+  sessionId: string,
+  config: Record<string, unknown>,
+): Promise<Session> {
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<{ session: Session }>("conversation.config.update", {
+    conversationId: sessionId,
+    config,
+  });
+  return result.session;
+}
+
+/** 拉取 diff 全文（0710 收敛：走 WS RPC，按需懒加载）。 */
+export async function loadConversationDiff(sessionId: string, diffId: string): Promise<FileDiffArtifact> {
+  const transport = getLocalTransport();
+  await transport.connect();
+  const result = await transport.request<{ diff: FileDiffArtifact }>("diff.get", {
+    conversationId: sessionId,
+    diffId,
+  });
+  return result.diff;
+}
+
+/** fs.readFile 返回：会话工作区内单个文件的内容与元信息。 */
+export interface WorkspaceFileResult {
+  path: string;
+  kind: "text" | "image";
+  mimeType: string;
+  encoding: "utf-8" | "base64";
+  content: string;
+  truncated: boolean;
+  sizeBytes: number;
+}
+
+/** 读取会话工作区内的单个文件（聊天正文文件引用查看）。 */
+export async function loadWorkspaceFile(sessionId: string, path: string): Promise<WorkspaceFileResult> {
+  const transport = getLocalTransport();
+  await transport.connect();
+  return transport.request<WorkspaceFileResult>("fs.readFile", {
+    conversationId: sessionId,
+    path,
+  });
 }

@@ -1,0 +1,160 @@
+/* ============================================
+ * Design tokens — single source of truth
+ *
+ * 颜色令牌按 data-theme（mono / warm）× data-mode（light / dark）
+ * 四种组合定义；其余令牌（圆角/阴影/动效/层级/语义色）与主题无关，
+ * 统一放在 :root。
+ * ============================================ */
+
+:root {
+  /* ── 语义色：访问模式 / 思考强度（跨主题恒定） ── */
+  --tone-codex-full: #db4f1d;
+  --tone-claude-bypass: #a6322a;
+  --tone-claude-accept: #6f3fb5;
+  --tone-claude-plan: #1478c8;
+  --tone-claude-auto: #0d766e;
+  --tone-claude-dontask: #8a5a16;
+  --tone-effort-xhigh: #e07b1a;
+  --tone-effort-max: #d63b30;
+  --tone-effort-ultra: #8b3fd6;
+
+  /* ── 圆角 ── */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ── 阴影 ── */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-pop: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --shadow-fab: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --shadow-toast: 0 4px 20px rgba(0, 0, 0, 0.25);
+
+  /* ── 动效 ── */
+  --dur-fast: 0.15s;
+  --dur-base: 0.25s;
+  --dur-slow: 0.32s;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-page: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ── 层级 ── */
+  --z-fab: 99;
+  --z-tabbar: 100;
+  --z-chat: 150;
+  --z-modal: 200;
+  --z-toast: 300;
+
+  color-scheme: light;
+}
+
+[data-mode="dark"] { color-scheme: dark; }
+
+/* ── 主题 mono（黑白，默认）· 浅色 ── */
+:root,
+[data-theme="mono"] {
+  --line: #dedbd7;
+  --muted: #6f747b;
+  --subtle: #8b9096;
+  --panel: #fbfbfa;
+  --sidebar: #f3f2f0;
+  --hover: #eceff3;
+  --active: #e7ebf0;
+  --bg: #f6f5f3;
+  --text: #1f2328;
+  --surface: #ffffff;
+
+  --accent: #1f2328;
+  --accent-pressed: #3d4148;
+  --on-accent: #ffffff;
+  --green: #12845a;
+  --green-soft: rgba(18, 132, 90, 0.1);
+  --orange: #e85d2a;
+  --orange-pressed: #c44d1e;
+  --orange-soft: rgba(232, 93, 42, 0.08);
+
+  --file-ref-bg: #dbeafe;
+  --file-ref-text: #1e478f;
+  --file-ref-border: #b6d2fb;
+}
+
+/* ── 主题 mono · 暗色 ── */
+[data-theme="mono"][data-mode="dark"] {
+  --line: #363b40;
+  --muted: #9aa0a6;
+  --subtle: #71787e;
+  --panel: #232629;
+  --sidebar: #2a2e32;
+  --hover: #2f3438;
+  --active: #363b40;
+  --bg: #1a1c1e;
+  --text: #e8eaed;
+  --surface: #232629;
+
+  --accent: #e8eaed;
+  --accent-pressed: #c8ccd0;
+  --on-accent: #1a1c1e;
+  --green: #2ea67e;
+  --green-soft: rgba(46, 166, 126, 0.16);
+  --orange: #f47048;
+  --orange-pressed: #d85a35;
+  --orange-soft: rgba(244, 112, 72, 0.16);
+
+  --file-ref-bg: #1e3252;
+  --file-ref-text: #9cc4ff;
+  --file-ref-border: #2f4a73;
+}
+
+/* ── 主题 warm（Happy Hues 11）· 浅色 ── */
+[data-theme="warm"] {
+  --line: #e0d3c0;
+  --muted: #716040;
+  --subtle: #9a8a6a;
+  --panel: #fffffe;
+  --sidebar: #eaddcf;
+  --hover: #f0e6d8;
+  --active: #eaddcf;
+  --bg: #f9f4ef;
+  --text: #020826;
+  --surface: #fffffe;
+
+  --accent: #8c7851;
+  --accent-pressed: #75623f;
+  --on-accent: #fffffe;
+  --green: #12845a;
+  --green-soft: rgba(18, 132, 90, 0.1);
+  --orange: #f25042;
+  --orange-pressed: #d63e30;
+  --orange-soft: rgba(242, 80, 66, 0.1);
+
+  --file-ref-bg: #dfe9f7;
+  --file-ref-text: #2a5490;
+  --file-ref-border: #c3d6ee;
+}
+
+/* ── 主题 warm · 暗色 ── */
+[data-theme="warm"][data-mode="dark"] {
+  --line: #383442;
+  --muted: #b5a789;
+  --subtle: #8a7d64;
+  --panel: #22202a;
+  --sidebar: #2b2833;
+  --hover: #302d3a;
+  --active: #383442;
+  --bg: #16151a;
+  --text: #fffffe;
+  --surface: #22202a;
+
+  --accent: #a08a5f;
+  --accent-pressed: #b89e6d;
+  --on-accent: #16151a;
+  --green: #2ea67e;
+  --green-soft: rgba(46, 166, 126, 0.16);
+  --orange: #f25042;
+  --orange-pressed: #d63e30;
+  --orange-soft: rgba(242, 80, 66, 0.16);
+
+  --file-ref-bg: #2a2e3d;
+  --file-ref-text: #a8c6f0;
+  --file-ref-border: #3a4258;
+}

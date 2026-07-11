@@ -1,34 +1,209 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ChatComposer } from "../features/chat/ChatComposer";
-import { ConversationHeader } from "../features/chat/ConversationHeader";
-import { MessageList } from "../features/chat/MessageList";
+import { AgentSelectionPanel } from "../features/chat/AgentSelectionPanel";
+import { ChatWorkspace } from "../features/chat/ChatWorkspace";
+import type { ChatConfigValue, SessionConfig } from "../features/chat/chatTypes";
+import {
+  appendRuntimeEvent,
+  hasVisiblePlan,
+  isRecord,
+  latestMergedPlanFromMessages,
+  mergeMessagePlan,
+  mergePlanSnapshot,
+  updateMessage,
+  upsertToolCall
+} from "@code-lite/chat-core";
 import {
   createEmptySession,
   createId,
-  createInitialState,
   normalizeStoredState,
   type PendingMessageDelta,
-  type StoredState,
-  updateMessage
+  type StoredState
 } from "../lib/chatState";
-import { formatJson, formatSessionStatus } from "../lib/formatters";
+import { formatJson } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
-import { cancelTurn, sendApprovalDecision, streamAgentTurn } from "../services/agentClient";
+import { createConversation, getConversationClient, initializeSession, uploadTurnAttachments } from "../services/agentClient";
+import { useConversationState } from "../services/useConversations";
 import {
   deleteConversation,
   listConversations,
   loadConversation,
+  saveConversationConfig,
   updateConversationArchiveState
 } from "../services/conversationStore";
-import type { AgentEvent, ApprovalRequest, ChatMessage, Session, ToolCallItem } from "../types";
-import "./ChatPage.css";
+import { loadAgentRuntimeModels, loadAgentRuntimeSettings } from "../services/settingsStore";
+import {
+  createDraftImage,
+  MAX_DRAFT_IMAGES,
+  MAX_TOTAL_IMAGE_BYTES,
+  revokeDraftImage,
+  type DraftImage,
+} from "../features/chat/draftImages";
+import type {
+  AgentEvent,
+  AgentRuntimeModel,
+  AgentSummary,
+  ApprovalRequest,
+  ChatMessage,
+  InputRequest,
+  Session,
+  SessionCapabilities,
+  SessionConfigOption,
+  SessionModel,
+  ToolCallItem,
+  PlanSnapshot,
+  RuntimeEventRecord,
+  SlashCommand,
+  UserContentBlock,
+  UsageStats
+} from "../types";
 
 const DRAFT_SESSION_ID = "__draft_session__";
 const STREAM_DELTA_FLUSH_MS = 60;
 type ActiveView = "chat" | "overview" | "settings";
+type PendingApprovalState = ApprovalRequest & { conversationId: string };
+type PendingInputState = InputRequest & { conversationId: string };
+
+function splitRuntimeModelId(modelId: string): { family: string; effort: string | null } {
+  const trimmed = modelId.trim();
+  if (!trimmed) {
+    return { family: "", effort: null };
+  }
+  const match = trimmed.match(/^([^\[]+)((?:\[[^\]]+\])+)?$/);
+  if (!match) {
+    return { family: trimmed, effort: null };
+  }
+  const efforts = [...(match[2] ?? "").matchAll(/\[([^\]]+)\]/g)].map((item) => item[1].trim()).filter(Boolean);
+  return {
+    family: match[1].trim(),
+    effort: efforts.length > 0 ? efforts[efforts.length - 1] : null,
+  };
+}
+
+function normalizeCodexModelSelection(modelId: string, effort?: string | null): { family: string; effort: string } {
+  const parsed = splitRuntimeModelId(modelId);
+  return {
+    family: parsed.family,
+    effort: String(effort || parsed.effort || "").trim(),
+  };
+}
+
+function buildCodexRuntimeModelId(modelFamily: string, reasoningEffort: string): string {
+  const selection = normalizeCodexModelSelection(modelFamily, reasoningEffort);
+  return selection.family && selection.effort ? `${selection.family}[${selection.effort}]` : selection.family;
+}
+
+function isCodexAgent(agent: AgentSummary | null | undefined): boolean {
+  return (agent?.runtimeId ?? agent?.id ?? "") === "codex";
+}
+
+function isCodexCapabilities(caps: SessionCapabilities): boolean {
+  return caps.agent.id === "codex";
+}
+
+function fastModeConfigOption(options: SessionConfigOption[] | undefined): SessionConfigOption | null {
+  return options?.find((option) => option.id === "fast_mode" || option.id === "fast-mode" || option.id === "fast") ?? null;
+}
+
+function withoutFastModeConfigOption(options: SessionConfigOption[]): SessionConfigOption[] {
+  return options.filter((option) => option.id !== "fast_mode" && option.id !== "fast-mode" && option.id !== "fast");
+}
+
+function createCodexFastModeConfigOption(currentValue: ChatConfigValue = "off"): SessionConfigOption {
+  return {
+    id: "fast_mode",
+    label: "速率",
+    type: "enum",
+    values: ["off", "on"],
+    currentValue,
+    valueLabels: {
+      off: "1x 普通速率",
+      on: "1.5x 高速",
+    },
+  };
+}
+
+function currentModelFamilyFromCapabilities(caps: SessionCapabilities): string {
+  const currentModel = caps.models.find((model) => model.isCurrent) ?? caps.models[0];
+  if (!currentModel) {
+    return "";
+  }
+  return isCodexCapabilities(caps) ? splitRuntimeModelId(currentModel.id).family : currentModel.id;
+}
+
+function codexModelLikelySupportsFast(modelFamily: string): boolean {
+  const normalized = modelFamily.trim().toLowerCase();
+  return Boolean(normalized) && !normalized.includes("mini");
+}
+
+function prepareRuntimeCapabilities(
+  caps: SessionCapabilities,
+  config?: SessionConfig | null,
+): SessionCapabilities {
+  void config;
+  const runtimeFamily = currentModelFamilyFromCapabilities(caps);
+  const currentFastOption = fastModeConfigOption(caps.configOptions);
+  const fastOption = currentFastOption
+    ?? caps.fastModeConfigOption
+    ?? (isCodexCapabilities(caps) ? createCodexFastModeConfigOption() : null);
+  const modelFastSupport = { ...(caps.modelFastSupport ?? {}) };
+  if (runtimeFamily && currentFastOption) {
+    modelFastSupport[runtimeFamily] = true;
+  }
+
+  return {
+    ...caps,
+    fastModeConfigOption: fastOption,
+    modelFastSupport,
+  };
+}
+
+function applyFastModeVisibility(
+  caps: SessionCapabilities | null,
+  config: SessionConfig | null | undefined,
+): SessionCapabilities | null {
+  if (!caps || !isCodexCapabilities(caps)) {
+    return caps;
+  }
+  const selectedFamily = config?.modelFamily || currentModelFamilyFromCapabilities(caps);
+  const storedFastOption = fastModeConfigOption(caps.configOptions)
+    ?? caps.fastModeConfigOption
+    ?? createCodexFastModeConfigOption();
+  if (!storedFastOption) {
+    return caps;
+  }
+
+  const support = selectedFamily ? caps.modelFastSupport?.[selectedFamily] : undefined;
+  const shouldShow = support ?? codexModelLikelySupportsFast(selectedFamily);
+  const configOptions = withoutFastModeConfigOption(caps.configOptions);
+  if (!shouldShow) {
+    return {
+      ...caps,
+      configOptions,
+    };
+  }
+
+  const selectedValue = config?.selectedConfig?.fast_mode
+    ?? config?.selectedConfig?.fastMode
+    ?? config?.selectedConfig?.["fast-mode"]
+    ?? config?.selectedConfig?.fast
+    ?? storedFastOption.currentValue
+    ?? "off";
+  return {
+    ...caps,
+    configOptions: [
+      ...configOptions,
+      {
+        ...storedFastOption,
+        id: "fast_mode",
+        label: "速率",
+        currentValue: isConfigValue(selectedValue) ? selectedValue : storedFastOption.currentValue,
+      },
+    ],
+  };
+}
 
 function createDraftSession(): Session {
   return {
@@ -41,35 +216,204 @@ function isDraftSessionId(sessionId: string) {
   return sessionId === DRAFT_SESSION_ID;
 }
 
-function upsertToolCall(
-  toolCalls: ToolCallItem[],
-  item: Partial<ToolCallItem> & Pick<ToolCallItem, "id" | "name">,
-) {
-  const now = Date.now();
-  const index = toolCalls.findIndex((tool) => tool.id === item.id);
-  if (index < 0) {
-    return [
-      ...toolCalls,
-      {
-        argumentsText: "{}",
-        createdAt: now,
-        status: "running",
-        updatedAt: now,
-        ...item
-      } as ToolCallItem
-    ];
+function isConfigValue(value: unknown): value is ChatConfigValue {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function configValueRecord(value: unknown): Record<string, ChatConfigValue> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  return Object.entries(value).reduce<Record<string, ChatConfigValue>>((result, [key, item]) => {
+    if (isConfigValue(item)) {
+      result[key] = item;
+    }
+    return result;
+  }, {});
+}
+
+function fastModeFromModelInfo(modelInfo: Record<string, unknown>): "off" | "on" | null {
+  const fastMode = modelInfo.fastMode;
+  if (!isRecord(fastMode)) {
+    return null;
+  }
+  const raw = fastMode.runtimeValue ?? fastMode.speedMode ?? fastMode.displayRate ?? fastMode.enabled;
+  if (typeof raw === "boolean") {
+    return raw ? "on" : "off";
+  }
+  const normalized = String(raw ?? "").trim().toLowerCase();
+  if (["on", "true", "fast", "high", "1.5x"].includes(normalized)) {
+    return "on";
+  }
+  if (["off", "false", "normal", "default", "1x"].includes(normalized)) {
+    return "off";
+  }
+  return null;
+}
+
+function mergeRuntimeCommands(current: SessionCapabilities | undefined, commands: SlashCommand[]): SessionCapabilities | undefined {
+  if (!current || commands.length === 0) {
+    return current;
+  }
+  return {
+    ...current,
+    commands,
+  };
+}
+
+function normalizeRuntimeConfigOptions(options: unknown[]): SessionConfigOption[] {
+  return options
+    .filter(isRecord)
+    .map((option): SessionConfigOption | null => {
+      const rawId = String(option.id ?? "").trim();
+      if (!rawId || rawId === "mode" || rawId === "model") {
+        return null;
+      }
+      const id = rawId === "fast-mode" || rawId === "fast"
+        ? "fast_mode"
+        : rawId === "effort"
+          ? "reasoning_effort"
+          : rawId;
+      const values: string[] = [];
+      const valueLabels: Record<string, string> = {};
+      const rawOptions = Array.isArray(option.options) ? option.options : [];
+      for (const item of rawOptions) {
+        if (!isRecord(item)) {
+          continue;
+        }
+        const value = String(item.value ?? "").trim();
+        if (!value) {
+          continue;
+        }
+        values.push(value);
+        valueLabels[value] = String(item.name ?? value);
+      }
+      const rawType = String(option.type ?? "enum");
+      const type: SessionConfigOption["type"] = rawType === "boolean"
+        ? "boolean"
+        : rawType === "number"
+          ? "number"
+          : "enum";
+      return {
+        id,
+        label: id === "fast_mode"
+          ? "速率"
+          : id === "reasoning_effort"
+            ? "思考强度"
+            : String(option.name ?? id),
+        type,
+        values: values.length > 0 ? values : null,
+        currentValue: isConfigValue(option.currentValue) ? option.currentValue : null,
+        valueLabels: Object.keys(valueLabels).length > 0 ? valueLabels : null,
+      };
+    })
+    .filter((option): option is SessionConfigOption => option !== null);
+}
+
+function mergeRuntimeConfigOptions(
+  current: SessionCapabilities | undefined,
+  options: unknown[],
+  config?: SessionConfig | null,
+): SessionCapabilities | undefined {
+  if (!current) {
+    return current;
+  }
+  const incoming = normalizeRuntimeConfigOptions(options);
+  const incomingFastOption = fastModeConfigOption(incoming);
+  const modelFastSupport = { ...(current.modelFastSupport ?? {}) };
+  if (isCodexCapabilities(current)) {
+    const selectedFamily = config?.modelFamily || currentModelFamilyFromCapabilities(current);
+    if (selectedFamily) {
+      modelFastSupport[selectedFamily] = Boolean(incomingFastOption);
+    }
+  }
+  const merged = {
+    ...current,
+    configOptions: incoming,
+    fastModeConfigOption: incomingFastOption ?? current.fastModeConfigOption ?? (isCodexCapabilities(current) ? createCodexFastModeConfigOption() : null),
+    modelFastSupport,
+  };
+  return prepareRuntimeCapabilities(merged, config);
+}
+
+function mergeLoadedMessages(loadedMessages: ChatMessage[], cachedMessages: ChatMessage[] | undefined) {
+  if (!cachedMessages?.length) {
+    return loadedMessages;
   }
 
-  return toolCalls.map((tool, currentIndex) =>
-    currentIndex === index
-      ? {
-          ...tool,
-          ...item,
-          anchorOffset: item.anchorOffset ?? tool.anchorOffset,
-          updatedAt: now
-        }
-      : tool
-  );
+  const cachedById = new Map(cachedMessages.map((message) => [message.id, message]));
+  const loadedIds = new Set(loadedMessages.map((message) => message.id));
+  return [
+    ...loadedMessages.map((message) => cachedById.get(message.id) ?? message),
+    ...cachedMessages.filter((message) => !loadedIds.has(message.id))
+  ];
+}
+
+function mergeLoadedSession(loadedSession: Session, cachedSession: Session | undefined, isRunning: boolean) {
+  if (!cachedSession || !isRunning) {
+    return loadedSession;
+  }
+
+  return {
+    ...loadedSession,
+    ...cachedSession,
+    updatedAt: Math.max(loadedSession.updatedAt, cachedSession.updatedAt)
+  };
+}
+
+function buildDefaultConfig(caps: SessionCapabilities): SessionConfig {
+  const defaultMode = caps.modes.find((mode) => mode.isDefault);
+  const accessMode = defaultMode?.id ?? caps.modes[0]?.id ?? "read-only";
+  const reasoningOpt = caps.configOptions.find((option) => option.id === "reasoning_effort" || option.id === "effort");
+  const reasoningEffort = reasoningOpt?.currentValue ? String(reasoningOpt.currentValue) : "medium";
+  const selectedConfig: Record<string, ChatConfigValue> = {};
+  for (const option of caps.configOptions) {
+    if (option.currentValue != null) {
+      selectedConfig[option.id] = option.currentValue;
+    }
+  }
+
+  const currentModel = caps.models.find((model) => model.isCurrent) ?? caps.models[0];
+  let modelFamily = "";
+  if (currentModel) {
+    modelFamily = isCodexCapabilities(caps) ? splitRuntimeModelId(currentModel.id).family : currentModel.id;
+  }
+
+  return {
+    accessMode,
+    modelFamily,
+    reasoningEffort,
+    selectedConfig,
+  };
+}
+
+function mergeConfigDefaults(config: SessionConfig | undefined, caps: SessionCapabilities): SessionConfig {
+  const defaults = buildDefaultConfig(caps);
+  if (!config) {
+    return defaults;
+  }
+
+  return {
+    accessMode: config.accessMode || defaults.accessMode,
+    modelFamily: config.modelFamily || defaults.modelFamily,
+    reasoningEffort: config.reasoningEffort || defaults.reasoningEffort,
+    selectedConfig: {
+      ...defaults.selectedConfig,
+      ...config.selectedConfig,
+    },
+  };
+}
+
+function isConfigReady(caps: SessionCapabilities | null, config: SessionConfig | null | undefined): boolean {
+  if (!caps || !config) {
+    return false;
+  }
+  const nextConfig = mergeConfigDefaults(config, caps);
+  const hasRequiredModel = caps.models.length > 0 && Boolean(nextConfig.modelFamily);
+  const hasRequiredMode = caps.modes.length === 0 || Boolean(nextConfig.accessMode);
+  const hasReasoningPicker = caps.configOptions.some((option) => option.id === "reasoning_effort" || option.id === "effort");
+  const hasRequiredReasoning = !hasReasoningPicker || Boolean(nextConfig.reasoningEffort);
+  return hasRequiredModel && hasRequiredMode && hasRequiredReasoning;
 }
 
 export function ChatPage() {
@@ -83,23 +427,79 @@ export function ChatPage() {
       sessions: [session]
     };
   }, []);
-  const [sessions, setSessions] = useState(initialState.sessions);
-  const [messages, setMessages] = useState(initialState.messages);
+  // 共享状态层：会话列表与每会话视图态（消息/运行态/上下文/审批/输入）由 client 管理。
+  const client = useMemo(() => getConversationClient(), []);
+  const { sessions: clientSessions, views } = useConversationState(client);
+
   const [activeSessionId, setActiveSessionId] = useState(initialState.activeSessionId);
   const [activeView, setActiveView] = useState<ActiveView>("chat");
   const [archivedSessionIds, setArchivedSessionIds] = useState<Set<string>>(() => new Set());
   const [searchText, setSearchText] = useState("");
   const [draft, setDraft] = useState("");
-  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
+  const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
+  const [draftImageError, setDraftImageError] = useState<string | null>(null);
+  const [imagesProcessing, setImagesProcessing] = useState(false);
+  const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
+  const [showAgentSelection, setShowAgentSelection] = useState(false);
+  const [newSessionWorkspace, setNewSessionWorkspace] = useState("");
+  // draft session 仅存在于本地（未落后端），与 client 的真实会话列表合并展示。
+  const [draftSession, setDraftSession] = useState<Session | null>(() => createDraftSession());
+
+  // 会话列表 = client 的真实会话 + 本地 draft（若有）。
+  const sessions = useMemo<Session[]>(
+    () => (draftSession ? [draftSession, ...clientSessions.filter((s) => s.id !== draftSession.id)] : clientSessions),
+    [clientSessions, draftSession],
+  );
+
+  // ─── Per-session 状态：每个会话独立的 capabilities 和 config ───
+  const [capabilitiesBySession, setCapabilitiesBySession] = useState<Record<string, SessionCapabilities>>({});
+  const [configBySession, setConfigBySession] = useState<Record<string, SessionConfig>>({});
+  const [configLoadingBySession, setConfigLoadingBySession] = useState<Record<string, boolean>>({});
+
+  // ─── 派生：当前会话的 capabilities 和 config ───
+  const currentConfig = configBySession[activeSessionId] ?? null;
+  const rawCurrentCapabilities = capabilitiesBySession[activeSessionId] ?? null;
+  const currentCapabilities = useMemo(
+    () => applyFastModeVisibility(rawCurrentCapabilities, currentConfig),
+    [rawCurrentCapabilities, currentConfig],
+  );
+  const isCurrentConfigReady = isConfigReady(currentCapabilities, currentConfig);
+  const isCurrentConfigLoading =
+    activeView === "chat" && ((configLoadingBySession[activeSessionId] ?? false) || !isCurrentConfigReady);
+
+  // ─── 同步 config 到 ref（确保 sendMessage 读取到最新值）───
+  useEffect(() => {
+    configBySessionRef.current = configBySession;
+  }, [configBySession]);
+
+  useEffect(() => {
+    draftImagesRef.current = draftImages;
+  }, [draftImages]);
+
+  useEffect(() => { activeSessionIdRef.current = activeSessionId; }, [activeSessionId]);
+
   const abortControllerRef = useRef<AbortController | null>(null);
-  const pendingMessageDeltasRef = useRef<Record<string, PendingMessageDelta>>({});
-  const streamFlushTimerRef = useRef<number | null>(null);
-  const activeAssistantMessageIdRef = useRef<string | null>(null);
-  const activeStreamSessionIdRef = useRef<string | null>(null);
+  const configSaveTimerRef = useRef<Record<string, number>>({});
+  const activeSessionIdRef = useRef(activeSessionId);
+  // 当前已订阅的会话频道（切换会话时先退订旧的）
+  const subscribedChannelRef = useRef<string | null>(null);
+  // 使用 ref 存储最新的 config，确保 sendMessage 读取到最新值（避免闭包捕获旧值）
+  const configBySessionRef = useRef<Record<string, SessionConfig>>({});
+  const draftImagesRef = useRef<DraftImage[]>([]);
 
   const activeSession = sessions.find((item) => item.id === activeSessionId) ?? sessions[0];
-  const activeMessages = messages[activeSession.id] ?? [];
+  const activeView_ = views[activeSession.id];
+  const activeMessages = activeView_?.messages ?? [];
+  const isActiveSessionRunning = client.isRunning(activeSession.id) || Boolean(activeView_?.running);
+  const activePendingApproval = activeView_?.pendingApproval
+    ? { ...activeView_.pendingApproval, conversationId: activeSession.id }
+    : null;
+  const activePendingInput = activeView_?.pendingInput
+    ? { ...activeView_.pendingInput, conversationId: activeSession.id }
+    : null;
+  const sessionAgent = activeSession.agent ?? (isDraftSessionId(activeSession.id) ? activeAgent : null);
+  const contextUsage = activeView_?.contextUsage ?? null;
+  const activeTurnId = client.getActiveTurnId(activeSession.id) ?? null;
 
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !archivedSessionIds.has(session.id)),
@@ -118,116 +518,498 @@ export function ChatPage() {
     return `${item.title} ${item.preview}`.toLowerCase().includes(query);
   }), [searchText, visibleSessions]);
 
+  // ─── 客户端启动（0710 统一状态层）───
+  // ConversationClient 内部：连接 + 订阅全局频道 + 拉会话列表 + 注册运行态/配置监听。
+  // 桌面端在此之上叠加：从各会话 session.json 恢复 config/context 到本地选择器；
+  // 通过 onRawEvent 处理 reducer 不覆盖的桌面副作用（caps/config-from-events）；
+  // 配置的跨端同步（config.batch）落到 configBySession 让选择器跟随。
   useEffect(() => {
     let cancelled = false;
 
-    async function loadStoredState() {
+    // 桌面副作用观察者：capabilities / config-from-events。
+    const offRaw = client.onRawEvent((event, channel) => {
+      const type = (event as { type?: string }).type;
+      if (type === "agent.command.available.updated") {
+        setCapabilitiesBySession((prev) => {
+          const nextCaps = mergeRuntimeCommands(prev[channel], (event as { commands: SlashCommand[] }).commands);
+          return nextCaps ? { ...prev, [channel]: nextCaps } : prev;
+        });
+      } else if (type === "agent.config.updated") {
+        const configOptions = (event as { configOptions: unknown[] }).configOptions;
+        setCapabilitiesBySession((prev) => {
+          const merged = mergeRuntimeConfigOptions(prev[channel], configOptions, configBySessionRef.current[channel]);
+          return merged ? { ...prev, [channel]: merged } : prev;
+        });
+      } else if (type === "agent.mode.updated") {
+        const modeId = (event as { modeId?: string }).modeId;
+        if (modeId) {
+          setConfigBySession((prev) => {
+            const current = prev[channel];
+            const next: SessionConfig = {
+              accessMode: modeId,
+              modelFamily: current?.modelFamily ?? "",
+              reasoningEffort: current?.reasoningEffort ?? "medium",
+              selectedConfig: current?.selectedConfig ?? {},
+            };
+            const result = { ...prev, [channel]: next };
+            configBySessionRef.current = result;
+            return result;
+          });
+        }
+      }
+    });
+
+    // 配置跨端同步：另一端改模型/思考/权限 → 本端选择器跟随。
+    const offConfig = client.getSync().onConfigChange((payload) => {
+      const p = payload as { conversationId?: string; changes?: Partial<SessionConfig> };
+      const channel = p.conversationId;
+      const changes = p.changes;
+      if (!channel || !changes) return;
+      setConfigBySession((prev) => {
+        const existing = prev[channel];
+        const next: SessionConfig = {
+          modelFamily: changes.modelFamily ?? existing?.modelFamily ?? "",
+          accessMode: changes.accessMode ?? existing?.accessMode ?? "",
+          reasoningEffort: changes.reasoningEffort ?? existing?.reasoningEffort ?? "medium",
+          selectedConfig: changes.selectedConfig ?? existing?.selectedConfig ?? {},
+        };
+        const result = { ...prev, [channel]: next };
+        configBySessionRef.current = result;
+        return result;
+      });
+    });
+
+    async function boot() {
       try {
-        const remoteSessions = await listConversations();
-        let nextState: StoredState;
-
-        if (remoteSessions.length > 0) {
-          const firstVisibleSession = remoteSessions.find((session) => !session.archived);
-          if (firstVisibleSession) {
-            const activeId = firstVisibleSession.id;
-            const loaded = await loadConversation(activeId);
-            nextState = normalizeStoredState({
-              activeSessionId: activeId,
-              messages: {
-                [activeId]: loaded.messages
-              },
-              sessions: remoteSessions
-            });
-          } else {
-            const draftSession = createDraftSession();
-            nextState = normalizeStoredState({
-              activeSessionId: draftSession.id,
-              messages: {
-                [draftSession.id]: []
-              },
-              sessions: [draftSession, ...remoteSessions]
-            });
+        await client.start();
+        if (cancelled) return;
+        const remoteSessions = client.getSnapshot().sessions;
+        // 从各会话 session.json 恢复 config（选择器初值）。
+        const restoredConfigs: Record<string, SessionConfig> = {};
+        for (const session of remoteSessions) {
+          const sessionObj = session as unknown as Record<string, unknown>;
+          const savedConfig = sessionObj.config;
+          if (savedConfig && typeof savedConfig === "object") {
+            const cfg = savedConfig as Partial<SessionConfig>;
+            const savedAgent = sessionObj.agent;
+            const isCodex = isRecord(savedAgent) && String(savedAgent.runtimeId ?? savedAgent.id ?? "") === "codex";
+            const rawModelFamily = String(cfg.modelFamily ?? "");
+            const rawReasoningEffort = String(cfg.reasoningEffort ?? "");
+            const rawSelectedConfig = (cfg.selectedConfig as Record<string, ChatConfigValue>) ?? {};
+            const modelSelection = isCodex
+              ? normalizeCodexModelSelection(rawModelFamily, rawReasoningEffort)
+              : { family: rawModelFamily, effort: rawReasoningEffort };
+            const selectedConfig = isCodex && modelSelection.effort
+              ? { ...rawSelectedConfig, reasoning_effort: modelSelection.effort }
+              : rawSelectedConfig;
+            restoredConfigs[session.id] = {
+              modelFamily: modelSelection.family,
+              accessMode: String(cfg.accessMode ?? ""),
+              reasoningEffort: modelSelection.effort || "medium",
+              selectedConfig,
+            };
           }
-        } else {
-          nextState = initialState;
         }
-
-        if (cancelled) {
-          return;
+        if (Object.keys(restoredConfigs).length > 0) {
+          setConfigBySession(restoredConfigs);
+          configBySessionRef.current = { ...configBySessionRef.current, ...restoredConfigs };
         }
-
-        setSessions(nextState.sessions);
-        setMessages(nextState.messages);
-        setActiveSessionId(nextState.activeSessionId);
-        setArchivedSessionIds(new Set(nextState.sessions.filter((session) => session.archived).map((session) => session.id)));
+        setArchivedSessionIds(new Set(remoteSessions.filter((s) => s.archived).map((s) => s.id)));
+        // 有真实会话时默认选中首个未归档会话，并清掉本地 draft。
+        const firstVisible = remoteSessions.find((s) => !s.archived);
+        if (firstVisible) {
+          setDraftSession(null);
+          setActiveSessionId(firstVisible.id);
+        }
       } catch (error) {
         console.error(error);
       }
     }
 
-    void loadStoredState();
+    void boot();
 
     return () => {
       cancelled = true;
+      offRaw();
+      offConfig();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ─── 会话频道订阅（0710 统一状态层）───
+  // 切换到真实会话时通过 client 订阅其频道：后端先回 snapshot（client 建视图态），再推增量事件。
+  // 切到别的会话或离开时退订。
+  useEffect(() => {
+    if (!activeSessionId || isDraftSessionId(activeSessionId) || activeView !== "chat") {
+      return;
+    }
+    const myChannel = activeSessionId;
+    const prev = subscribedChannelRef.current;
+    if (prev && prev !== myChannel) {
+      client.closeConversation(prev);
+    }
+    subscribedChannelRef.current = myChannel;
+    void client.openConversation(myChannel);
+    return () => {
+      if (subscribedChannelRef.current === myChannel) {
+        subscribedChannelRef.current = null;
+      }
+      client.closeConversation(myChannel);
+    };
+  }, [activeSessionId, activeView, client]);
+
+  useEffect(() => {
+    // draft session 也通过 __probe__ 探测 capabilities
+    // 真实会话的 agent 来自 session.agent 字段
+    if (!activeSessionId || activeView !== "chat") return;
+    let cancelled = false;
+    setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: true }));
+
+    async function loadCapabilities() {
+      try {
+        // 如果当前会话已有缓存，跳过重复初始化（切换回该会话时从缓存读取）
+        const existingCaps = capabilitiesBySession[activeSessionId];
+        if (existingCaps && activeSessionId !== DRAFT_SESSION_ID) {
+          // capabilities 已缓存；使用函数式更新确保不覆盖用户的选择
+          setConfigBySession((prev) => {
+            const result = { ...prev, [activeSessionId]: mergeConfigDefaults(prev[activeSessionId], existingCaps) };
+            configBySessionRef.current = result;
+            return result;
+          });
+          if (!cancelled) {
+            setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
+          }
+          return;
+        }
+
+        const probeId = isDraftSessionId(activeSessionId) ? "__probe__" : activeSessionId;
+        const caps = await initializeSession(probeId);
+        if (cancelled) return;
+
+        // 写入 capabilities 缓存
+        setCapabilitiesBySession((prev) => ({
+          ...prev,
+          [activeSessionId]: prepareRuntimeCapabilities(caps, configBySessionRef.current[activeSessionId]),
+        }));
+
+        // 初始化 config（仅当该会话没有 config 时）— 使用函数式更新确保不覆盖
+        setConfigBySession((prev) => {
+          const result = { ...prev, [activeSessionId]: mergeConfigDefaults(prev[activeSessionId], caps) };
+          configBySessionRef.current = result;
+          return result;
+        });
+        setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
+      } catch (error) {
+        console.error("Failed to load session capabilities:", error);
+        // ... fallback 逻辑（保留原有行为，但写入 capabilitiesBySession 而非全局 state）
+        if (!cancelled) {
+          void loadCapabilitiesFallback();
+        }
+      }
+    }
+
+    async function loadCapabilitiesFallback() {
+      try {
+        const fallbackAgentId = sessionAgent?.id
+          ?? (await loadAgentRuntimeSettings().then(s => s.activeAdapter).catch(() => null));
+        const runtimeSettings = await loadAgentRuntimeSettings();
+        const runtime = runtimeSettings.runtimes.find(
+          (item) => item.adapter === (fallbackAgentId || runtimeSettings.activeAdapter)
+        );
+        if (!runtime) {
+          setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
+          return;
+        }
+
+        setActiveAgent({
+          configMode: runtime.configMode,
+          id: runtime.adapter,
+          label: runtime.label,
+          mode: runtime.mode,
+          runtimeId: runtime.id,
+        });
+
+        const isCodex = runtime.id === "codex";
+        const fallbackModes = isCodex
+          ? [
+              { id: "read-only", label: "只读", isDefault: runtime.mode === "read-only" },
+              { id: "agent", label: "Agent", isDefault: runtime.mode === "agent" },
+              { id: "agent-full-access", label: "完全访问", isDefault: runtime.mode === "agent-full-access" },
+            ]
+          : [{ id: runtime.mode || "default", label: runtime.mode || "默认", isDefault: true }];
+
+        const fallbackConfigOptions: SessionConfigOption[] = isCodex
+          ? [{
+              id: "reasoning_effort",
+              label: "思考强度",
+              type: "enum" as const,
+              values: ["none", "low", "medium", "high", "xhigh"],
+              currentValue: "xhigh",
+              valueLabels: { none: "无", low: "低", medium: "中", high: "高", xhigh: "超高" },
+            }]
+          : [];
+
+        let fallbackModels: SessionModel[] = [];
+        try {
+          const runtimeModels = await loadAgentRuntimeModels(runtime.id ?? runtime.adapter);
+          fallbackModels = runtimeModels.models.map((m: AgentRuntimeModel) => ({
+            id: m.id, label: m.label, description: m.description,
+            isCurrent: m.id === runtimeModels.currentModelId,
+          }));
+        } catch { /* ignore */ }
+
+        const fallbackCaps: SessionCapabilities = {
+          agent: {
+            id: runtime.adapter, label: runtime.label,
+            adapterKind: "acp" as const, status: runtime.status || "available",
+          },
+          modes: fallbackModes,
+          models: fallbackModels,
+          configOptions: fallbackConfigOptions,
+          commands: [],
+        };
+
+        setCapabilitiesBySession((prev) => ({
+          ...prev,
+          [activeSessionId]: prepareRuntimeCapabilities(fallbackCaps, configBySessionRef.current[activeSessionId]),
+        }));
+
+        // 初始化 config（仅当该会话没有 config 时）— 使用函数式更新确保不覆盖
+        setConfigBySession((prev) => {
+          const result = { ...prev, [activeSessionId]: mergeConfigDefaults(prev[activeSessionId], fallbackCaps) };
+          configBySessionRef.current = result;
+          return result;
+        });
+        setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
+      } catch (fallbackError) {
+        console.error("Fallback model loading also failed:", fallbackError);
+        setConfigLoadingBySession((prev) => ({ ...prev, [activeSessionId]: false }));
+      }
+    }
+
+    void loadCapabilities();
+    return () => { cancelled = true; };
+  }, [activeView, activeSessionId, sessionAgent?.id, sessionAgent?.runtimeId]);
 
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
-      if (streamFlushTimerRef.current !== null) {
-        window.clearTimeout(streamFlushTimerRef.current);
+      for (const timer of Object.values(configSaveTimerRef.current)) {
+        window.clearTimeout(timer);
+      }
+      for (const image of draftImagesRef.current) {
+        revokeDraftImage(image);
       }
     };
   }, []);
 
-  function updateSession(sessionId: string, updater: (session: Session) => Session) {
-    setSessions((current) => current.map((session) => (session.id === sessionId ? updater(session) : session)));
+  /** 用 client 的会话列表更新一个会话字段（供 resolveApproval/resolveInput/archive 用）。 */
+  function patchClientSession(sessionId: string, patch: Partial<Session>): void {
+    client.patchSession(sessionId, patch);
   }
 
-  function createSession(nextView: ActiveView = "chat") {
-    const draftSession = createDraftSession();
-    setArchivedSessionIds((current) => {
-      if (!current.has(DRAFT_SESSION_ID)) {
-        return current;
-      }
-      const next = new Set(current);
-      next.delete(DRAFT_SESSION_ID);
-      return next;
+  /** 更新当前会话的 config（同时保存到后端） */
+  function updateSessionConfig(patch: Partial<SessionConfig>) {
+    const sessionId = activeSessionId;
+    if (isDraftSessionId(sessionId)) return; // draft session 不保存
+
+    setConfigBySession((prev) => {
+      const current = prev[sessionId];
+      const next: SessionConfig = current
+        ? { ...current, ...patch }
+        : {
+            modelFamily: "",
+            accessMode: "",
+            reasoningEffort: "medium",
+            selectedConfig: {},
+            ...patch,
+          };
+      const result = { ...prev, [sessionId]: next };
+      // 同步更新 ref，确保后续事件处理器立即读取到最新值
+      configBySessionRef.current = result;
+
+      // debounce 保存到后端（500ms 内只保存最后一次）
+      const prevTimer = configSaveTimerRef.current[sessionId];
+      if (prevTimer) window.clearTimeout(prevTimer);
+      configSaveTimerRef.current[sessionId] = window.setTimeout(() => {
+        saveConversationConfig(sessionId, next as unknown as Record<string, unknown>)
+          .catch((err) => console.error("Failed to save session config:", err));
+      }, 500);
+
+      return result;
     });
-    setSessions((current) => [
-      draftSession,
-      ...current.filter((session) => !isDraftSessionId(session.id))
-    ]);
-    setMessages((current) => ({
-      ...current,
-      [draftSession.id]: []
-    }));
-    setActiveSessionId(draftSession.id);
-    setActiveView(nextView);
-    setDraft("");
-    setPendingApproval(null);
+  }
+
+  function clearDraftImages() {
+    setDraftImages((current) => {
+      for (const image of current) {
+        revokeDraftImage(image);
+      }
+      return [];
+    });
+    setDraftImageError(null);
+  }
+
+  function removeDraftImage(imageId: string) {
+    setDraftImages((current) => {
+      const target = current.find((image) => image.id === imageId);
+      if (target) {
+        revokeDraftImage(target);
+      }
+      return current.filter((image) => image.id !== imageId);
+    });
+    setDraftImageError(null);
+  }
+
+  async function addDraftImages(files: File[]) {
+    if (files.length === 0) {
+      return;
+    }
+    setImagesProcessing(true);
+    setDraftImageError(null);
+    try {
+      const slots = Math.max(0, MAX_DRAFT_IMAGES - draftImagesRef.current.length);
+      if (slots <= 0) {
+        setDraftImageError("单轮最多支持 20 张图片。");
+        return;
+      }
+      const accepted = files.slice(0, slots);
+      if (accepted.length < files.length) {
+        setDraftImageError("单轮最多支持 20 张图片，已忽略多余图片。");
+      }
+
+      const created: DraftImage[] = [];
+      for (const file of accepted) {
+        try {
+          created.push(await createDraftImage(file));
+        } catch (error) {
+          setDraftImageError(error instanceof Error ? error.message : String(error));
+        }
+      }
+      if (created.length === 0) {
+        return;
+      }
+
+      setDraftImages((current) => {
+        const next = [...current, ...created];
+        const totalBytes = next.reduce((sum, image) => sum + (image.normalized?.normalizedBytes ?? image.rawBytes), 0);
+        if (totalBytes > MAX_TOTAL_IMAGE_BYTES) {
+          for (const image of created) {
+            revokeDraftImage(image);
+          }
+          setDraftImageError("单轮图片总大小不能超过 200 MB。");
+          return current;
+        }
+        return next;
+      });
+    } finally {
+      setImagesProcessing(false);
+    }
+  }
+
+  async function ensureRealConversationForSend(sessionId: string, text: string): Promise<string> {
+    if (!isDraftSessionId(sessionId)) {
+      return sessionId;
+    }
+    const result = await createConversation({
+      agentId: sessionAgent?.id ?? activeAgent?.id ?? currentCapabilities?.agent.id ?? "codex",
+      preview: text,
+      title: text.slice(0, 24) || (draftImagesRef.current.length ? "图片输入" : undefined),
+      ...(newSessionWorkspace ? { workspace: newSessionWorkspace } : {}),
+    });
+    const session = result.session;
+    const draftCaps = capabilitiesBySession[sessionId];
+    const draftCfg = configBySessionRef.current[sessionId];
+    if (draftCaps) {
+      setCapabilitiesBySession((prev) => ({ ...prev, [session.id]: prev[session.id] ?? draftCaps }));
+    }
+    if (draftCfg) {
+      setConfigBySession((prev) => {
+        const next = { ...prev, [session.id]: prev[session.id] ?? draftCfg };
+        configBySessionRef.current = next;
+        return next;
+      });
+    }
+    // 清掉本地 draft（后端 broadcast 会把真实会话插入 client 列表）。
+    setDraftSession(null);
+    setActiveSessionId(session.id);
+    return session.id;
+  }
+
+  function createSession(workspace = "") {
+    // 显示 Agent 选择面板，让用户选择要使用的 agent
+    setNewSessionWorkspace(workspace);
+    setShowAgentSelection(true);
+  }
+
+  async function confirmAgentSelection(agentId: string, workspace: string) {
+    setShowAgentSelection(false);
+    setNewSessionWorkspace("");
+    try {
+      const result = await createConversation({
+        agentId,
+        ...(workspace ? { workspace } : {})
+      });
+      const session = result.session;
+      setArchivedSessionIds((current) => {
+        if (!current.has(DRAFT_SESSION_ID)) return current;
+        const next = new Set(current);
+        next.delete(DRAFT_SESSION_ID);
+        return next;
+      });
+      // 清掉本地 draft；后端 broadcast 会把真实会话插入 client 列表。
+      setDraftSession(null);
+      setActiveSessionId(session.id);
+      setActiveView("chat");
+      setDraft("");
+    } catch (error) {
+      console.error("Failed to create conversation:", error);
+      // fallback: 创建本地 draft session
+      const newDraft = createDraftSession();
+      setDraftSession(newDraft);
+      setActiveSessionId(newDraft.id);
+      setActiveView("chat");
+    }
   }
 
   function selectSession(sessionId: string) {
     setActiveSessionId(sessionId);
     setActiveView("chat");
-    setPendingApproval(null);
     if (isDraftSessionId(sessionId)) {
       return;
     }
-
-    void loadConversation(sessionId)
-      .then((conversation) => {
-        setSessions((current) =>
-          current.map((session) => (session.id === sessionId ? conversation.session : session))
-        );
-        setMessages((current) => ({
-          ...current,
-          [sessionId]: conversation.messages
-        }));
-      })
-      .catch((error) => console.error(error));
+    // 切换会话：client 内部会订阅频道并拿到 snapshot，视图态随之更新。
+    // 此处仅处理桌面特有副作用：从 session.config 恢复 configBySession 选择器。
+    const conversationSession = client.getSnapshot().sessions.find((s) => s.id === sessionId);
+    if (!conversationSession) return;
+    const sessionObj = conversationSession as unknown as Record<string, unknown>;
+    const savedConfig = sessionObj.config;
+    const conversationAgent = sessionObj.agent;
+    const isCodex = isRecord(conversationAgent) && String(conversationAgent.runtimeId ?? conversationAgent.id ?? "") === "codex";
+    if (savedConfig && typeof savedConfig === "object") {
+      const cfg = savedConfig as Partial<SessionConfig>;
+      const rawModelFamily = String(cfg.modelFamily ?? "");
+      const rawReasoningEffort = String(cfg.reasoningEffort ?? "");
+      const rawSelectedConfig = configValueRecord(cfg.selectedConfig);
+      const modelSelection = isCodex
+        ? normalizeCodexModelSelection(rawModelFamily, rawReasoningEffort)
+        : { family: rawModelFamily, effort: rawReasoningEffort };
+      const selectedConfig = isCodex && modelSelection.effort
+        ? { ...rawSelectedConfig, reasoning_effort: modelSelection.effort }
+        : rawSelectedConfig;
+      setConfigBySession((prev) => {
+        if (prev[sessionId]) return prev; // 已有本地配置，不覆盖
+        return {
+          ...prev,
+          [sessionId]: {
+            modelFamily: modelSelection.family,
+            accessMode: String(cfg.accessMode ?? ""),
+            reasoningEffort: modelSelection.effort || "medium",
+            selectedConfig,
+          },
+        };
+      });
+    }
   }
 
   function archiveSession(sessionId: string) {
@@ -236,23 +1018,45 @@ export function ChatPage() {
       next.add(sessionId);
       return next;
     });
-    updateSession(sessionId, (session) => ({ ...session, archived: true }));
+    patchClientSession(sessionId, { archived: true });
     if (!isDraftSessionId(sessionId)) {
       void updateConversationArchiveState(sessionId, true)
-        .then((session) => updateSession(sessionId, () => session))
+        .then((session) => patchClientSession(sessionId, session))
         .catch((error) => console.error(error));
     }
-
-    if (sessionId !== activeSessionId) {
-      return;
-    }
-
+    if (sessionId !== activeSessionId) return;
     const nextSession = sessions.find((session) => session.id !== sessionId && !archivedSessionIds.has(session.id));
     if (nextSession) {
       selectSession(nextSession.id);
       return;
     }
+    createSession();
+  }
 
+  function archiveSessionGroup(sessionIds: string[]) {
+    if (sessionIds.length === 0) return;
+    const ids = new Set(sessionIds);
+    setArchivedSessionIds((current) => {
+      const next = new Set(current);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    for (const id of ids) {
+      patchClientSession(id, { archived: true });
+      if (!isDraftSessionId(id)) {
+        void updateConversationArchiveState(id, true)
+          .then((session) => patchClientSession(id, session))
+          .catch((error) => console.error(error));
+      }
+    }
+    if (!ids.has(activeSessionId)) return;
+    const nextSession = sessions.find(
+      (session) => !ids.has(session.id) && !archivedSessionIds.has(session.id),
+    );
+    if (nextSession) {
+      selectSession(nextSession.id);
+      return;
+    }
     createSession();
   }
 
@@ -262,10 +1066,10 @@ export function ChatPage() {
       next.delete(sessionId);
       return next;
     });
-    updateSession(sessionId, (session) => ({ ...session, archived: false }));
+    patchClientSession(sessionId, { archived: false });
     if (!isDraftSessionId(sessionId)) {
       void updateConversationArchiveState(sessionId, false)
-        .then((session) => updateSession(sessionId, () => session))
+        .then((session) => patchClientSession(sessionId, session))
         .catch((error) => console.error(error));
     }
   }
@@ -274,311 +1078,188 @@ export function ChatPage() {
     if (!isDraftSessionId(sessionId)) {
       await deleteConversation(sessionId);
     }
-
     setArchivedSessionIds((current) => {
       const next = new Set(current);
       next.delete(sessionId);
       return next;
     });
-    setSessions((current) => current.filter((session) => session.id !== sessionId));
-    setMessages((current) => {
-      const next = { ...current };
-      delete next[sessionId];
-      return next;
-    });
+    // 后端 broadcast 会从 client 列表移除该会话。
   }
 
-  function flushQueuedMessageDeltas() {
-    if (streamFlushTimerRef.current !== null) {
-      window.clearTimeout(streamFlushTimerRef.current);
-      streamFlushTimerRef.current = null;
-    }
-
-    const pendingDeltas = Object.values(pendingMessageDeltasRef.current);
-    if (pendingDeltas.length === 0) {
-      return;
-    }
-
-    pendingMessageDeltasRef.current = {};
-    setMessages((current) => {
-      let next = current;
-      for (const delta of pendingDeltas) {
-        if (!delta.text && !delta.reasoning) {
-          continue;
-        }
-
-        next = updateMessage(next, delta.sessionId, delta.messageId, (message) => ({
-          ...message,
-          content: delta.text ? message.content + delta.text : message.content,
-          reasoning: delta.reasoning ? `${message.reasoning ?? ""}${delta.reasoning}` : message.reasoning
-        }));
+  // ─── draft→real 迁移观察（由 ConversationClient 事件触发）───
+  // 发起方场景：本窗口在 draft session 发送 turn，后端在 turn.start 结果里返回真实 conversationId，
+  // 随后 conversation.turn.started 事件的 conversationId 为真实 id。此时需要：
+  // - 把 draft 的 caps/config 迁移到真实 id
+  // - 切换到真实会话
+  useEffect(() => {
+    const off = client.onRawEvent((event, channel) => {
+      if (event.type !== "conversation.turn.started") return;
+      const draftId = activeSessionIdRef.current;
+      if (!draftId || !isDraftSessionId(draftId)) return;
+      const realId = event.conversationId;
+      if (realId === draftId) return;
+      const draftCaps = capabilitiesBySession[draftId];
+      if (draftCaps) {
+        setCapabilitiesBySession((prev) => ({ ...prev, [realId]: prev[realId] ?? draftCaps }));
       }
-      return next;
+      const draftCfg = configBySessionRef.current[draftId];
+      if (draftCfg) {
+        setConfigBySession((prev) => {
+          const next = { ...prev, [realId]: prev[realId] ?? draftCfg };
+          configBySessionRef.current = next;
+          return next;
+        });
+      }
+      setActiveSessionId(realId);
     });
-  }
-
-  function scheduleMessageDeltaFlush() {
-    if (streamFlushTimerRef.current !== null) {
-      return;
-    }
-
-    streamFlushTimerRef.current = window.setTimeout(flushQueuedMessageDeltas, STREAM_DELTA_FLUSH_MS);
-  }
-
-  function queueMessageDelta(
-    sessionId: string,
-    assistantMessageId: string,
-    delta: string,
-    kind: "text" | "reasoning",
-  ) {
-    const key = `${sessionId}:${assistantMessageId}`;
-    const current = pendingMessageDeltasRef.current[key] ?? {
-      messageId: assistantMessageId,
-      reasoning: "",
-      sessionId,
-      text: ""
-    };
-
-    pendingMessageDeltasRef.current[key] = {
-      ...current,
-      reasoning: kind === "reasoning" ? current.reasoning + delta : current.reasoning,
-      text: kind === "text" ? current.text + delta : current.text
-    };
-    scheduleMessageDeltaFlush();
-  }
-
-  function handleAgentEvent(sessionId: string, event: AgentEvent) {
-    if (event.type === "conversation.turn.started") {
-      const nextSessionId = event.conversationId;
-      activeAssistantMessageIdRef.current = event.assistantMessage.id;
-      activeStreamSessionIdRef.current = nextSessionId;
-      setActiveSessionId(nextSessionId);
-      setSessions((current) => {
-        const withoutDraft = current.filter((session) => session.id !== sessionId);
-        const existingIndex = withoutDraft.findIndex((session) => session.id === nextSessionId);
-        if (existingIndex >= 0) {
-          return withoutDraft.map((session) => (session.id === nextSessionId ? event.session : session));
-        }
-        return [event.session, ...withoutDraft];
-      });
-      setMessages((current) => ({
-        ...Object.fromEntries(Object.entries(current).filter(([id]) => id !== sessionId)),
-        [nextSessionId]: [...(current[nextSessionId] ?? []), event.userMessage, event.assistantMessage]
-      }));
-      return;
-    }
-
-    const assistantMessageId = activeAssistantMessageIdRef.current;
-    const targetSessionId = activeStreamSessionIdRef.current ?? sessionId;
-    if (!assistantMessageId) {
-      return;
-    }
-
-    if (event.type === "agent.text.delta") {
-      queueMessageDelta(targetSessionId, assistantMessageId, event.delta, "text");
-      return;
-    }
-
-    if (event.type === "agent.reasoning.delta") {
-      queueMessageDelta(targetSessionId, assistantMessageId, event.delta, "reasoning");
-      return;
-    }
-
-    if (event.type === "agent.text.completed" || event.type === "agent.reasoning.completed") {
-      flushQueuedMessageDeltas();
-      return;
-    }
-
-    if (event.type === "agent.tool.started") {
-      flushQueuedMessageDeltas();
-      setMessages((current) =>
-        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
-          ...message,
-          toolCalls: upsertToolCall(message.toolCalls, {
-            anchorOffset: message.content.length,
-            argumentsText: formatJson(event.arguments),
-            id: event.toolCallId || createId("tool"),
-            name: event.name,
-            risk: event.risk,
-            status: "running"
-          })
-        }))
-      );
-      return;
-    }
-
-    if (event.type === "agent.tool.completed") {
-      flushQueuedMessageDeltas();
-      setMessages((current) =>
-        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
-          ...message,
-          toolCalls: upsertToolCall(message.toolCalls, {
-            id: event.toolCallId || createId("tool"),
-            name: event.name,
-            resultText: formatJson(event.result ?? event.metadata),
-            status: "complete"
-          })
-        }))
-      );
-      return;
-    }
-
-    if (event.type === "agent.tool.failed") {
-      flushQueuedMessageDeltas();
-      setMessages((current) =>
-        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
-          ...message,
-          toolCalls: upsertToolCall(message.toolCalls, {
-            error: event.error ?? "工具调用失败",
-            id: event.toolCallId || createId("tool"),
-            name: event.name,
-            status: "error"
-          })
-        }))
-      );
-      return;
-    }
-
-    if (event.type === "approval.required") {
-      flushQueuedMessageDeltas();
-      setPendingApproval({
-        approvalId: event.approvalId,
-        argumentsText: formatJson(event.argumentsText ? event.argumentsText : event.arguments),
-        impact: event.impact,
-        name: event.name,
-        purpose: event.purpose,
-        risk: event.risk,
-        risks: event.risks,
-        rollback: event.rollback,
-        toolCallId: event.toolCallId
-      });
-      updateSession(targetSessionId, (session) => ({ ...session, status: "approval", updatedAt: Date.now() }));
-      setMessages((current) =>
-        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
-          ...message,
-          toolCalls: upsertToolCall(message.toolCalls, {
-            anchorOffset: message.content.length,
-            argumentsText: formatJson(event.argumentsText ? event.argumentsText : event.arguments),
-            id: event.toolCallId || event.approvalId,
-            name: event.name,
-            risk: event.risk,
-            status: "approval"
-          })
-        }))
-      );
-      return;
-    }
-
-    if (event.type === "agent.run.completed") {
-      flushQueuedMessageDeltas();
-      setMessages((current) =>
-        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
-          ...message,
-          streaming: false,
-          usage: typeof event.usage === "object" && event.usage ? (event.usage as ChatMessage["usage"]) : message.usage
-        }))
-      );
-      updateSession(targetSessionId, (session) => event.session ?? { ...session, status: "idle", updatedAt: Date.now() });
-      return;
-    }
-
-    if (event.type === "agent.run.failed") {
-      flushQueuedMessageDeltas();
-      setMessages((current) =>
-        updateMessage(current, targetSessionId, assistantMessageId, (message) => ({
-          ...message,
-          error: event.error ?? "Agent 运行失败",
-          streaming: false
-        }))
-      );
-      updateSession(targetSessionId, (session) => event.session ?? { ...session, status: "error", updatedAt: Date.now() });
-    }
-  }
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function sendMessage() {
     const text = draft.trim();
-    if (!text || activeTurnId) {
+    const images = draftImagesRef.current;
+    if ((!text && images.length === 0) || activeTurnId || imagesProcessing || isCurrentConfigLoading || !isCurrentConfigReady) {
+      return;
+    }
+    if (!currentCapabilities) {
       return;
     }
 
     const sessionId = activeSession.id;
-    const conversationId = isDraftSessionId(sessionId) ? undefined : sessionId;
     const turnId = createId("turn");
-    setDraft("");
-    setActiveTurnId(turnId);
-    activeAssistantMessageIdRef.current = null;
-    activeStreamSessionIdRef.current = null;
-    setPendingApproval(null);
 
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
+    // 图片场景：先确保有真实会话（draft 不可上传附件）。
+    let conversationId: string | undefined;
+    if (images.length > 0) {
+      conversationId = await ensureRealConversationForSend(sessionId, text);
+    } else if (!isDraftSessionId(sessionId)) {
+      conversationId = sessionId;
+    }
+
+    // 从 ref 读取最新的 config（避免闭包捕获旧值）
+    const cfg = mergeConfigDefaults(configBySessionRef.current[sessionId] ?? currentConfig ?? undefined, currentCapabilities);
+    const models = currentCapabilities.models;
+
+    // 解析模型 ID：Codex 用 bracket 格式，其他直接用 id。
+    const isCodex = isCodexAgent(sessionAgent);
+    let fullModelId: string | undefined;
+    let modelLabel: string | undefined;
+    if (isCodex && cfg?.modelFamily && cfg.reasoningEffort) {
+      fullModelId = buildCodexRuntimeModelId(cfg.modelFamily, cfg.reasoningEffort);
+      modelLabel = fullModelId;
+    } else if (cfg?.modelFamily) {
+      const exact = models.find((m) => m.id === cfg.modelFamily);
+      fullModelId = exact?.id ?? cfg.modelFamily;
+      modelLabel = exact?.label;
+    }
+
+    // 图片附件上传（HTTP，保留原路径）。
+    let contentBlocks: UserContentBlock[] | undefined;
+    if (images.length > 0 && conversationId) {
+      const uploaded = await uploadTurnAttachments({
+        conversationId,
+        images: images.map((image) => ({
+          blob: image.normalized?.blob ?? image.file,
+          fileName: image.name,
+          height: image.normalized?.height ?? image.height,
+          mimeType: image.normalized?.mimeType ?? image.mimeType,
+          wasCompressed: image.normalized?.wasCompressed,
+          width: image.normalized?.width ?? image.width,
+        })),
+        turnId,
+      });
+      contentBlocks = [
+        ...(text ? [{ type: "text" as const, text }] : []),
+        ...uploaded.map((attachment) => ({
+          type: "image" as const,
+          mimeType: attachment.mimeType as "image/png" | "image/jpeg" | "image/webp",
+          source: { kind: "attachment" as const, attachmentId: attachment.id },
+          name: attachment.name,
+          sizeBytes: attachment.sizeBytes,
+          width: attachment.width,
+          height: attachment.height,
+          sha256: attachment.sha256,
+          wasCompressed: attachment.wasCompressed,
+        })),
+      ];
+    }
+
+    // 立即清输入（乐观 UI 反馈）
+    setDraft("");
+    clearDraftImages();
 
     try {
-      await streamAgentTurn({
-        conversationId,
+      await client.sendTurn({
+        conversationId: conversationId ?? "",
         input: text,
-        onEvent: (event) => handleAgentEvent(sessionId, event),
-        signal: abortController.signal,
-        turnId
+        turnId,
+        accessMode: cfg?.accessMode || undefined,
+        modelId: fullModelId,
+        modelLabel: modelLabel || undefined,
+        reasoningEffort: cfg?.reasoningEffort,
+        selectedConfig: cfg?.selectedConfig,
+        contentBlocks: contentBlocks as unknown[],
       });
     } catch (error) {
-      if (abortController.signal.aborted) {
-        handleAgentEvent(sessionId, {
-          conversationId: sessionId,
-          error: "用户取消了当前任务。",
-          turnId,
-          type: "agent.run.failed"
-        });
-      } else {
-        handleAgentEvent(sessionId, {
-          conversationId: sessionId,
-          error: error instanceof Error ? error.message : String(error),
-          turnId,
-          type: "agent.run.failed"
-        });
-      }
-    } finally {
-      setActiveTurnId(null);
-      activeStreamSessionIdRef.current = null;
-      abortControllerRef.current = null;
+      // 发起失败时恢复输入
+      setDraft(text);
+      setDraftImages(images);
+      setDraftImageError(error instanceof Error ? error.message : String(error));
     }
   }
 
   async function stopCurrentTurn() {
-    if (!activeTurnId) {
+    if (!activeTurnId || !isActiveSessionRunning) {
       return;
     }
-
-    const turnId = activeTurnId;
-    abortControllerRef.current?.abort();
-    flushQueuedMessageDeltas();
-    await cancelTurn(turnId).catch(() => undefined);
-    setActiveTurnId(null);
-    setPendingApproval(null);
+    const sessionId = activeSession.id;
+    await client.cancelTurn(sessionId).catch(() => undefined);
   }
 
   async function resolveApproval(decision: "allow" | "deny") {
-    if (!pendingApproval) {
-      return;
+    if (!activePendingApproval) return;
+    const approval = activePendingApproval;
+    const approvalId = approval.approvalId;
+    patchClientSession(approval.conversationId, { status: "running", updatedAt: Date.now() });
+    try {
+      await client.resolveApproval(approvalId, decision);
+    } catch (error) {
+      patchClientSession(approval.conversationId, { status: "error", updatedAt: Date.now() });
+      console.error(error);
     }
+  }
 
-    const approvalId = pendingApproval.approvalId;
-    setPendingApproval(null);
-    updateSession(activeSession.id, (session) => ({ ...session, status: "running", updatedAt: Date.now() }));
-    await sendApprovalDecision(approvalId, decision)
-      .then((result) => {
-        if (result.session) {
-          updateSession(activeSession.id, () => result.session as Session);
-        }
-      })
-      .catch((error) => {
-        updateSession(activeSession.id, (session) => ({ ...session, status: "error", updatedAt: Date.now() }));
-        console.error(error);
-      });
+  async function resolveInput(action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) {
+    if (!activePendingInput) return;
+    const input = activePendingInput;
+    patchClientSession(input.conversationId, { status: "running", updatedAt: Date.now() });
+    try {
+      await client.resolveInput(input.inputRequestId, action, content);
+    } catch (error) {
+      patchClientSession(input.conversationId, { status: "error", updatedAt: Date.now() });
+      console.error(error);
+    }
   }
 
   return (
     <>
+      {showAgentSelection ? (
+        <AgentSelectionPanel
+          availableAgents={[
+            { id: "codex", label: "Codex", status: "available", description: "OpenAI Codex，通过 ACP 协议接入。支持代码生成、工具调用和文件操作。" },
+            { id: "claude_code", label: "Claude Code", status: "available", description: "Anthropic Claude Code，通过 ACP 协议接入。支持 Haiku/Sonnet/Opus 等模型等级，代码生成和分析。" },
+            { id: "opencode", label: "opencode", status: "planned", description: "opencode agent，通过 ACP 协议接入。当前为计划接入状态。" },
+            { id: "nanobot", label: "Nanobot", status: "available", description: "Legacy agent，使用产品级模型配置。适合非代码任务。" },
+          ]}
+          initialWorkspace={newSessionWorkspace}
+          onCancel={() => {
+            setShowAgentSelection(false);
+            setNewSessionWorkspace("");
+          }}
+          onSelect={(agentId, workspace) => void confirmAgentSelection(agentId, workspace)}
+        />
+      ) : null}
       {activeView === "settings" ? (
         <SettingsPage
           archivedSessions={archivedSessions}
@@ -592,7 +1273,8 @@ export function ChatPage() {
             activeSessionId={activeSession.id}
             activeView={activeView}
             onArchiveSession={archiveSession}
-            onCreateSession={() => createSession()}
+            onArchiveGroup={archiveSessionGroup}
+            onCreateSession={createSession}
             onOpenOverview={() => setActiveView("overview")}
             onOpenSettings={() => setActiveView("settings")}
             onSearchTextChange={setSearchText}
@@ -604,23 +1286,47 @@ export function ChatPage() {
           {activeView === "overview" ? (
             <OverviewPage />
           ) : (
-            <main className="main-panel">
-              <ConversationHeader isRunning={Boolean(activeTurnId)} title={activeSession.title} />
-              <MessageList
-                messages={activeMessages}
-                session={activeSession}
-                statusLabel={formatSessionStatus(activeSession.status)}
-              />
-              <ChatComposer
-                activeTurnId={activeTurnId}
-                draft={draft}
-                onDraftChange={setDraft}
-                onResolveApproval={(decision) => void resolveApproval(decision)}
-                onSendMessage={() => void sendMessage()}
-                onStopTurn={() => void stopCurrentTurn()}
-                pendingApproval={pendingApproval}
-              />
-            </main>
+            <ChatWorkspace
+              accessMode={currentConfig?.accessMode ?? ""}
+              activeTurnId={isActiveSessionRunning ? activeTurnId : null}
+              agent={sessionAgent}
+              commands={currentCapabilities?.commands ?? []}
+              configLoading={isCurrentConfigLoading}
+              configOptions={currentCapabilities?.configOptions ?? []}
+              contextUsage={contextUsage}
+              draft={draft}
+              draftImageError={draftImageError}
+              draftImages={draftImages}
+              imagesProcessing={imagesProcessing}
+              isRunning={isActiveSessionRunning}
+              messages={activeMessages}
+              modes={currentCapabilities?.modes ?? []}
+              models={currentCapabilities?.models ?? []}
+              onAccessModeChange={(value) => updateSessionConfig({ accessMode: value })}
+              onConfigChange={(optionId, value) => {
+                const next = { ...(currentConfig?.selectedConfig ?? {}), [optionId]: value };
+                updateSessionConfig({ selectedConfig: next });
+              }}
+              onDraftChange={setDraft}
+              onDraftImagesAdd={(files) => void addDraftImages(files)}
+              onDraftImageRemove={removeDraftImage}
+              onModelFamilyChange={(value) => updateSessionConfig({ modelFamily: value })}
+              onReasoningEffortChange={(value) => updateSessionConfig({ reasoningEffort: value })}
+              onResolveApproval={(decision) => void resolveApproval(decision)}
+              onResolveInput={(action, content) => void resolveInput(action, content)}
+              onSendMessage={() => void sendMessage()}
+              onStopTurn={() => void stopCurrentTurn()}
+              pendingApproval={activePendingApproval}
+              pendingInput={activePendingInput}
+              reasoningEffort={currentConfig?.reasoningEffort ?? ""}
+              sendDisabled={imagesProcessing || isCurrentConfigLoading || !isCurrentConfigReady}
+              selectedConfig={currentConfig?.selectedConfig ?? {}}
+              selectedModelFamily={currentConfig?.modelFamily ?? ""}
+              sessionId={activeSession.id}
+              title={activeSession.title}
+              updatedAt={activeSession.updatedAt}
+              workspace={activeSession.workspace}
+            />
           )}
         </>
       )}

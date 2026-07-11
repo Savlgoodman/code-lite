@@ -1,0 +1,15 @@
+{
+  "name": "@code-lite/sync",
+  "version": "0.1.4",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@code-lite/protocol": "0.1.4",
+    "@code-lite/transport": "0.1.4"
+  }
+}

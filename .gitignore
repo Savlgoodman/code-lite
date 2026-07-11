@@ -95,3 +95,6 @@ models/
 *.onnx
 *.gguf
 *.bin
+
+# 外部参考仓库
+ref/

@@ -1,0 +1,104 @@
+.context-ring-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.fast-mode-indicator {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.fast-mode-indicator svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.context-ring {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.context-ring-label {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.context-ring-tooltip {
+  position: absolute;
+  right: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 30;
+  min-width: 164px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transform: translate(50%, 4px);
+  border: 1px solid rgba(222, 219, 215, 0.92);
+  border-radius: 8px;
+  background: rgba(32, 36, 43, 0.96);
+  padding: 8px 10px;
+  color: #fff;
+  box-shadow: 0 12px 30px rgba(30, 35, 42, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.context-ring-tooltip::after {
+  position: absolute;
+  right: 50%;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
+  transform: translateX(50%) rotate(45deg);
+  background: rgba(32, 36, 43, 0.96);
+  content: "";
+}
+
+.context-ring-tooltip strong {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.context-ring-tooltip span {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.context-ring-tooltip small {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.context-ring:hover .context-ring-tooltip,
+.context-ring:focus-visible .context-ring-tooltip {
+  transform: translate(50%, 0);
+  opacity: 1;
+  visibility: visible;
+}

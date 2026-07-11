@@ -1,5 +1,6 @@
 import { summarizeArguments, formatRisk } from "../../lib/formatters";
 import type { ApprovalRequest } from "../../types";
+import "./ApprovalCard.css";
 
 interface ApprovalCardProps {
   approval: ApprovalRequest;

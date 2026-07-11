@@ -1,0 +1,272 @@
+/* ============================================
+ * Markdown 渲染（Streamdown）
+ * ============================================ */
+
+.streamdown-shell {
+  max-width: 100%;
+  min-width: 0;
+  color: var(--text);
+}
+
+.streamdown-body {
+  max-width: 100%;
+  min-width: 0;
+  line-height: 1.8;
+}
+
+.streamdown-body > :first-child { margin-top: 0; }
+.streamdown-body > :last-child { margin-bottom: 0; }
+
+.streamdown-body ul,
+.streamdown-body ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+
+.streamdown-body li { margin: 2px 0; }
+.streamdown-body li::marker { color: var(--muted); }
+.streamdown-body p { margin: 6px 0; }
+
+.streamdown-body h1,
+.streamdown-body h2,
+.streamdown-body h3,
+.streamdown-body h4 {
+  margin: 12px 0 6px;
+  line-height: 1.4;
+}
+
+.streamdown-body blockquote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+
+.streamdown-body a,
+.markdown-link {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.streamdown-body a:hover,
+.markdown-link:hover { color: var(--muted); }
+
+/* ── 文件引用 chip（正文本地文件链接高亮，点击跳详情页） ── */
+.file-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin: 0 1px;
+  padding: 1px 8px;
+  border: 1px solid var(--file-ref-border);
+  border-radius: var(--radius-sm);
+  background: var(--file-ref-bg);
+  color: var(--file-ref-text);
+  font-size: 0.92em;
+  font-weight: 500;
+  line-height: 1.5;
+  text-decoration: none;
+  vertical-align: baseline;
+}
+
+.file-ref-chip.failed { opacity: 0.7; }
+.file-ref-chip-icon { flex-shrink: 0; opacity: 0.85; }
+.file-ref-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.file-ref-image {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  object-fit: contain;
+}
+
+/* 行内代码 */
+.streamdown-body code,
+.streamdown-body [data-streamdown="inline-code"] {
+  border-radius: 5px;
+  background: var(--sidebar);
+  padding: 1px 5px;
+  font-size: 0.9em;
+}
+
+/* 代码块 */
+.streamdown-body [data-streamdown="code-block"] {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  margin: 10px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+}
+
+.streamdown-body [data-streamdown="code-block-header"] {
+  height: 32px;
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--sidebar);
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: lowercase;
+}
+
+.streamdown-body [data-streamdown="code-block"] > div:not([data-streamdown]) {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  z-index: 2;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.streamdown-body [data-streamdown="code-block-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(222, 219, 215, 0.88);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+
+.streamdown-body [data-streamdown="code-block-copy-button"],
+.streamdown-body [data-streamdown="code-block-download-button"] {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.streamdown-body [data-streamdown="code-block-copy-button"]:hover,
+.streamdown-body [data-streamdown="code-block-download-button"]:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text);
+}
+
+.streamdown-body [data-streamdown="code-block-body"] {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  background: var(--panel);
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
+.streamdown-body [data-streamdown="code-block-body"]::-webkit-scrollbar { height: 8px; }
+.streamdown-body [data-streamdown="code-block-body"]::-webkit-scrollbar-track { background: transparent; }
+.streamdown-body [data-streamdown="code-block-body"]::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--line);
+  background-clip: padding-box;
+}
+
+.streamdown-body [data-streamdown="code-block-body"] pre {
+  min-width: max-content;
+  margin: 0;
+  background: var(--sdm-bg, transparent);
+  color: var(--sdm-fg, var(--text));
+}
+
+.streamdown-body [data-streamdown="code-block-body"] code {
+  display: block;
+  min-width: max-content;
+  background: transparent;
+  border-radius: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  white-space: pre;
+}
+
+.streamdown-body [data-streamdown="code-block-body"] code > span { display: block; }
+.streamdown-body [data-streamdown="code-block-body"] span[style*="--sdm-c"] { color: var(--sdm-c, inherit); }
+.streamdown-body [data-streamdown="code-block-body"] span[style*="--sdm-tbg"] { background: var(--sdm-tbg); }
+
+/*
+ * 深色语法高亮统一开关。streamdown 用 shiki 双主题为每个 token 同时输出浅色 --sdm-c
+ * 与深色 --shiki-dark，靠 Tailwind dark: 变体切换；本项目不接 Tailwind，dark: 不生效，
+ * 深色下会用浅色语法色贴深底。这里按 data-mode 手动切到 shiki 深色变量。
+ */
+[data-mode="dark"] .streamdown-body [data-streamdown="code-block-body"] pre {
+  color: var(--shiki-dark, var(--sdm-fg, var(--text)));
+  background: var(--shiki-dark-bg, var(--sdm-bg, transparent));
+}
+[data-mode="dark"] .streamdown-body [data-streamdown="code-block-body"] span[style*="--sdm-c"] {
+  color: var(--shiki-dark, var(--sdm-c, inherit));
+}
+[data-mode="dark"] .streamdown-body [data-streamdown="code-block-body"] span[style*="--sdm-tbg"] {
+  background: var(--shiki-dark-bg, var(--sdm-tbg));
+}
+
+/* 表格 */
+.markdown-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
+.streamdown-body table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.streamdown-body th,
+.streamdown-body td {
+  max-width: 280px;
+  padding: 6px 10px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: top;
+}
+
+.streamdown-body th:last-child,
+.streamdown-body td:last-child { border-right: 0; }
+.streamdown-body tr:last-child td { border-bottom: 0; }
+
+.streamdown-body th {
+  background: var(--sidebar);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.streamdown-body td { background: var(--panel); }

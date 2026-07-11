@@ -1,6 +1,31 @@
-# PC Repair Agent - Agent 协作规范
+# code-lite - Agent 协作规范
 
-本文件面向所有参与本仓库工作的 AI Coding Agent 和开发者。当前 UI 与 Tauri 桌面壳已进入原型阶段，Python 后台、Agent Runtime 和审批网关等模块仍在规划与验证中。本文件只记录高频协作规则、文档入口、简要启动入口、提交规范和文件编码要求；完整实现细节统一沉淀到 `docs/` 下的专项文档。
+本文件面向所有参与本仓库工作的 AI Coding Agent 和开发者。code-lite 是一个桌面端多 Agent 工作台，目标是接入 Codex、Claude Code、opencode 等 agent runtime，为用户完成编码任务和其他自动化任务，并支持远程连接、远程同步观看、双端对等控制和后续授权协作。
+
+产品由四类可独立运行、又通过统一协议协作的组件构成：
+
+1. **桌面端**：Tauri 2 桌面壳（`src-tauri/`）+ React 前端（`ui/`）+ Python Agent Hub（`backend/`）。这是主控端，直接拉起并驱动 agent runtime，产生对话与事件。
+2. **远程遥控端**：`ui-remote/`，React + Vite 前端，通过 Capacitor 同时打包为**安卓 App**，也支持以 **PWA / 浏览器**方式运行。它不直接连 agent，而是经中继服务器远程连接桌面端，浏览工作区、管理会话、与 agent 对话并观看同步。
+3. **中继服务器**：`proxy_server/`，FastAPI + WebSocket 的盲转发中继。桌面端（host）与远程端（remote）各自用 `roomId = SHA256(pairKey)` 加入同一房间，中继只按房间转发消息帧，不解析、不记录、不缓存 payload，也不持有原始 pairKey。
+4. **共享协议包**：`packages/`，桌面端与远程端共用的 TypeScript 包，保证两端对协议、消息、同步和传输的理解一致。
+
+当前 UI 与 Tauri 桌面壳已进入原型阶段，Python backend 已具备本地流式事件接口和早期 adapter 结构，远程连接与双端同步已可用。后续重点是把产品叙事、adapter 抽象、远程同步、权限审批和运行时配置统一到 code-lite 方向。
+
+## 仓库结构总览
+
+| 目录 | 角色 | 说明 |
+|------|------|------|
+| `src-tauri/` | 桌面壳 | Tauri 2 Rust 外壳，负责窗口、生命周期、拉起并托管 Python backend（sidecar 或 dev 模式）。默认窗口 `1200x756`，最小 `900x620`。后端端口在 50000-60000 间随机探测空闲端口，前端经 `ensure_backend` 返回的 `base_url` 自动跟随。 |
+| `ui/` | 桌面端前端 | React 18 + Vite，桌面主控界面：会话侧边栏、对话工作区、输入框、模型/思考强度选择、设置页等。由 backend 流式事件驱动，用 `streamdown` 渲染 Markdown。 |
+| `backend/` | Python Agent Hub | uv 管理依赖，提供本地流式接口与通用 ACP adapter，接入 Codex / Claude Code / opencode runtime。同时承担远程桥接（RemoteBridge），作为 host 连接中继。 |
+| `ui-remote/` | 远程遥控端 | React 18 + Vite，Capacitor 打包**安卓 App**，也支持 **PWA / 浏览器**运行。经中继远程连接桌面端：浏览工作区、管理会话、与 agent 对话、观看同步、扫码配对。环境判定见 `src/lib/environment.ts`（native / dev / pwa / web）。**改动前必读 `ui-remote/AGENTS.md`。** |
+| `proxy_server/` | 中继服务器 | FastAPI + WebSocket 盲转发中继。host 与 remote 用 `roomId = SHA256(pairKey)` 加入同一房间，中继只按房间转发帧，不解析/记录/缓存 payload，不持有原始 pairKey。 |
+| `packages/` | 共享协议包 | 桌面端与远程端共用的 TypeScript workspace 包：`@code-lite/protocol`（协议与线格式）、`@code-lite/chat-core`（会话客户端、消息归约、模型分组）、`@code-lite/sync`（双端同步管理与状态追踪）、`@code-lite/transport`（WS 传输）。经 tsconfig paths 与 vite alias 指向 `../packages/*/src`，两端共用同一份源码。 |
+| `docs/` | 文档 | 详细设计、架构、开发流程和排错说明，见下方文档入口。 |
+| `demo/` | 示例 | ACP mock、SDK probe、legacy nanobot 等参考用例，不作为主线功能。 |
+| `scripts/` `start-dev.ps1` `release.ps1` | 脚本 | Windows 开发启动、打包发布入口。 |
+
+**协议链路一句话**：`ui` ↔ `backend`（本地）在同一台机器上直连；`ui-remote` ↔ `proxy_server` ↔ `backend`（RemoteBridge）经中继盲转发；`ui` 与 `ui-remote` 通过 `packages/` 共享的协议与同步逻辑保持对齐。
 
 ## AI Coding 规范
 
@@ -11,9 +36,10 @@
 3. **禁止写入敏感信息**：不要把 API Key、Token、账号密码、私钥等敏感信息写入仓库文件；配置文件只保留环境变量占位或示例值。
 4. **禁止 Emoji**：代码、注释、提交信息、文档和用户可见文案中不使用 emoji 表情。
 5. **禁止擅自启动长期进程**：未经用户明确要求，不自行后台启动前端、后端、数据库、Agent 服务或其他长期运行进程。
-6. **优先阅读文档**：开始涉及需求、架构、nanobot、demo 或目录设计的任务前，先阅读本文件和相关 `docs/` 文档。
+6. **优先阅读文档**：开始涉及需求、架构、Agent Adapter、远程同步、demo 或目录设计的任务前，先阅读本文件和相关 `docs/` 文档。
 7. **小步修改**：每次改动尽量围绕一个明确目标，不做无关重构，不顺手格式化无关文件。
 8. **可验证优先**：能用脚本、命令或静态检查验证的改动，应在完成后执行验证，并在回复中说明结果。
+9. **双端同步先征求意见**：涉及对话、对话样式、消息渲染、会话管理等桌面端（`ui/`）与远程端（`ui-remote/`）都存在的功能时，改一端前先判断是否需要两端一起更新，并主动征求用户意见后再动手。详见下方「双端同步约定」。
 
 对任意 Agent：请记住，本项目中任何文档和代码都必须以 UTF-8 的方式读取和写入。
 
@@ -24,7 +50,7 @@
 PowerShell 读取文件时建议：
 
 ```powershell
-Get-Content -Encoding UTF8 .\docs\PRD.md
+Get-Content -Encoding UTF8 .\docs\guides\PRD.md
 ```
 
 PowerShell 写入文件时必须显式指定 UTF-8：
@@ -36,11 +62,35 @@ Set-Content -Encoding UTF8 .\path\to\file.md $content
 Python 读写文件时必须显式指定编码：
 
 ```python
-Path("docs/PRD.md").read_text(encoding="utf-8")
-Path("docs/PRD.md").write_text(content, encoding="utf-8")
+Path("docs/guides/PRD.md").read_text(encoding="utf-8")
+Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 ```
 
 手动编辑文件时，也应确认编辑器保存编码为 UTF-8。
+
+## 双端同步约定
+
+桌面端（`ui/`）和远程遥控端（`ui-remote/`）是两套独立的前端代码，但面向的是同一套会话与 agent 交互。很多功能在两端都有对应实现，例如：
+
+- 对话消息的渲染与样式（Markdown、工具调用、计划进度、图片等）。
+- 会话列表与管理（归档、分组、进行中指示、切换等）。
+- 输入框、模型选择、思考强度、访问模式等交互。
+- 远程连接、配对与同步相关的行为。
+
+因此，当一个功能或样式改动落在上述这类**两端都存在**的区域时：
+
+1. **先判断影响范围**：明确这次改动只影响桌面端，还是远程端也有对应界面/逻辑需要跟进。共享逻辑通常应下沉到 `packages/`，纯展示与交互层则各端分别实现。
+2. **主动征求用户意见**：如果远程端也可能需要同步更新，不要默认只改一端、也不要擅自同时改两端，而应先向用户说明「这个改动桌面端和远程端都涉及，是否需要两边一起同步更新」，得到明确答复后再执行。
+3. **保持协议一致**：涉及 `packages/`（protocol / chat-core / sync / transport）的改动会同时影响两端，务必确认两端都能编译通过（各自 `npm run build`），避免只顾一端导致另一端协议错位。
+4. **提交时说清楚**：如果最终只更新了一端，在提交信息或回复中注明另一端尚未同步，方便后续跟进。
+
+判断不确定时，宁可先问用户，也不要单方面决定同步范围。
+
+### 聊天渲染共享库与配色
+
+- **共享渲染逻辑放 `packages/chat-render`（`@code-lite/chat-render`）**：工具组/文件编辑组分组、diff 行计算、文件引用解析（`classifyHref`）等纯逻辑两端共用；React 展示层与弹窗/详情页各端分别实现（桌面弹窗、移动端跳详情页）。
+- **配色一律走各端语义 CSS 令牌**（桌面 `ui/src/styles.css`、远端 `ui-remote/src/styles/tokens.css`），禁止硬编码 hex；新增令牌要覆盖明暗两套。
+- **streamdown 深色靠主题属性切换，不靠 Tailwind**：本项目未接 Tailwind，streamdown 自带的 `dark:` 变体不生效。深色语法高亮通过 `[data-theme="dark"]`（桌面）/ `[data-mode="dark"]`（远端）手动切到 shiki 的 `--shiki-dark` 变量，代码块标题栏等 chrome 也用实心令牌自绘。
 
 ## 文档入口
 
@@ -48,35 +98,51 @@ Path("docs/PRD.md").write_text(content, encoding="utf-8")
 
 | 路径 | 用途 |
 |------|------|
-| `docs/PRD.md` | 产品需求文档，记录产品定位、核心功能、MVP 范围和路线规划 |
-| `docs/ARCHITECTURE.md` | 架构设计文档，记录 Tauri、Python 后台、Agent Runtime、审批网关等设计方向 |
-| `docs/PROJECT_STRUCTURE.md` | 项目目录结构规划，记录未来代码目录和职责边界 |
-| `docs/UI_DEVELOPMENT.md` | UI 与 Tauri 桌面壳开发文档，记录环境依赖、启动流程、目录职责和常见问题 |
-| `docs/DEVELOPMENT_WORKFLOW.md` | 开发流程规范，记录分支命名、master 使用范围、合并和版本升级要求 |
-| `docs/UI_NANOBOT_INTEGRATION_DESIGN.md` | UI 去 mock、接入 nanobot Python 后台和 streamdown Markdown 渲染的设计文档 |
-| `docs/NANOBOT_SDK_RESEARCH.md` | nanobot SDK 调研记录，包含流式输出、工具审批、自定义 Tool、Skill 注入和配置建议 |
-| `demo/README.md` | nanobot 命令行 demo 使用说明 |
+| `docs/README.md` | 文档索引，说明当前主线、保留文档和已清理旧路线 |
+| `docs/guides/PRD.md` | 产品需求文档，记录 code-lite 的产品定位、核心功能、MVP 范围和路线规划 |
+| `docs/architecture/ARCHITECTURE.md` | 架构设计文档，记录 Tauri、Python Agent Hub、多 Agent Adapter、远程同步和权限边界 |
+| `docs/architecture/PROJECT_STRUCTURE.md` | 项目目录结构规划，记录目标代码目录、职责边界和命名迁移策略 |
+| `docs/guides/UI_DEVELOPMENT.md` | UI 与 Tauri 桌面壳开发文档，记录环境依赖、启动流程、目录职责和常见问题 |
+| `ui-remote/AGENTS.md` | 远程遥控端（`ui-remote/`）开发约定，记录技术栈、目录结构、组件模式、PWA / 安卓环境判定和构建要求 |
+| `docs/development/DEVELOPMENT_WORKFLOW.md` | 开发流程规范，记录 dev 集成、分支命名、master 使用范围、变基合并和版本升级要求 |
+| `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` | ACP Agent Adapter 实施设计，记录 Codex、Claude Code、opencode 的主线接入方案 |
+| `docs/design/0703-AGENT-UNIFIED-ACP.md` | 统一前端交互协议设计，记录 session capabilities、模型、模式和事件映射 |
+| `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` | Agent adapter 归位、结构化日志、诊断错误和设置页日志查看重构方案 |
+| `docs/refactor/0709-ACP-RUNTIME-FORCE-DISCONNECT.md` | ACP Runtime 强制断开、进程树清理、设置变更联动断开和升级占用修复方案 |
+| `docs/design/0702-REMOTE-SYNC.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
+| `docs/design/0709-REMOTE-CONTROL-DUAL-SYNC.md` | 远程控制与双端对等同步设计，记录事件总线、附着快照、单会话互锁、中继盲转发和落地顺序 |
+| `docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md` | 远程控制协议修复与双端同步收敛，记录 turn.start 参数 bug、中继信封路由、WsSession 统一 dispatch、会话生命周期双向同步和最小安全模型 |
+| `docs/design/0711-REMOTE-CHAT-RENDER-APPROVAL-FILEREF.md` | 远端聊天渲染增强、审批流修复与文件引用渲染设计，记录 @code-lite/chat-render 共享库、工具组/文件编辑组/详情页、approval.resolved 广播与挂起审批快照恢复、fs.readFile 受控读取与文件引用高亮 |
+| `docs/design/0703-RUNTIME-MODEL-PROVIDER.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
+| `docs/guides/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
+| `demo/acp-demo/README.md` | ACP mock、Python SDK probe 和 Codex ACP smoke 使用说明 |
 
 阅读建议：
 
-1. 做产品需求相关任务，先读 `docs/PRD.md`。
-2. 做架构和模块边界相关任务，先读 `docs/ARCHITECTURE.md` 和 `docs/PROJECT_STRUCTURE.md`。
-3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/UI_DEVELOPMENT.md`。
-4. 做 UI 去 mock、接入 nanobot、流式事件、审批闭环和 Markdown 渲染相关任务，先读 `docs/UI_NANOBOT_INTEGRATION_DESIGN.md`。
-5. 做 nanobot、Skill、Tool、审批流相关任务，先读 `docs/NANOBOT_SDK_RESEARCH.md`。
-6. 做 demo 相关任务，先读 `demo/README.md` 和 `demo/pyproject.toml`。
-7. 做功能开发、Bug 修复、性能优化、重构或发布合并前，先读 `docs/DEVELOPMENT_WORKFLOW.md`。
+1. 做产品需求相关任务，先读 `docs/README.md` 和 `docs/guides/PRD.md`。
+2. 做架构、模块边界相关任务，先读 `docs/architecture/ARCHITECTURE.md` 和 `docs/architecture/PROJECT_STRUCTURE.md`。
+3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/guides/UI_DEVELOPMENT.md`。
+4. 做 Codex、Claude Code、opencode、ACP adapter、runtime 事件、ACP 连接释放和进程清理相关任务，先读 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md`、`docs/design/0703-AGENT-UNIFIED-ACP.md`、`docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` 和 `docs/refactor/0709-ACP-RUNTIME-FORCE-DISCONNECT.md`。
+5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/design/0702-REMOTE-SYNC.md`、`docs/design/0709-REMOTE-CONTROL-DUAL-SYNC.md` 和 `docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md`；改动 `ui-remote/` 前必读 `ui-remote/AGENTS.md`。
+5.1 做对话、对话样式、会话管理等桌面端与远程端都涉及的功能，先读本文件「双端同步约定」，判断是否需要两端同步并征求用户意见。
+6. 做模型供应商、模型选择和 runtime 配置相关任务，先读 `docs/design/0703-RUNTIME-MODEL-PROVIDER.md`。
+7. 做运行时数据、聊天 UI、adapter 迁移、日志或诊断重构相关任务，先读 `docs/refactor/0703-RUNTIME-DATA-CHAT-UI.md` 和 `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md`。
+8. 做 ACP 协议、Python backend ACP client 或 SDK 探针相关调研，先读 `docs/research/0702-AGENT-ACP-RESEARCH.md` 和 `docs/research/0703-BACKEND-ACP-RESEARCH.md`。
+9. 做 legacy nanobot demo 相关任务，只参考 `demo/nanobot-demo/README.md` 和当前代码，不把 nanobot 作为新功能主线。
+10. 做功能开发、Bug 修复、性能优化、重构或发布合并前，先读 `docs/development/DEVELOPMENT_WORKFLOW.md`。
 
 ## 开发与启动入口
 
-当前已落地的桌面 UI 原型由 `ui/`、`src-tauri/` 和 `backend/` 组成：
+桌面主控端由 `ui/`、`src-tauri/` 和 `backend/` 组成；远程遥控端 `ui-remote/` 与中继 `proxy_server/` 可按需单独启动。
 
 1. `ui/`：React + Vite 前端 UI，使用 `streamdown` 渲染 assistant Markdown，当前由 backend 流式事件驱动消息。
 2. `src-tauri/`：Tauri 2 桌面壳，默认窗口为 `1200x756`，最小窗口为 `900x620`。
-3. `backend/`：Python nanobot 后台，使用 uv 管理依赖，提供本地 NDJSON 流式接口。
-4. `scripts/dev-tauri.ps1`：Windows 本地开发启动脚本，会临时设置 VS Build Tools、Cargo PATH 和代理环境。
+3. `backend/`：Python Agent Hub 原型，使用 uv 管理依赖，提供本地 NDJSON 流式接口；当前主线是通用 ACP adapter 与 Codex / Claude Code / opencode runtime descriptor，nanobot 仅作 legacy 兼容 adapter。
+4. `ui-remote/`：远程遥控端，React + Vite + Capacitor；开发流程与约定见 `ui-remote/AGENTS.md`，`npm run build` = `tsc && vite build`。
+5. `proxy_server/`：FastAPI + WebSocket 中继，`requirements.txt` 声明依赖，独立进程运行；桌面端与远程端需连同一中继地址。
+6. `scripts/dev-tauri.ps1`：Windows 本地开发启动脚本，会临时设置 VS Build Tools、Cargo PATH 和代理环境。
 
-常用命令：
+桌面端常用命令：
 
 ```powershell
 npm install --prefix ui
@@ -109,11 +175,23 @@ npm run backend:dev
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-tauri.ps1 -Proxy http://127.0.0.1:7899
 ```
 
-完整开发步骤、环境依赖、排错说明和 UI 结构说明见 `docs/UI_DEVELOPMENT.md`。
+### 端口说明
+
+- **后端端口随机化**：桌面壳启动时在 `50000-60000` 内探测一个空闲端口拉起 backend，前端经 `ensure_backend` 返回的 `base_url` 自动跟随，无需硬编码，避免端口冲突。`start-dev.ps1` 双终端开发流程会先选好空闲端口，再经 `CODE_LITE_BACKEND_PORT` 注入给 Tauri 终端复用（保留独立后端日志窗口）。
+- **前端桌面 dev 端口固定**：Tauri 加载的 Vite dev 端口（`tauri.conf.json` 中的 `1420`）保持不变，正式版不含 dev 端口。
+- **浏览器独立调试**：非 Tauri 直连时前端回退地址可用 `VITE_BACKEND_URL` 覆盖，默认 `http://127.0.0.1:18765`。
+- **中继端口**：`proxy_server` 默认 `18766`，桌面端 RemoteBridge 与远程端均连接该中继地址。
+
+完整开发步骤、环境依赖、排错说明和 UI 结构说明见 `docs/guides/UI_DEVELOPMENT.md`；远程端专项约定见 `ui-remote/AGENTS.md`。
 
 ## 分支开发流程
 
-功能开发、Bug 修复、性能优化、重构和测试补充等改动，必须从 `master` 新建分支进行，不直接在 `master` 上开发。
+项目长期保留 `master` 和 `dev` 两个主干分支：
+
+1. `master`：稳定发布分支，只保留发布级合并、编译发布验证和用户明确授权的紧急修正。
+2. `dev`：集成测试分支，用于在合并到 `master` 前汇总功能分支、修复分支和性能优化分支，并完成合并测试。
+
+功能开发、Bug 修复、性能优化、重构和测试补充等改动，必须从 `dev` 新建分支进行，不直接在 `master` 上开发。文档修改、参数配置、流程说明等小幅度改动允许直接在 `dev` 上修改和提交。
 
 分支命名格式：
 
@@ -124,20 +202,23 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-tauri.ps1 -Proxy http://1
 示例：
 
 ```text
-feat/settings-0630-model-provider
-fix/backend-0630-sidecar-lifecycle
-perf/overview-0630-cache
+feat/adapter-0701-codex-runtime
+feat/remote-0701-viewer-sync
+fix/backend-0701-sidecar-lifecycle
+perf/events-0701-stream-cache
 ```
 
 `master` 分支只保留以下操作：
 
-1. 合并已经完成验证的特性分支。
-2. 合并后进行版本升级提交。
+1. 合并已经在 `dev` 完成集成验证且包含版本升级提交的内容。
+2. 在合并后执行编译、打包和发布验证。
 3. 用户明确授权的紧急文档或流程修正。
 
-每次分支合并到 `master` 后，必须立即进行一次独立版本升级提交。版本升级使用统一入口，例如 `npm run version:set -- 0.1.3` 或修改 `VERSION` 后运行 `npm run version:sync`。版本提交只包含版本相关文件，不混入功能代码。
+所有合并尽量采用变基合并：功能分支先 `rebase dev`，再快进合并到 `dev`；`dev` 达到可发布状态后先完成集成验证，再在 `dev` 上完成独立版本升级提交，之后快进合并到 `master`。如 `dev` 与 `master` 分叉，应先 `git rebase master`，再 `git merge --ff-only dev`。
 
-完整流程见 `docs/DEVELOPMENT_WORKFLOW.md`。
+每次发布前，必须先在 `dev` 分支进行一次独立版本升级提交，然后才能合并至 `master` 并执行编译、打包和发布验证。版本升级使用统一入口，例如 `npm run version:set -- 0.1.3` 或修改 `VERSION` 后运行 `npm run version:sync`。版本提交只包含版本相关文件，不混入功能代码。
+
+完整流程见 `docs/development/DEVELOPMENT_WORKFLOW.md`。
 
 ## 提交规范
 
@@ -145,14 +226,14 @@ perf/overview-0630-cache
 
 | 前缀 | 用途 | 示例 |
 |------|------|------|
-| `feat:` | 新功能 | `feat: 增加命令审批原型` |
-| `fix:` | 修复问题 | `fix: 修复 demo 配置路径错误` |
-| `docs:` | 文档变更 | `docs: 更新 nanobot 调研记录` |
-| `refactor:` | 重构 | `refactor: 调整 Agent 适配层结构` |
-| `test:` | 测试相关 | `test: 添加工具注册验证脚本` |
-| `chore:` | 构建、依赖、工具链 | `chore: 初始化 uv 项目配置` |
+| `feat:` | 新功能 | `feat: 增加 Codex adapter 原型` |
+| `fix:` | 修复问题 | `fix: 修复远程事件重连序号错误` |
+| `docs:` | 文档变更 | `docs: 更新 code-lite 架构文档` |
+| `refactor:` | 重构 | `refactor: 调整 Agent Adapter 描述模型` |
+| `test:` | 测试相关 | `test: 添加事件协议验证脚本` |
+| `chore:` | 构建、依赖、工具链 | `chore: 更新 sidecar 打包配置` |
 | `style:` | 纯格式调整 | `style: 统一 Markdown 表格格式` |
-| `perf:` | 性能优化 | `perf: 优化硬件扫描缓存逻辑` |
+| `perf:` | 性能优化 | `perf: 优化远程同步事件缓存` |
 
 提交规则：
 
@@ -161,6 +242,7 @@ perf/overview-0630-cache
 3. 提交前检查 `git status --short`，确认没有误加临时文件或敏感文件。
 4. 不提交本地密钥、缓存、虚拟环境、日志、下载文件和运行时生成文件。
 5. 如用户没有要求提交，Agent 不应主动创建 git commit。
+6. 但是在有文档的情况下的话，每完成一步就提交一次，防止时间线错乱。
 
 ## 敏感信息与本地文件
 
@@ -169,8 +251,8 @@ perf/overview-0630-cache
 1. API Key、Token、账号密码、私钥。
 2. `.env`、本地配置、真实用户数据。
 3. Python 虚拟环境、Node 依赖、Rust 编译产物。
-4. 日志、下载缓存、驱动缓存、运行时 session。
-5. 包含真实机器信息或用户隐私的诊断报告。
+4. 日志、下载缓存、运行时 session。
+5. 包含真实仓库私密内容、用户隐私或远程连接令牌的诊断报告。
 
 配置文件应提供示例模板，例如：
 
@@ -183,4 +265,4 @@ config.example.json
 
 ## 当前阶段约束
 
-当前 UI 与 Tauri 桌面壳已进入原型阶段，`AGENTS.md` 只保留高频入口和协作规范；详细设计、启动流程、排错步骤和模块说明应写入 `docs/` 下的专项文档。后续 Python 后台、Agent Runtime、审批网关等模块落地后，也应优先补充对应专项文档，再在本文件中加入简要入口。
+当前 UI 与 Tauri 桌面壳已进入原型阶段，`AGENTS.md` 只保留高频入口和协作规范；详细设计、启动流程、排错步骤和模块说明应写入 `docs/` 下的专项文档。后续 Codex、Claude Code、opencode、远程同步和权限审批等模块落地后，也应优先补充对应专项文档，再在本文件中加入简要入口。

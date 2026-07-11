@@ -1,0 +1,78 @@
+/* ─── 设备列表 ─── */
+.rc-peer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rc-peer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-tertiary);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.rc-peer-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rc-peer-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.rc-peer-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rc-peer-id {
+  font-family: var(--font-family-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.rc-peer-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.rc-peer-role-pending {
+  background: rgba(230, 160, 30, 0.15);
+  color: var(--color-warning);
+}
+
+.rc-peer-role-operator {
+  background: rgba(40, 160, 90, 0.15);
+  color: var(--color-success);
+}
+
+.rc-peer-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}

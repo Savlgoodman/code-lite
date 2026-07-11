@@ -1,0 +1,344 @@
+.tool-call-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tool-call-group {
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.tool-call-group-head {
+  padding: 9px 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.tool-call-group[open] .tool-call-group-head {
+  border-bottom: 1px solid var(--border-tertiary);
+}
+
+.tool-call-group > .tool-call-list {
+  margin: 0;
+  padding: 8px;
+}
+
+.file-edit-group {
+  overflow: hidden;
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.file-edit-group-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.file-edit-group-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-edit-group[open] .file-edit-group-head {
+  border-bottom: 1px solid var(--border-tertiary);
+}
+
+.file-edit-group > .tool-file-diff-list {
+  padding: 8px;
+}
+
+.tool-call-card {
+  padding: 10px;
+  border: 1px solid var(--border-tertiary);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.tool-call-card.error {
+  border-color: var(--color-error);
+}
+
+.tool-call-card.approval {
+  border-color: var(--approval-border);
+  background: var(--approval-bg);
+}
+
+.tool-call-pre-wrap {
+  margin: 8px 0 0;
+}
+
+.tool-call-pre-scroll {
+  position: relative;
+}
+
+.tool-call-pre {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 收起态底部渐隐，暗示内容被截断 */
+.tool-call-pre-scroll.collapsed::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 44px;
+  border-radius: 0 0 8px 8px;
+  background: linear-gradient(to bottom, transparent, var(--bg-secondary) 92%);
+  pointer-events: none;
+}
+
+.tool-call-pre-toggle {
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-tertiary);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.5;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.tool-call-pre-toggle:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.tool-call-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tool-call-head .tool-call-icon {
+  flex: 0 0 auto;
+}
+
+/* 命令名单行截断：shell 工具的 name 可能是整条长命令，不截断会撑高标题并把风险挤成竖排 */
+.tool-call-head strong.tool-call-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-head em {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 风险标签固定在行尾，不换行、不被挤压 */
+.tool-call-head .tool-call-risk {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.tool-call-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.tool-call-detail span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.tool-file-diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-file-diff {
+  overflow: hidden;
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.tool-file-diff-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tool-file-diff[open] .tool-file-diff-head {
+  border-bottom: 1px solid var(--border-tertiary);
+}
+
+.tool-file-diff-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-file-diff-head em {
+  border-radius: 999px;
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
+  font-style: normal;
+  padding: 2px 7px;
+}
+
+.tool-file-diff-head small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.diff-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.diff-stats-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.diff-stats-add {
+  color: var(--diff-add-text);
+}
+
+.diff-stats-remove {
+  color: var(--diff-remove-text);
+}
+
+.tool-file-diff-icon {
+  display: grid;
+  place-items: center;
+  color: var(--color-success);
+}
+
+.tool-file-diff-preview {
+  overflow: auto;
+  max-height: 360px;
+  margin: 0;
+  border-radius: 0;
+  background: var(--bg-secondary);
+  padding: 8px 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tool-file-diff-state {
+  padding: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tool-file-diff-state.error {
+  background: var(--diff-remove-bg);
+  color: var(--diff-remove-text);
+}
+
+.diff-line {
+  display: block;
+  min-width: max-content;
+  padding: 0 10px;
+  white-space: pre;
+}
+
+.diff-line.add {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
+}
+
+.diff-line.remove {
+  background: var(--diff-remove-bg);
+  color: var(--diff-remove-text);
+}
+
+.diff-line.context {
+  color: var(--text-secondary);
+}
+
+.tool-call-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-tertiary);
+}
+
+.tool-call-card.complete .tool-call-icon {
+  color: var(--green);
+}
+
+.tool-call-card.error .tool-call-icon,
+.tool-call-card.approval .tool-call-icon {
+  color: var(--orange);
+}
+
+.spin-dot {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}

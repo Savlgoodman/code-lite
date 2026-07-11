@@ -1,17 +1,4 @@
-import type { Session, ToolCallItem } from "../types";
-
-export function formatSessionStatus(status: Session["status"]) {
-  if (status === "running") {
-    return "运行中";
-  }
-  if (status === "approval") {
-    return "待审批";
-  }
-  if (status === "error") {
-    return "异常";
-  }
-  return "空闲";
-}
+import type { ToolCallItem } from "../types";
 
 export function formatTimeLabel(value: number) {
   const diff = Date.now() - value;
@@ -31,10 +18,32 @@ export function formatTimeLabel(value: number) {
   return `${Math.floor(diff / day)} 天`;
 }
 
+export function formatConversationBoundaryTime(value: number) {
+  const date = new Date(value);
+  const now = new Date();
+  const time = new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(date);
+
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  if (isToday) {
+    return time;
+  }
+
+  const weekday = new Intl.DateTimeFormat("zh-CN", { weekday: "short" }).format(date);
+  return `${weekday} ${time}`;
+}
+
 export function titleFromInput(input: string) {
   const text = input.trim().replace(/\s+/g, " ");
   if (!text) {
-    return "新的维修会话";
+    return "新会话";
   }
   return text.length > 24 ? `${text.slice(0, 24)}...` : text;
 }

@@ -24,11 +24,12 @@ export function createEmptySession(): Session {
   const now = Date.now();
   return {
     id: createId("session"),
-    title: "新的维修会话",
-    preview: "描述电脑问题，Agent 会先生成只读检查计划",
+    title: "新会话",
+    preview: "",
     createdAt: now,
     updatedAt: now,
-    status: "idle"
+    status: "idle",
+    agent: null
   };
 }
 
@@ -61,8 +62,10 @@ export function normalizeStoredState(value: StoredState): StoredState {
       items.map((message) => ({
         ...message,
         createdAt: typeof message.createdAt === "number" ? message.createdAt : now,
+        updatedAt: typeof message.updatedAt === "number" ? message.updatedAt : undefined,
         streaming: false,
-        toolCalls: message.toolCalls ?? []
+        toolCalls: message.toolCalls ?? [],
+        runtimeEvents: message.runtimeEvents ?? []
       }))
     ])
   );
@@ -82,21 +85,11 @@ export function createAssistantMessage(id: string): ChatMessage {
     role: "assistant",
     content: "",
     createdAt: Date.now(),
+    updatedAt: Date.now(),
     streaming: true,
     toolCalls: []
   };
 }
 
-export function updateMessage(
-  messages: Record<string, ChatMessage[]>,
-  sessionId: string,
-  messageId: string,
-  updater: (message: ChatMessage) => ChatMessage,
-) {
-  return {
-    ...messages,
-    [sessionId]: (messages[sessionId] ?? []).map((message) =>
-      message.id === messageId ? updater(message) : message
-    )
-  };
-}
+// updateMessage 已迁移到 packages/chat-core，此处 re-export 保持兼容。
+export { updateMessage } from "@code-lite/chat-core";

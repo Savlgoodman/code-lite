@@ -1,5 +1,26 @@
 import { ensureBackend } from "./agentClient";
-import type { AppAboutInfo, ModelProviderModelsResult, SavedModelProviderResult } from "../types";
+import type {
+  AcpPackageSettingsState,
+  AcpRuntimeDisconnectResult,
+  AcpRuntimeStatus,
+  AppAboutInfo,
+  AgentRuntimeModelsResult,
+  AgentRuntimeConfig,
+  AgentRuntimeSettingsState,
+  ConfiguredModel,
+  ConfiguredModelProvider,
+  DefaultModelStrategy,
+  ModelCapabilities,
+  ModelGeneration,
+  ModelLimits,
+  ModelProtocol,
+  LogFilesResult,
+  LogTailResult,
+  ModelProviderModelsResult,
+  ModelSettingsState,
+  RuntimeExecutableInfo,
+  SavedModelProviderResult
+} from "../types";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const baseUrl = await ensureBackend();
@@ -24,6 +45,141 @@ export async function loadAppAbout(): Promise<AppAboutInfo> {
   return requestJson<AppAboutInfo>("/api/settings/about");
 }
 
+export async function loadLogFiles(): Promise<LogFilesResult> {
+  return requestJson<LogFilesResult>("/api/logs/files");
+}
+
+export async function loadLogTail(options: {
+  category?: string;
+  level?: string;
+  runtime?: string;
+  query?: string;
+  limit?: number;
+} = {}): Promise<LogTailResult> {
+  const params = new URLSearchParams();
+  if (options.category) params.set("category", options.category);
+  if (options.level) params.set("level", options.level);
+  if (options.runtime) params.set("runtime", options.runtime);
+  if (options.query) params.set("query", options.query);
+  if (options.limit) params.set("limit", String(options.limit));
+  const suffix = params.toString() ? `?${params}` : "";
+  return requestJson<LogTailResult>(`/api/logs/tail${suffix}`);
+}
+
+export async function loadAgentRuntimeSettings(): Promise<AgentRuntimeSettingsState> {
+  return requestJson<AgentRuntimeSettingsState>("/api/settings/agent-runtimes");
+}
+
+export async function loadAcpPackageSettings(options: {
+  check?: boolean;
+  includeRuntimeExecutables?: boolean;
+  includeRuntimeVersions?: boolean;
+  runtimeId?: string;
+} = {}): Promise<AcpPackageSettingsState> {
+  const params = new URLSearchParams();
+  if (options.check) params.set("check", "true");
+  if (options.includeRuntimeExecutables) params.set("includeRuntimeExecutables", "true");
+  if (options.includeRuntimeVersions) params.set("includeRuntimeVersions", "true");
+  if (options.runtimeId) params.set("runtime", options.runtimeId);
+  const suffix = params.toString() ? `?${params}` : "";
+  return requestJson<AcpPackageSettingsState>(`/api/settings/acp-packages${suffix}`);
+}
+
+export async function loadAcpRuntimeDetails(runtimeId: string, options: { check?: boolean } = {}): Promise<AcpPackageSettingsState> {
+  return loadAcpPackageSettings({
+    check: options.check,
+    includeRuntimeExecutables: true,
+    includeRuntimeVersions: true,
+    runtimeId
+  });
+}
+
+export async function loadRuntimeExecutableSettings(
+  runtimeId: string,
+  options: { check?: boolean } = {}
+): Promise<RuntimeExecutableInfo> {
+  const params = new URLSearchParams();
+  if (options.check) params.set("check", "true");
+  const suffix = params.toString() ? `?${params}` : "";
+  return requestJson<RuntimeExecutableInfo>(
+    `/api/settings/agent-runtimes/${runtimeId}/runtime-executable${suffix}`
+  );
+}
+
+export async function updateAcpPackageDir(runtimeId: string, packageDir: string): Promise<AcpPackageSettingsState> {
+  return requestJson<AcpPackageSettingsState>("/api/settings/acp-packages", {
+    body: JSON.stringify({
+      packageDir,
+      runtimeId
+    }),
+    method: "PATCH"
+  });
+}
+
+export async function updateAcpPackageRoot(
+  packageRoot: string,
+): Promise<AcpPackageSettingsState> {
+  return requestJson<AcpPackageSettingsState>("/api/settings/acp-packages", {
+    body: JSON.stringify({
+      packageRoot
+    }),
+    method: "PATCH"
+  });
+}
+
+export async function installAcpPackages(options: { runtimeId?: string; update?: boolean } = {}): Promise<AcpPackageSettingsState> {
+  return requestJson<AcpPackageSettingsState>("/api/settings/acp-packages/install", {
+    body: JSON.stringify({
+      runtimeId: options.runtimeId,
+      update: Boolean(options.update)
+    }),
+    method: "POST"
+  });
+}
+
+export async function updateAgentRuntime(
+  runtimeId: string,
+  patch: Partial<Omit<Pick<AgentRuntimeConfig, "codexPath" | "command" | "configMode" | "enabled" | "mode">, "command">> & {
+    command?: string | string[];
+    runtimeExecutable?: {
+      selectedPath?: string;
+      source: string;
+    };
+  }
+): Promise<AgentRuntimeConfig> {
+  return requestJson<AgentRuntimeConfig>(`/api/settings/agent-runtimes/${runtimeId}`, {
+    body: JSON.stringify(patch),
+    method: "PATCH"
+  });
+}
+
+export async function installAgentRuntime(runtimeId: string): Promise<AgentRuntimeConfig> {
+  return requestJson<AgentRuntimeConfig>(`/api/settings/agent-runtimes/${runtimeId}/install`, {
+    method: "POST"
+  });
+}
+
+export async function updateActiveAgentRuntime(adapter: string): Promise<AgentRuntimeSettingsState> {
+  return requestJson<AgentRuntimeSettingsState>("/api/settings/agent-runtimes/active", {
+    body: JSON.stringify({ adapter }),
+    method: "PATCH"
+  });
+}
+
+export async function loadAgentRuntimeModels(runtimeId: string): Promise<AgentRuntimeModelsResult> {
+  return requestJson<AgentRuntimeModelsResult>(`/api/settings/agent-runtimes/${runtimeId}/models`);
+}
+
+export async function loadAcpRuntimeStatus(): Promise<AcpRuntimeStatus> {
+  return requestJson<AcpRuntimeStatus>("/api/runtimes/acp/status");
+}
+
+export async function cleanupAcpRuntimes(): Promise<AcpRuntimeDisconnectResult> {
+  return requestJson<AcpRuntimeDisconnectResult>("/api/runtimes/acp/cleanup", {
+    method: "POST"
+  });
+}
+
 export async function fetchProviderModels(options: {
   apiKey: string;
   baseUrl: string;
@@ -34,6 +190,87 @@ export async function fetchProviderModels(options: {
       baseUrl: options.baseUrl
     }),
     method: "POST"
+  });
+}
+
+export async function loadModelSettings(): Promise<ModelSettingsState> {
+  return requestJson<ModelSettingsState>("/api/settings/model-providers");
+}
+
+export async function createModelProvider(options: {
+  apiKey: string;
+  baseUrl: string;
+  name: string;
+  protocol: ModelProtocol;
+}): Promise<ConfiguredModelProvider> {
+  return requestJson<ConfiguredModelProvider>("/api/settings/model-providers", {
+    body: JSON.stringify(options),
+    method: "POST"
+  });
+}
+
+export async function updateModelProvider(
+  providerId: string,
+  patch: Partial<Pick<ConfiguredModelProvider, "baseUrl" | "enabled" | "name" | "protocol">> & { apiKey?: string }
+): Promise<ConfiguredModelProvider> {
+  return requestJson<ConfiguredModelProvider>(`/api/settings/model-providers/${providerId}`, {
+    body: JSON.stringify(patch),
+    method: "PATCH"
+  });
+}
+
+export async function refreshModelProviderModels(providerId: string): Promise<ConfiguredModelProvider> {
+  return requestJson<ConfiguredModelProvider>(`/api/settings/model-providers/${providerId}/models/refresh`, {
+    method: "POST"
+  });
+}
+
+export async function addProviderModels(
+  providerId: string,
+  models: Array<{
+    capabilities?: Partial<ModelCapabilities>;
+    generation?: Partial<ModelGeneration>;
+    label?: string;
+    limits?: Partial<ModelLimits>;
+    model: string;
+    protocol?: ModelProtocol;
+  }>
+): Promise<ModelSettingsState> {
+  return requestJson<ModelSettingsState>(`/api/settings/model-providers/${providerId}/models`, {
+    body: JSON.stringify({ models }),
+    method: "POST"
+  });
+}
+
+export async function updateConfiguredModel(
+  modelId: string,
+  patch: Partial<Pick<ConfiguredModel, "capabilities" | "enabled" | "generation" | "label" | "limits" | "protocol">>
+): Promise<ConfiguredModel> {
+  return requestJson<ConfiguredModel>(`/api/settings/models/${modelId}`, {
+    body: JSON.stringify(patch),
+    method: "PATCH"
+  });
+}
+
+export async function deleteConfiguredModel(modelId: string): Promise<ModelSettingsState> {
+  return requestJson<ModelSettingsState>(`/api/settings/models/${modelId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function deleteModelProvider(providerId: string): Promise<ModelSettingsState> {
+  return requestJson<ModelSettingsState>(`/api/settings/model-providers/${providerId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function updateDefaultModel(options: {
+  defaultModelId: string | null;
+  defaultStrategy: DefaultModelStrategy;
+}): Promise<ModelSettingsState> {
+  return requestJson<ModelSettingsState>("/api/settings/models/default", {
+    body: JSON.stringify(options),
+    method: "PATCH"
   });
 }
 

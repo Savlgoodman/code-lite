@@ -15,13 +15,14 @@ if (-not (Test-Path $vsDevCmd)) {
 $env:HTTP_PROXY = $Proxy
 $env:HTTPS_PROXY = $Proxy
 $env:ALL_PROXY = $Proxy
-$env:REPAIR_AGENTS_ENV = "DEV"
+$env:CODE_LITE_ENV = "DEV"
 
 $cmd = @(
   "call `"$vsDevCmd`" -arch=x64 -host_arch=x64",
   "set `"PATH=%USERPROFILE%\.cargo\bin;%PATH%`"",
   "cd /d `"$repoRoot`"",
-  "npm run tauri:dev"
+  "npm run ui:deps",
+  "npm run tauri:dev --ignore-scripts"
 ) -join " && "
 
 if ($SkipBackend) {

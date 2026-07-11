@@ -1,0 +1,200 @@
+.plan-progress-panel {
+  --plan-progress-item-gap: 8px;
+  --plan-progress-item-height: 20px;
+  height: var(--chat-plan-panel-height, 60px);
+  width: min(252px, 33.333%);
+  min-width: 218px;
+  max-height: min(148px, calc(100vh - 220px));
+  align-self: center;
+  overflow: hidden;
+  border: 1px solid rgba(218, 216, 211, 0.72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 26px rgba(31, 35, 42, 0.1);
+  color: var(--text-primary);
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(14px);
+  transition:
+    height 0.24s cubic-bezier(0.2, 0, 0, 1),
+    width 0.18s ease,
+    min-width 0.18s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.plan-progress-panel:hover,
+.plan-progress-panel:focus-visible {
+  border-color: rgba(199, 197, 191, 0.9);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 30px rgba(31, 35, 42, 0.13);
+}
+
+.plan-progress-panel:focus-visible {
+  outline: 2px solid rgba(55, 110, 184, 0.18);
+  outline-offset: 3px;
+}
+
+.plan-progress-panel.expanded {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.plan-progress-header {
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.plan-progress-header span:first-child {
+  min-width: 0;
+}
+
+.plan-progress-count {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.plan-progress-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text-muted);
+  transition: transform 0.16s ease;
+}
+
+.plan-progress-panel.expanded .plan-progress-chevron {
+  transform: rotate(180deg);
+}
+
+.plan-progress-list {
+  max-height: min(
+    calc((var(--plan-progress-item-height) * 3.5) + (var(--plan-progress-item-gap) * 3)),
+    calc(100vh - 288px)
+  );
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--plan-progress-item-gap);
+  margin: 0;
+  padding: 0 10px 10px;
+  list-style: none;
+  scrollbar-width: none;
+  transition:
+    max-height 0.24s cubic-bezier(0.2, 0, 0, 1),
+    padding-bottom 0.24s cubic-bezier(0.2, 0, 0, 1),
+    opacity 0.18s ease;
+}
+
+.plan-progress-panel.collapsed .plan-progress-list {
+  max-height: 26px;
+  gap: 0;
+  padding-bottom: 8px;
+  overflow: hidden;
+}
+
+.plan-progress-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.plan-progress-item {
+  min-height: var(--plan-progress-item-height);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.plan-progress-panel.collapsed .plan-progress-item {
+  min-height: 20px;
+  align-items: center;
+}
+
+.plan-progress-item.completed {
+  color: var(--text-muted);
+}
+
+.plan-progress-marker {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  display: grid;
+  place-items: center;
+  margin-top: 3px;
+  border: 1.5px solid #babec4;
+  border-radius: 50%;
+  color: #fff;
+}
+
+.plan-progress-panel.collapsed .plan-progress-marker {
+  margin-top: 0;
+}
+
+.plan-progress-item.completed .plan-progress-marker {
+  border-color: #9ea3aa;
+  background: #9ea3aa;
+}
+
+.plan-progress-item.in_progress .plan-progress-marker {
+  border-color: #4f687f;
+  border-right-color: transparent;
+  animation: plan-progress-ring-spin 1.2s linear infinite;
+}
+
+.plan-progress-item.in_progress .plan-progress-marker::after {
+  position: absolute;
+  inset: -4px;
+  border: 1px solid rgba(79, 104, 127, 0.3);
+  border-radius: 50%;
+  content: "";
+  animation: plan-progress-ring-breathe 1.7s ease-in-out infinite;
+}
+
+.plan-progress-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+@keyframes plan-progress-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes plan-progress-ring-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.72);
+  }
+
+  50% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+}
+
+@media (max-width: 780px) {
+  .plan-progress-panel {
+    width: min(280px, 76%);
+    min-width: 0;
+    max-height: min(148px, calc(100vh - 210px));
+  }
+}

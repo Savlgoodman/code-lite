@@ -59,19 +59,19 @@ $version = [string]$packageJson.version
 $artifacts = @(
   @{
     Label = "NSIS installer"
-    Path = Join-Path $repoRoot "src-tauri\target\release\bundle\nsis\PC Repair Agent_$($version)_x64-setup.exe"
+    Path = Join-Path $repoRoot "src-tauri\target\release\bundle\nsis\Code Lite_$($version)_x64-setup.exe"
   },
   @{
     Label = "MSI installer"
-    Path = Join-Path $repoRoot "src-tauri\target\release\bundle\msi\PC Repair Agent_$($version)_x64_en-US.msi"
+    Path = Join-Path $repoRoot "src-tauri\target\release\bundle\msi\Code Lite_$($version)_x64_en-US.msi"
   },
   @{
     Label = "Tauri app executable"
-    Path = Join-Path $repoRoot "src-tauri\target\release\pc-repair-agent.exe"
+    Path = Join-Path $repoRoot "src-tauri\target\release\code-lite.exe"
   },
   @{
     Label = "Backend sidecar executable"
-    Path = Join-Path $repoRoot "src-tauri\target\release\pc-agent-backend.exe"
+    Path = Join-Path $repoRoot "src-tauri\target\release\code-lite-backend.exe"
   }
 )
 

@@ -1,0 +1,124 @@
+/* ============================================
+ * 导航层级与页面转场
+ * ============================================ */
+
+/* ── 底部 Tab Bar ── */
+
+.bottom-tab-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: var(--z-tabbar);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab-button {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color var(--dur-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tab-button.active { color: var(--text); }
+
+.tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.tab-button.active .tab-icon { transform: translateY(-1px); }
+
+.tab-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ── Home Pager：四个 Tab 横向平移 ── */
+
+.home-pager {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.home-track {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  transition: transform var(--dur-slow) var(--ease-page);
+  will-change: transform;
+  touch-action: pan-y;
+}
+
+/* 拖拽跟手期间禁用过渡 */
+.home-track.dragging {
+  transition: none;
+}
+
+.home-pane {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Chat Overlay：从右侧拉入，返回时向右推出 ── */
+
+.chat-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-chat);
+  background: var(--bg);
+  transform: translateX(0);
+  transition: transform var(--dur-slow) var(--ease-page);
+  will-change: transform;
+}
+
+/* 进入前 / 退出后：停在屏幕右侧外 */
+.chat-overlay.enter,
+.chat-overlay.exit {
+  transform: translateX(100%);
+}
+
+/* 底层主界面在 chat 打开时轻微左移并压暗，营造层级纵深 */
+.home-pager.behind {
+  transform: translateX(-12%);
+  filter: brightness(0.96);
+  transition: transform var(--dur-slow) var(--ease-page), filter var(--dur-slow) var(--ease-page);
+}
+
+/* ── Detail Overlay：会话内工具/diff 详情页，叠在会话页之上从右滑入 ── */
+
+.detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--bg);
+  transform: translateX(0);
+  transition: transform var(--dur-slow) var(--ease-page);
+  will-change: transform;
+}
+
+.detail-overlay.enter,
+.detail-overlay.exit {
+  transform: translateX(100%);
+}

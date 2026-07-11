@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/code-lite-backend"
+    ]
+  }
+}

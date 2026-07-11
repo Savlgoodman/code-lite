@@ -1,0 +1,624 @@
+/* ============================================
+ * 独立 AI 对话模块：会话列表 / 供应商设置 / 模型选择
+ * ============================================ */
+
+/* ── AI 会话列表 ── */
+
+.ai-conv-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-conv-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition: background var(--dur-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ai-conv-item:active { background: var(--hover); }
+
+.ai-conv-icon {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.ai-conv-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-conv-title {
+  font-size: 15px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-conv-time {
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+/* ── 通用图标按钮 ── */
+
+.ai-icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ai-icon-btn:active { background: var(--hover); color: var(--text); }
+.ai-icon-btn.danger:active { color: var(--orange); }
+
+/* ── 设置项：导航行 ── */
+
+.settings-item-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.settings-item-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+/* 不可用（如 PWA 环境下的 AI 入口） */
+.settings-item-nav.disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.settings-item-nav.disabled:hover {
+  background: none;
+}
+
+.settings-item-nav.disabled .settings-item-label {
+  color: var(--muted);
+}
+
+/* ── 关于页 ── */
+
+.about-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.about-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  padding: 8px 0 4px;
+}
+
+.about-app-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.about-app-desc {
+  font-size: 13px;
+  color: var(--subtle);
+}
+
+.about-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.about-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin: 0;
+}
+
+.about-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.about-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.about-row:last-child { border-bottom: none; }
+
+.about-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.about-row-value {
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.about-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.about-yes { color: var(--green); }
+.about-no { color: var(--orange); }
+
+.about-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background var(--dur-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.about-link:active { background: var(--hover); }
+
+.about-link-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.about-link-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.about-link-url {
+  font-size: 12px;
+  color: var(--subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 供应商设置 ── */
+
+.ai-provider-list,
+.ai-provider-form,
+.ai-pick-models {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ai-hint {
+  font-size: 13px;
+  color: var(--subtle);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ai-hint-inline {
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+.ai-provider-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+
+.ai-provider-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-provider-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-provider-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ai-provider-url {
+  font-size: 12px;
+  color: var(--subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-provider-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.ai-model-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── 已添加模型行 ── */
+
+.ai-model-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.ai-model-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.ai-model-label {
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-model-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ai-model-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--hover);
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+}
+
+.ai-model-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.ai-model-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── 复选框 ── */
+
+.ai-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text);
+  font-family: inherit;
+  padding: 4px 0;
+}
+
+.ai-checkbox {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-accent);
+  flex-shrink: 0;
+}
+
+.ai-checkbox.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── 供应商表单 / 返回 ── */
+
+.ai-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+/* ── 拉取模型列表 ── */
+
+.ai-available-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.ai-available-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.ai-available-row.already { opacity: 0.55; cursor: default; }
+
+.ai-available-id {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-pick-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-pick-actions > * { flex: 1; }
+
+/* ── 手动添加模型 ── */
+
+.ai-manual-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-manual-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ai-manual-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ai-manual-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-spin { animation: ai-spin 0.8s linear infinite; }
+
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+
+/* ── 对话内模型选择 ── */
+
+.ai-model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ai-model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-model-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 0 2px 2px;
+}
+
+.ai-model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+}
+
+.ai-model-option.selected { border-color: var(--accent); }
+
+.ai-model-option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+/* ── 对话页内联模型名 ── */
+
+.ai-model-inline {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+  cursor: pointer;
+}
+
+.ai-message-error {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--orange);
+}
+
+/* ── 已归档对话 ── */
+
+.ai-archived-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-archived-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.ai-archived-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-archived-title {
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-archived-time { font-size: 12px; color: var(--subtle); }
+
+.ai-archived-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.ai-archived-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 16px;
+  color: var(--subtle);
+  font-size: 14px;
+}
+
+/* ── 设置子页面（全屏页面级） ── */
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+
+.settings-page-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.settings-page-title {
+  flex: 1;
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  color: var(--text);
+}
+
+.settings-page-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}

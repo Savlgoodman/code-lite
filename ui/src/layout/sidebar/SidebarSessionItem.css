@@ -1,0 +1,124 @@
+.sidebar-session-row {
+  position: relative;
+  height: 38px;
+  border-radius: 8px;
+  transition: background 120ms ease;
+}
+
+.sidebar-session-row:hover,
+.sidebar-session-row:focus-within {
+  background: var(--hover-overlay);
+}
+
+.sidebar-session-row.active {
+  background: var(--active-overlay);
+}
+
+.sidebar-session-select {
+  width: 100%;
+  height: 38px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-session-select:focus-visible {
+  outline: 0;
+}
+
+.sidebar-session-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-session-agent {
+  color: var(--text-muted);
+}
+
+.sidebar-session-time {
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-session-running {
+  flex: 0 0 auto;
+  color: var(--accent, var(--text-secondary));
+  transition: opacity 120ms ease;
+}
+
+.sidebar-session-archive {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.sidebar-session-row:hover .sidebar-session-time,
+.sidebar-session-row:focus-within .sidebar-session-time,
+.sidebar-session-row.confirming-archive .sidebar-session-time,
+.sidebar-session-row:hover .sidebar-session-running,
+.sidebar-session-row:focus-within .sidebar-session-running,
+.sidebar-session-row.confirming-archive .sidebar-session-running {
+  opacity: 0;
+}
+
+.sidebar-session-row:hover .sidebar-session-archive,
+.sidebar-session-row:focus-within .sidebar-session-archive,
+.sidebar-session-archive:focus-visible,
+.sidebar-session-row.confirming-archive .sidebar-session-archive {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-session-archive:hover,
+.sidebar-session-archive:focus-visible {
+  background: var(--hover-overlay);
+  color: var(--text-primary);
+  outline: 0;
+}
+
+.sidebar-session-row.confirming-archive .sidebar-session-archive {
+  width: 42px;
+  border-radius: 7px;
+  background: var(--accent-danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.sidebar-session-row.confirming-archive .sidebar-session-archive:hover,
+.sidebar-session-row.confirming-archive .sidebar-session-archive:focus-visible {
+  background: var(--accent-danger);
+  color: #fff;
+}
+
+.sidebar-session-archive span {
+  line-height: 1;
+  white-space: nowrap;
+}
