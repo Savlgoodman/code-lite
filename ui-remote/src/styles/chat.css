@@ -746,6 +746,26 @@
 .detail-state { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
 .detail-state.error { color: var(--orange); }
 
+/* 文件引用详情页内容 */
+.detail-file-state { padding: 32px 12px; text-align: center; color: var(--muted); font-size: 13px; }
+.detail-file-state.error { color: var(--orange); }
+.detail-file-image {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: var(--radius-md);
+}
+.detail-file-markdown { font-size: 14px; color: var(--text); }
+.detail-file-truncated {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--orange-soft);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 /* ============================================
  * 审批卡片（输入框上方）
  * ============================================ */

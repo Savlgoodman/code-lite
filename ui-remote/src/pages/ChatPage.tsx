@@ -4,7 +4,9 @@ import type { ChatMessage, Session, UserContentBlock } from "@code-lite/protocol
 import { useConversationState } from "../hooks/useConversations";
 import { connectionManager } from "../services/ConnectionManager";
 import { useSessionConfig } from "../hooks/useSessionConfig";
+import type { FileRef } from "@code-lite/chat-render";
 import { MessageBubble } from "../components/MessageBubble";
+import { FileRefProvider } from "../components/MessageRenderer";
 import { DetailOverlay, type DetailRoute } from "../components/DetailOverlay";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { ConfigSheet } from "../sheets/ConfigSheet";
@@ -455,30 +457,41 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       </header>
 
       {/* 消息流 */}
-      <div className="chat-messages" ref={scrollContainerRef}>
-        {messages.length === 0 ? (
-          <EmptyState title="开始对话">输入你的问题，AI 将为你解答</EmptyState>
-        ) : (
-          messages.map((msg, i) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              conversationId={sessionId}
-              showTimestamp={shouldShowTimestamp(msg, i, messages, isRunning)}
-              onPreviewImage={(url, name) => setPreviewImage({ url, name })}
-              onOpenTool={(target) => setDetailRoute({ kind: "tool", target })}
-              onOpenDiff={(target) => setDetailRoute({ kind: "diff", target })}
-            />
-          ))
-        )}
-        {/* 正在思考流光指示器 */}
-        {showThinking && (
-          <div className="thinking-indicator-row">
-            <span className="thinking-indicator" data-text="正在思考">正在思考</span>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+      <FileRefProvider
+        onOpenFileRef={(fileRef: FileRef) =>
+          setDetailRoute({ kind: "fileref", target: { fileRef, conversationId: sessionId } })
+        }
+        loadImage={async (fileRef: FileRef) => {
+          if (!client) throw new Error("no client");
+          const res = await client.readFile(sessionId, fileRef.path);
+          return `data:${res.mimeType};base64,${res.content}`;
+        }}
+      >
+        <div className="chat-messages" ref={scrollContainerRef}>
+          {messages.length === 0 ? (
+            <EmptyState title="开始对话">输入你的问题，AI 将为你解答</EmptyState>
+          ) : (
+            messages.map((msg, i) => (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                conversationId={sessionId}
+                showTimestamp={shouldShowTimestamp(msg, i, messages, isRunning)}
+                onPreviewImage={(url, name) => setPreviewImage({ url, name })}
+                onOpenTool={(target) => setDetailRoute({ kind: "tool", target })}
+                onOpenDiff={(target) => setDetailRoute({ kind: "diff", target })}
+              />
+            ))
+          )}
+          {/* 正在思考流光指示器 */}
+          {showThinking && (
+            <div className="thinking-indicator-row">
+              <span className="thinking-indicator" data-text="正在思考">正在思考</span>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </FileRefProvider>
 
       {/* 回到底部按钮（输入框上方） */}
       {showScrollToBottom && (

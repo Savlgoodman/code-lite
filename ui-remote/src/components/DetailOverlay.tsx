@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from "react";
+import type { FileRef } from "@code-lite/chat-render";
 import { Portal } from "./ui";
 import { ToolDetailPage } from "../pages/ToolDetailPage";
 import { DiffDetailPage } from "../pages/DiffDetailPage";
+import { FileRefDetailPage } from "../pages/FileRefDetailPage";
 import type { DiffDetailTarget, ToolDetailTarget } from "./AssistantToolFlow";
+
+export interface FileRefDetailTarget {
+  fileRef: FileRef;
+  conversationId: string;
+}
 
 export type DetailRoute =
   | { kind: "tool"; target: ToolDetailTarget }
-  | { kind: "diff"; target: DiffDetailTarget };
+  | { kind: "diff"; target: DiffDetailTarget }
+  | { kind: "fileref"; target: FileRefDetailTarget };
 
 interface DetailOverlayProps {
   /** 当前详情路由；为 null 时执行退出动画后卸载。 */
@@ -52,9 +60,15 @@ export function DetailOverlay({ route, onBack }: DetailOverlayProps) {
       <div className={`detail-overlay ${phaseClass}`.trim()} onTransitionEnd={handleTransitionEnd}>
         {rendered.kind === "tool" ? (
           <ToolDetailPage tool={rendered.target.tool} onBack={onBack} />
-        ) : (
+        ) : rendered.kind === "diff" ? (
           <DiffDetailPage
             diff={rendered.target.diff}
+            conversationId={rendered.target.conversationId}
+            onBack={onBack}
+          />
+        ) : (
+          <FileRefDetailPage
+            fileRef={rendered.target.fileRef}
             conversationId={rendered.target.conversationId}
             onBack={onBack}
           />
