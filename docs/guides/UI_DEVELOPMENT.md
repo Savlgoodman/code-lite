@@ -380,6 +380,14 @@ Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
 
 如果已有旧 backend 进程，可关闭后重新启动 Tauri。
 
+### remote 端改代码不生效（Service Worker 缓存）
+
+仅限远程端 `ui-remote`：它注册了 Service Worker（PWA 安装用），对带 hash 的 JS 走
+cache-first，可能缓存住旧 bundle，导致 `npm run dev` 改了代码也看不到效果、`console.log`
+不出现（桌面 `ui/` 无 SW，不受影响）。现已在 dev 环境禁用 SW；若仍遇旧代码，
+DevTools → Application → Unregister SW + Clear site data + 硬刷新。详见
+`ui-remote/AGENTS.md` 的「Service Worker 缓存陷阱」。
+
 ## 提交注意事项
 
 不要提交以下内容：

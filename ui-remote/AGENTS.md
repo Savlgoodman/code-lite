@@ -334,6 +334,25 @@ npm run preview  # 预览打包产物
 - 触摸手势（HomePager 拖拽、滑块拖动）用指针/触摸事件，桌面浏览器鼠标不一定触发，
   真机或移动模拟器验证。
 
+### Service Worker 缓存陷阱（改代码不生效先看这里）
+
+`ui-remote` 注册了 Service Worker（`public/sw.js`）以支持 PWA 安装，它对带 hash 的
+JS 静态资源走 **cache-first**。历史上 `main.tsx` 无 dev 判断就注册 SW，导致 **改了代码
+`npm run dev` 也看不到效果**：SW 返回缓存的旧 bundle，改动不生效、`console.log` 不出现，
+重启 dev 也没用。桌面 `ui/` 无 SW，所以同一份共享 `packages/` 修复"桌面立即生效、
+remote 死活不生效"——极易误判成逻辑/解析 bug（曾为此绕一大圈）。
+
+约定与排错：
+
+- **在 `ui-remote` 改代码却看不到效果时，第一反应是 SW 缓存，不要先当逻辑 bug 查。**
+- 现已修复：`main.tsx` 在 `import.meta.env.DEV` 下**不注册 SW**并主动 unregister + 清
+  `caches`。若仍遇旧代码：DevTools → Application → Service Workers → Unregister，
+  再 Clear site data，然后硬刷新（Ctrl+Shift+R）。
+- **发版/PWA 部署**：改动静态资源缓存策略或需要强制刷新时，升 `sw.js` 的 `CACHE_VERSION`
+  （activate 时会清理非当前版本的缓存），否则老用户拉不到新 bundle。
+- **安卓 App**：Capacitor 壳内不走 SW，但 JS 是打包进 APK 的；改动需重新 `npm run build`
+  打包并重装，旧 APK 里是旧代码。
+
 ## 快速自查清单（改 UI 前后过一遍）
 
 - [ ] 颜色全走 `var(--*)`，没有写死的十六进制/rgb（火焰特效除外）。
@@ -343,6 +362,7 @@ npm run preview  # 预览打包产物
 - [ ] 新弹窗基于 `Sheet`；确认操作走 `close(fn)` 以保留离场动画。
 - [ ] 全屏浮层经 `Portal`。
 - [ ] 间距/圆角/时长/层级尽量用令牌。
+- [ ] 改动看不到效果时先排查 Service Worker 缓存（见「开发流程」）。
 - [ ] `npm run build` 通过。
 
 
