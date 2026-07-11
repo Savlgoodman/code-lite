@@ -79,15 +79,55 @@
   background: #fff8f3;
 }
 
-.tool-call-card pre {
-  overflow-x: auto;
+.tool-call-pre-wrap {
   margin: 8px 0 0;
+}
+
+.tool-call-pre-scroll {
+  position: relative;
+}
+
+.tool-call-pre {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0;
   border-radius: 8px;
   background: #f2f1ef;
   padding: 10px 12px;
   color: #30353d;
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* 收起态底部渐隐，暗示内容被截断 */
+.tool-call-pre-scroll.collapsed::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 44px;
+  border-radius: 0 0 8px 8px;
+  background: linear-gradient(to bottom, rgba(242, 241, 239, 0), #f2f1ef 92%);
+  pointer-events: none;
+}
+
+.tool-call-pre-toggle {
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-tertiary);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.5;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.tool-call-pre-toggle:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 .tool-call-head {

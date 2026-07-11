@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, Circle, FileCode2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { FileDiffArtifact, ToolCallItem } from "../../types";
 import { formatRisk } from "../../lib/formatters";
@@ -121,6 +121,53 @@ function FileDiffPreview({
   );
 }
 
+/** 折叠高度阈值（px）：超过则默认截断，显示展开按钮。 */
+const COLLAPSED_PRE_MAX_HEIGHT = 200;
+
+/**
+ * 工具调用入参/输出的代码块：默认按高度截断，超出时点击展开全部。
+ * 收起态用 max-height 限高并渐隐底部，避免长命令/长输出撑坏排版；
+ * 竖向溢出用 hidden 防止卡片自身变成滚动容器抢走页面滚轮。
+ */
+function CollapsiblePre({ text }: { text: string }) {
+  const preRef = useRef<HTMLPreElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = preRef.current;
+    if (!element) {
+      return;
+    }
+    setOverflowing(element.scrollHeight > COLLAPSED_PRE_MAX_HEIGHT + 4);
+  }, [text]);
+
+  const collapsed = overflowing && !expanded;
+
+  return (
+    <div className="tool-call-pre-wrap">
+      <div className={`tool-call-pre-scroll${collapsed ? " collapsed" : ""}`}>
+        <pre
+          ref={preRef}
+          className="tool-call-pre"
+          style={collapsed ? { maxHeight: COLLAPSED_PRE_MAX_HEIGHT } : undefined}
+        >
+          {text}
+        </pre>
+      </div>
+      {overflowing ? (
+        <button
+          type="button"
+          className="tool-call-pre-toggle"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "收起" : "展开全部"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function ToolCallCard({ tool }: { tool: ToolCallItem }) {
   const defaultOpen = tool.status !== "complete";
 
@@ -142,11 +189,11 @@ export function ToolCallCard({ tool }: { tool: ToolCallItem }) {
       </summary>
       <div className="tool-call-detail">
         <span>入参</span>
-        <pre>{tool.argumentsText}</pre>
+        <CollapsiblePre text={tool.argumentsText} />
         {tool.resultText || tool.error ? (
           <>
             <span>{tool.error ? "错误" : "输出"}</span>
-            <pre>{tool.error ?? tool.resultText}</pre>
+            <CollapsiblePre text={tool.error ?? tool.resultText ?? ""} />
           </>
         ) : null}
       </div>
