@@ -1,10 +1,13 @@
 import { ArrowDown, ChevronRight, Minimize2 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
-import { MessageRenderer } from "../../components/MessageRenderer";
+import type { FileRef } from "@code-lite/chat-render";
+import { MessageRenderer, FileRefProvider } from "../../components/MessageRenderer";
 import { formatConversationBoundaryTime } from "../../lib/formatters";
 import { attachmentImageUrl } from "../../services/agentClient";
+import { loadWorkspaceFile } from "../../services/conversationStore";
 import type { ChatMessage } from "../../types";
+import { FileRefModal } from "./FileRefModal";
 import { ImagePreview, type PreviewImage } from "./ImagePreview";
 import { buildAssistantInlineEntries } from "./messageTools";
 import { FileEditGroup, ToolCallGroup } from "./ToolCallViews";
@@ -264,6 +267,7 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showRunningThinking, setShowRunningThinking] = useState(false);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
+  const [openFileRef, setOpenFileRef] = useState<FileRef | null>(null);
   const [scrollbarState, setScrollbarState] = useState({
     thumbHeight: 100,
     thumbTop: 0,
@@ -503,7 +507,13 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
   }, [sessionId]);
 
   return (
-    <>
+    <FileRefProvider
+      onOpenFileRef={setOpenFileRef}
+      loadImage={async (ref) => {
+        const res = await loadWorkspaceFile(sessionId, ref.path);
+        return `data:${res.mimeType};base64,${res.content}`;
+      }}
+    >
       <section className="chat-scroll" ref={scrollRef}>
         <div className="chat-content" ref={contentRef}>
           {messages.map((message, index) => (
@@ -548,6 +558,13 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
         </button>
       ) : null}
       <ImagePreview image={previewImage} onClose={() => setPreviewImage(null)} />
-    </>
+      {openFileRef ? (
+        <FileRefModal
+          conversationId={sessionId}
+          fileRef={openFileRef}
+          onClose={() => setOpenFileRef(null)}
+        />
+      ) : null}
+    </FileRefProvider>
   );
 }

@@ -30,6 +30,11 @@
   --color-info: #1677ff;
   --color-error: #f25042;
 
+  /* ─── 文件引用 chip（偏深的浅蓝高亮） ─── */
+  --file-ref-bg: #dbeafe;
+  --file-ref-text: #1e478f;
+  --file-ref-border: #b6d2fb;
+
   /* ─── 交互状态 ─── */
   --hover-overlay: rgba(2, 8, 38, 0.06);
   --active-overlay: rgba(2, 8, 38, 0.08);
@@ -111,6 +116,10 @@
   --accent-primary: #a89273;
   --accent-secondary: #3a352e;
   --accent-danger: #ff6b5e;
+
+  --file-ref-bg: #1e3252;
+  --file-ref-text: #9cc4ff;
+  --file-ref-border: #2f4a73;
 
   --hover-overlay: rgba(255, 255, 255, 0.08);
   --active-overlay: rgba(255, 255, 255, 0.12);
