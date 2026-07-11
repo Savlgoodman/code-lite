@@ -1033,6 +1033,33 @@ export function ChatPage() {
     createSession();
   }
 
+  function archiveSessionGroup(sessionIds: string[]) {
+    if (sessionIds.length === 0) return;
+    const ids = new Set(sessionIds);
+    setArchivedSessionIds((current) => {
+      const next = new Set(current);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    for (const id of ids) {
+      patchClientSession(id, { archived: true });
+      if (!isDraftSessionId(id)) {
+        void updateConversationArchiveState(id, true)
+          .then((session) => patchClientSession(id, session))
+          .catch((error) => console.error(error));
+      }
+    }
+    if (!ids.has(activeSessionId)) return;
+    const nextSession = sessions.find(
+      (session) => !ids.has(session.id) && !archivedSessionIds.has(session.id),
+    );
+    if (nextSession) {
+      selectSession(nextSession.id);
+      return;
+    }
+    createSession();
+  }
+
   function restoreArchivedSession(sessionId: string) {
     setArchivedSessionIds((current) => {
       const next = new Set(current);
@@ -1246,6 +1273,7 @@ export function ChatPage() {
             activeSessionId={activeSession.id}
             activeView={activeView}
             onArchiveSession={archiveSession}
+            onArchiveGroup={archiveSessionGroup}
             onCreateSession={createSession}
             onOpenOverview={() => setActiveView("overview")}
             onOpenSettings={() => setActiveView("settings")}

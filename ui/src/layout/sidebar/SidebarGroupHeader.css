@@ -3,11 +3,17 @@
   width: 100%;
   height: 32px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   border-radius: 8px;
   padding: 0 2px 0 0;
   transition: background 120ms ease;
+}
+
+.sidebar-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .sidebar-group-header:hover,
@@ -77,4 +83,43 @@
   background: rgba(30, 35, 42, 0.08);
   color: var(--text-primary);
   outline: 0;
+}
+
+.sidebar-group-archive {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease, width 120ms ease;
+}
+
+.sidebar-group-header:hover .sidebar-group-archive,
+.sidebar-group-header:focus-within .sidebar-group-archive,
+.sidebar-group-archive:focus-visible,
+.sidebar-group-header.confirming-archive .sidebar-group-archive {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-group-archive:hover,
+.sidebar-group-archive:focus-visible {
+  background: rgba(30, 35, 42, 0.08);
+  color: var(--text-primary);
+  outline: 0;
+}
+
+.sidebar-group-header.confirming-archive .sidebar-group-archive {
+  width: 42px;
+  border-radius: 7px;
+  background: var(--accent-danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
 }

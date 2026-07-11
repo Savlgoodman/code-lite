@@ -18,6 +18,7 @@ interface SidebarProps {
   activeView: "chat" | "overview";
   onCreateSession: (workspace?: string) => void;
   onArchiveSession: (sessionId: string) => void;
+  onArchiveGroup: (sessionIds: string[]) => void;
   onOpenOverview: () => void;
   onOpenSettings: () => void;
   onSearchTextChange: (value: string) => void;
@@ -81,6 +82,7 @@ export function Sidebar({
   activeSessionId,
   activeView,
   onArchiveSession,
+  onArchiveGroup,
   onCreateSession,
   onOpenOverview,
   onOpenSettings,
@@ -170,6 +172,7 @@ export function Sidebar({
                 collapsed={collapsed}
                 kind={group.kind}
                 label={group.label}
+                onArchiveGroup={() => onArchiveGroup(group.sessions.map((session) => session.id))}
                 onCreateSession={() => onCreateSession(group.kind === "project" ? group.workspace : undefined)}
                 onToggle={() => toggleGroup(group.key)}
                 workspace={group.workspace}
