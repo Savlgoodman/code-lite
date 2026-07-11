@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 class ToolApprovalRejected(RuntimeError):
@@ -13,6 +14,8 @@ class PendingApproval:
     conversation_id: str
     future: asyncio.Future[bool]
     turn_id: str
+    # 创建审批时的展示 payload（approval.required 事件体），供重新附着时回传快照。
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 class ApprovalBroker:
@@ -20,13 +23,21 @@ class ApprovalBroker:
         self._pending: dict[str, PendingApproval] = {}
         self._lock = asyncio.Lock()
 
-    async def create(self, *, approval_id: str, conversation_id: str, turn_id: str) -> asyncio.Future[bool]:
+    async def create(
+        self,
+        *,
+        approval_id: str,
+        conversation_id: str,
+        turn_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> asyncio.Future[bool]:
         async with self._lock:
             future = asyncio.get_running_loop().create_future()
             self._pending[approval_id] = PendingApproval(
                 conversation_id=conversation_id,
                 future=future,
                 turn_id=turn_id,
+                payload=dict(payload or {}),
             )
             return future
 
@@ -37,6 +48,14 @@ class ApprovalBroker:
             return None
         pending.future.set_result(decision)
         return pending
+
+    def list_for_conversation(self, conversation_id: str) -> list[dict[str, Any]]:
+        """返回某会话所有挂起审批的展示 payload（重新附着时恢复审批卡片用）。"""
+        return [
+            dict(pending.payload)
+            for pending in self._pending.values()
+            if pending.conversation_id == conversation_id and pending.payload
+        ]
 
     async def reject_all(self) -> None:
         async with self._lock:

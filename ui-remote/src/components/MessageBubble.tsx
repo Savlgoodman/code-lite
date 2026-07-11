@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ChatMessage, MessageAttachment } from "@code-lite/protocol";
 import { connectionManager } from "../services/ConnectionManager";
 import { MessageRenderer } from "./MessageRenderer";
+import { AssistantToolFlow, type DiffDetailTarget, type ToolDetailTarget } from "./AssistantToolFlow";
 import { formatMessageTime, formatFullDateTime } from "../lib/formatters";
 
 interface MessageBubbleProps {
@@ -9,6 +10,8 @@ interface MessageBubbleProps {
   conversationId: string;
   showTimestamp?: boolean;
   onPreviewImage?: (url: string, name: string) => void;
+  onOpenTool?: (target: ToolDetailTarget) => void;
+  onOpenDiff?: (target: DiffDetailTarget) => void;
 }
 
 /**
@@ -80,7 +83,14 @@ function MessageAttachments({
   );
 }
 
-export function MessageBubble({ message, conversationId, showTimestamp, onPreviewImage }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  conversationId,
+  showTimestamp,
+  onPreviewImage,
+  onOpenTool,
+  onOpenDiff,
+}: MessageBubbleProps) {
   const isUser = message.role === "user";
   const turnEndTime = message.updatedAt ?? message.createdAt;
   const imageAttachments = (message.attachments ?? []).filter((a) => a.kind === "image");
@@ -107,7 +117,18 @@ export function MessageBubble({ message, conversationId, showTimestamp, onPrevie
                 <div className="reasoning-text">{message.reasoning}</div>
               </details>
             )}
-            <MessageRenderer content={message.content} streaming={message.streaming} />
+            {message.toolCalls.length > 0 ? (
+              <AssistantToolFlow
+                content={message.content}
+                toolCalls={message.toolCalls}
+                streaming={message.streaming}
+                conversationId={conversationId}
+                onOpenTool={(t) => onOpenTool?.(t)}
+                onOpenDiff={(t) => onOpenDiff?.(t)}
+              />
+            ) : (
+              <MessageRenderer content={message.content} streaming={message.streaming} />
+            )}
           </div>
         )}
       </div>

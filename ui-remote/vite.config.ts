@@ -6,6 +6,7 @@ const protocolSrc = fileURLToPath(new URL("../packages/protocol/src", import.met
 const transportSrc = fileURLToPath(new URL("../packages/transport/src", import.meta.url));
 const chatCoreSrc = fileURLToPath(new URL("../packages/chat-core/src", import.meta.url));
 const syncSrc = fileURLToPath(new URL("../packages/sync/src", import.meta.url));
+const chatRenderSrc = fileURLToPath(new URL("../packages/chat-render/src", import.meta.url));
 
 export default defineConfig({
   plugins: [
@@ -80,6 +81,7 @@ export default defineConfig({
       "@code-lite/transport": transportSrc,
       "@code-lite/chat-core": chatCoreSrc,
       "@code-lite/sync": syncSrc,
+      "@code-lite/chat-render": chatRenderSrc,
     },
   },
   server: {

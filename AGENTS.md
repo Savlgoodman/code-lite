@@ -86,6 +86,12 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 
 判断不确定时，宁可先问用户，也不要单方面决定同步范围。
 
+### 聊天渲染共享库与配色
+
+- **共享渲染逻辑放 `packages/chat-render`（`@code-lite/chat-render`）**：工具组/文件编辑组分组、diff 行计算、文件引用解析（`classifyHref`）等纯逻辑两端共用；React 展示层与弹窗/详情页各端分别实现（桌面弹窗、移动端跳详情页）。
+- **配色一律走各端语义 CSS 令牌**（桌面 `ui/src/styles.css`、远端 `ui-remote/src/styles/tokens.css`），禁止硬编码 hex；新增令牌要覆盖明暗两套。
+- **streamdown 深色靠主题属性切换，不靠 Tailwind**：本项目未接 Tailwind，streamdown 自带的 `dark:` 变体不生效。深色语法高亮通过 `[data-theme="dark"]`（桌面）/ `[data-mode="dark"]`（远端）手动切到 shiki 的 `--shiki-dark` 变量，代码块标题栏等 chrome 也用实心令牌自绘。
+
 ## 文档入口
 
 当前主要文档如下：
@@ -106,6 +112,7 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 | `docs/design/0702-REMOTE-SYNC.md` | 远程连接与同步观看设计，记录连接码、事件同步、权限和安全边界 |
 | `docs/design/0709-REMOTE-CONTROL-DUAL-SYNC.md` | 远程控制与双端对等同步设计，记录事件总线、附着快照、单会话互锁、中继盲转发和落地顺序 |
 | `docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md` | 远程控制协议修复与双端同步收敛，记录 turn.start 参数 bug、中继信封路由、WsSession 统一 dispatch、会话生命周期双向同步和最小安全模型 |
+| `docs/design/0711-REMOTE-CHAT-RENDER-APPROVAL-FILEREF.md` | 远端聊天渲染增强、审批流修复与文件引用渲染设计，记录 @code-lite/chat-render 共享库、工具组/文件编辑组/详情页、approval.resolved 广播与挂起审批快照恢复、fs.readFile 受控读取与文件引用高亮 |
 | `docs/design/0703-RUNTIME-MODEL-PROVIDER.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
 | `docs/guides/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
 | `demo/acp-demo/README.md` | ACP mock、Python SDK probe 和 Codex ACP smoke 使用说明 |

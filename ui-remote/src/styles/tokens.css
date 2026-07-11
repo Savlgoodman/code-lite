@@ -72,6 +72,10 @@
   --orange: #e85d2a;
   --orange-pressed: #c44d1e;
   --orange-soft: rgba(232, 93, 42, 0.08);
+
+  --file-ref-bg: #dbeafe;
+  --file-ref-text: #1e478f;
+  --file-ref-border: #b6d2fb;
 }
 
 /* ── 主题 mono · 暗色 ── */
@@ -95,6 +99,10 @@
   --orange: #f47048;
   --orange-pressed: #d85a35;
   --orange-soft: rgba(244, 112, 72, 0.16);
+
+  --file-ref-bg: #1e3252;
+  --file-ref-text: #9cc4ff;
+  --file-ref-border: #2f4a73;
 }
 
 /* ── 主题 warm（Happy Hues 11）· 浅色 ── */
@@ -118,6 +126,10 @@
   --orange: #f25042;
   --orange-pressed: #d63e30;
   --orange-soft: rgba(242, 80, 66, 0.1);
+
+  --file-ref-bg: #dfe9f7;
+  --file-ref-text: #2a5490;
+  --file-ref-border: #c3d6ee;
 }
 
 /* ── 主题 warm · 暗色 ── */
@@ -141,4 +153,8 @@
   --orange: #f25042;
   --orange-pressed: #d63e30;
   --orange-soft: rgba(242, 80, 66, 0.16);
+
+  --file-ref-bg: #2a2e3d;
+  --file-ref-text: #a8c6f0;
+  --file-ref-border: #3a4258;
 }

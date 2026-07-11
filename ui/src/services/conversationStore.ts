@@ -72,3 +72,24 @@ export async function loadConversationDiff(sessionId: string, diffId: string): P
   });
   return result.diff;
 }
+
+/** fs.readFile 返回：会话工作区内单个文件的内容与元信息。 */
+export interface WorkspaceFileResult {
+  path: string;
+  kind: "text" | "image";
+  mimeType: string;
+  encoding: "utf-8" | "base64";
+  content: string;
+  truncated: boolean;
+  sizeBytes: number;
+}
+
+/** 读取会话工作区内的单个文件（聊天正文文件引用查看）。 */
+export async function loadWorkspaceFile(sessionId: string, path: string): Promise<WorkspaceFileResult> {
+  const transport = getLocalTransport();
+  await transport.connect();
+  return transport.request<WorkspaceFileResult>("fs.readFile", {
+    conversationId: sessionId,
+    path,
+  });
+}

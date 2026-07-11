@@ -30,6 +30,19 @@
   --color-info: #1677ff;
   --color-error: #f25042;
 
+  /* ─── diff / 状态软背景（工具调用、文件编辑、diff 行） ─── */
+  --diff-add-bg: #eef9ef;
+  --diff-add-text: #236331;
+  --diff-remove-bg: #fff0ed;
+  --diff-remove-text: #9a3c2b;
+  --approval-bg: #fff8f3;
+  --approval-border: #f2d0b4;
+
+  /* ─── 文件引用 chip（偏深的浅蓝高亮） ─── */
+  --file-ref-bg: #dbeafe;
+  --file-ref-text: #1e478f;
+  --file-ref-border: #b6d2fb;
+
   /* ─── 交互状态 ─── */
   --hover-overlay: rgba(2, 8, 38, 0.06);
   --active-overlay: rgba(2, 8, 38, 0.08);
@@ -111,6 +124,17 @@
   --accent-primary: #a89273;
   --accent-secondary: #3a352e;
   --accent-danger: #ff6b5e;
+
+  --diff-add-bg: rgba(46, 166, 126, 0.16);
+  --diff-add-text: #4ac48f;
+  --diff-remove-bg: rgba(244, 112, 72, 0.16);
+  --diff-remove-text: #f28d6f;
+  --approval-bg: rgba(244, 130, 72, 0.12);
+  --approval-border: #6b4a2e;
+
+  --file-ref-bg: #1e3252;
+  --file-ref-text: #9cc4ff;
+  --file-ref-border: #2f4a73;
 
   --hover-overlay: rgba(255, 255, 255, 0.08);
   --active-overlay: rgba(255, 255, 255, 0.12);

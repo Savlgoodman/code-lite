@@ -105,3 +105,20 @@
   filter: brightness(0.96);
   transition: transform var(--dur-slow) var(--ease-page), filter var(--dur-slow) var(--ease-page);
 }
+
+/* ── Detail Overlay：会话内工具/diff 详情页，叠在会话页之上从右滑入 ── */
+
+.detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--bg);
+  transform: translateX(0);
+  transition: transform var(--dur-slow) var(--ease-page);
+  will-change: transform;
+}
+
+.detail-overlay.enter,
+.detail-overlay.exit {
+  transform: translateX(100%);
+}

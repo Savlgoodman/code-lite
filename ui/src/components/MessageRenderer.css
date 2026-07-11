@@ -22,21 +22,22 @@
 .markdown-link {
   border: 0;
   background: transparent;
-  color: #0b63ce;
+  color: var(--color-info);
   font-weight: 700;
   text-decoration: none;
 }
 
 .streamdown-body a:hover,
 .markdown-link:hover {
-  color: #084a9b;
+  color: var(--color-info);
+  filter: brightness(0.9);
   text-decoration: underline;
 }
 
 .streamdown-body a:focus-visible,
 .markdown-link:focus-visible {
   border-radius: 4px;
-  outline: 2px solid rgba(11, 99, 206, 0.28);
+  outline: 2px solid color-mix(in srgb, var(--color-info) 40%, transparent);
   outline-offset: 2px;
 }
 
@@ -59,7 +60,7 @@
   margin: 12px 0 0;
   border: 1px solid var(--border-primary);
   border-radius: 9px;
-  background: var(--hover-overlay);
+  background: var(--bg-secondary);
 }
 
 .streamdown-body [data-streamdown="code-block-header"] {
@@ -69,8 +70,8 @@
   align-items: center;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-primary);
-  background: var(--hover-overlay);
-  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
   font-family: Consolas, "Cascadia Mono", "SFMono-Regular", ui-monospace, monospace;
   font-size: 12px;
   text-transform: lowercase;
@@ -93,10 +94,10 @@
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border: 1px solid rgba(222, 219, 215, 0.88);
+  border: 1px solid var(--border-primary);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 6px 16px rgba(30, 35, 42, 0.08);
+  background: var(--bg-elevated-alpha);
+  box-shadow: var(--shadow-md);
   backdrop-filter: blur(10px);
   pointer-events: auto;
 }
@@ -117,7 +118,7 @@
 
 .streamdown-body [data-streamdown="code-block-copy-button"]:hover,
 .streamdown-body [data-streamdown="code-block-download-button"]:hover {
-  background: rgba(32, 36, 43, 0.08);
+  background: var(--hover-overlay);
   color: var(--text-primary);
 }
 
@@ -155,7 +156,7 @@
   min-width: max-content;
   margin: 0;
   background: var(--sdm-bg, transparent);
-  color: var(--sdm-fg, #30353d);
+  color: var(--sdm-fg, var(--text-primary));
 }
 
 .streamdown-body [data-streamdown="code-block-body"] code {
@@ -182,6 +183,27 @@
   background: var(--sdm-tbg);
 }
 
+/*
+ * 深色语法高亮统一开关。
+ *
+ * streamdown 用 shiki 双主题（github-light + github-dark）为每个 token 同时输出
+ * 浅色 --sdm-c 和深色 --shiki-dark 两个内联变量，靠 Tailwind 的 dark: 变体切换。
+ * 本项目不接 Tailwind，dark: 类无 CSS 生效，导致深色下仍用浅色语法色（贴在深底上很违和）。
+ * 这里按主题属性手动切到 shiki 的深色变量，等价于那个“深色开关”。
+ */
+[data-theme="dark"] .streamdown-body [data-streamdown="code-block-body"] pre {
+  color: var(--shiki-dark, var(--sdm-fg, var(--text-primary)));
+  background: var(--shiki-dark-bg, var(--sdm-bg, transparent));
+}
+
+[data-theme="dark"] .streamdown-body [data-streamdown="code-block-body"] span[style*="--sdm-c"] {
+  color: var(--shiki-dark, var(--sdm-c, inherit));
+}
+
+[data-theme="dark"] .streamdown-body [data-streamdown="code-block-body"] span[style*="--sdm-tbg"] {
+  background: var(--shiki-dark-bg, var(--sdm-tbg));
+}
+
 .markdown-table-scroll {
   width: 100%;
   max-width: 100%;
@@ -190,7 +212,7 @@
   border: 1px solid var(--border-secondary);
   border-radius: 8px;
   background: var(--bg-elevated);
-  scrollbar-color: #ddd8d2 transparent;
+  scrollbar-color: var(--border-primary) transparent;
   scrollbar-width: thin;
 }
 
@@ -252,4 +274,54 @@
 
 .streamdown-body td {
   background: var(--bg-elevated);
+}
+
+/* ─── 文件引用 chip（正文本地文件链接高亮） ─── */
+.file-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin: 0 1px;
+  padding: 1px 7px;
+  border: 1px solid var(--file-ref-border);
+  border-radius: var(--radius-sm);
+  background: var(--file-ref-bg);
+  color: var(--file-ref-text);
+  font-size: 0.92em;
+  font-family: var(--font-family-base);
+  line-height: 1.4;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition: filter var(--transition-fast);
+}
+
+.file-ref-chip:hover {
+  filter: brightness(0.97);
+}
+
+.file-ref-chip.failed {
+  opacity: 0.7;
+}
+
+.file-ref-chip-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.file-ref-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-ref-image {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin: 8px 0;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  object-fit: contain;
+  cursor: zoom-in;
 }
