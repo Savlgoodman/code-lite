@@ -1,12 +1,38 @@
 param(
   [string]$Proxy = "http://127.0.0.1:7899",
-  [int]$BackendPort = 18765,
+  [int]$BackendPort = 0,
   [switch]$NoProxy
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = $PSScriptRoot
+
+# 在 50000-60000 内探测一个空闲端口（与 Tauri 壳保持一致的随机端口策略）。
+function Find-FreePort {
+  param([int]$Start = 50000, [int]$End = 60000)
+  $span = $End - $Start
+  $offset = Get-Random -Minimum 0 -Maximum $span
+  for ($i = 0; $i -lt $span; $i++) {
+    $port = $Start + (($offset + $i) % $span)
+    $listener = $null
+    try {
+      $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $port)
+      $listener.Start()
+      $listener.Stop()
+      return $port
+    } catch {
+      if ($listener) { try { $listener.Stop() } catch {} }
+    }
+  }
+  throw "No free port available in $Start-$End"
+}
+
+if ($BackendPort -le 0) {
+  $BackendPort = Find-FreePort
+}
+Write-Host "Selected backend port: $BackendPort" -ForegroundColor Cyan
+
 $backendUrl = "http://127.0.0.1:$BackendPort"
 $tempDir = Join-Path $repoRoot ".cache\dev-launch"
 $backendCmdFile = Join-Path $tempDir "backend.cmd"
@@ -89,6 +115,7 @@ $tauriScript = @"
 @echo off
 chcp 65001 > nul
 set "CODE_LITE_ENV=DEV"
+set "CODE_LITE_BACKEND_PORT=$BackendPort"
 "@
 
 if (-not $NoProxy) {

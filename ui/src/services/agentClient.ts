@@ -73,7 +73,9 @@ export interface UploadTurnAttachmentInput {
   width?: number;
 }
 
-const FALLBACK_BACKEND_URL = "http://127.0.0.1:18765";
+// 桌面壳（Tauri）会通过 ensure_backend 动态返回随机端口，前端自动跟随；
+// 仅浏览器独立调试（非 Tauri）时才用此回退地址，可用 VITE_BACKEND_URL 覆盖。
+const FALLBACK_BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://127.0.0.1:18765";
 
 function hasTauri() {
   return "__TAURI_INTERNALS__" in window;
