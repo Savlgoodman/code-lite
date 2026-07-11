@@ -318,4 +318,7 @@ if __name__ == "__main__":
         host=args.host,
         port=args.port,
         log_level=args.log_level,
+        # 放宽 WS 帧上限到 32 MiB：远端图片附件经 base64 转发，单张 10 MB 图约 13.3 MB，
+        # 默认 16 MiB 偏紧，抬高上限避免大图转发被截断。
+        ws_max_size=32 * 1024 * 1024,
     )

@@ -1,13 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ArrowLeft, ArrowDown, Send, Settings, Square } from "lucide-react";
-import type { ChatMessage, Session } from "@code-lite/protocol";
+import { ArrowLeft, ArrowDown, Image, Loader2, Send, Settings, Square, X } from "lucide-react";
+import type { ChatMessage, Session, UserContentBlock } from "@code-lite/protocol";
 import { useConversationState } from "../hooks/useConversations";
 import { connectionManager } from "../services/ConnectionManager";
 import { useSessionConfig } from "../hooks/useSessionConfig";
 import { MessageBubble } from "../components/MessageBubble";
 import { ConfigSheet } from "../sheets/ConfigSheet";
 import { ConfigBar } from "../components/ConfigBar";
-import { EmptyState, Button, Sheet } from "../components/ui";
+import { EmptyState, Button, Sheet, Portal } from "../components/ui";
+import {
+  IMAGE_ACCEPT,
+  MAX_DRAFT_IMAGES,
+  MAX_TOTAL_IMAGE_BYTES,
+  blobToBase64,
+  createDraftImage,
+  revokeDraftImage,
+  type DraftImage,
+} from "../lib/draftImages";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -52,12 +61,20 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const [composerHeight, setComposerHeight] = useState(0);
+  const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
+  const [draftImageError, setDraftImageError] = useState<string | null>(null);
+  const [imagesProcessing, setImagesProcessing] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const draftImagesRef = useRef<DraftImage[]>([]);
   const smoothScrollFrameRef = useRef<number | null>(null);
   const smoothScrollActiveRef = useRef(false);
+
+  draftImagesRef.current = draftImages;
 
   const isRunning = client?.isRunning(sessionId) ?? false;
 
@@ -189,6 +206,13 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
     return () => ro.disconnect();
   }, []);
 
+  // 卸载时释放所有草稿图片的 objectURL，避免内存泄漏
+  useEffect(() => {
+    return () => {
+      for (const image of draftImagesRef.current) revokeDraftImage(image);
+    };
+  }, []);
+
   // "正在思考" 流光指示器：running 且没有内容流式输出时显示
   useEffect(() => {
     if (!isRunning) {
@@ -219,11 +243,73 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
     );
   }
 
+  const clearDraftImages = () => {
+    setDraftImages((prev) => {
+      for (const image of prev) revokeDraftImage(image);
+      return [];
+    });
+    setDraftImageError(null);
+  };
+
+  const addDraftImages = async (files: File[]) => {
+    if (files.length === 0) return;
+    setDraftImageError(null);
+    setImagesProcessing(true);
+    try {
+      const slots = Math.max(0, MAX_DRAFT_IMAGES - draftImagesRef.current.length);
+      if (slots <= 0) {
+        setDraftImageError(`最多添加 ${MAX_DRAFT_IMAGES} 张图片。`);
+        return;
+      }
+      const created: DraftImage[] = [];
+      let failure: string | null = null;
+      for (const file of files.slice(0, slots)) {
+        try {
+          created.push(await createDraftImage(file));
+        } catch (err) {
+          failure = err instanceof Error ? err.message : String(err);
+        }
+      }
+      if (created.length > 0) {
+        setDraftImages((prev) => {
+          const next = [...prev, ...created];
+          const totalBytes = next.reduce((sum, image) => sum + (image.normalized?.normalizedBytes ?? image.rawBytes), 0);
+          if (totalBytes > MAX_TOTAL_IMAGE_BYTES) {
+            for (const image of created) revokeDraftImage(image);
+            failure = "图片总大小超过 200 MB。";
+            return prev;
+          }
+          return next;
+        });
+      }
+      if (files.length > slots) {
+        failure = `最多添加 ${MAX_DRAFT_IMAGES} 张图片。`;
+      }
+      if (failure) setDraftImageError(failure);
+    } finally {
+      setImagesProcessing(false);
+    }
+  };
+
+  const removeDraftImage = (id: string) => {
+    setDraftImages((prev) => {
+      const target = prev.find((image) => image.id === id);
+      if (target) revokeDraftImage(target);
+      return prev.filter((image) => image.id !== id);
+    });
+    setDraftImageError(null);
+  };
+
+  const filesFromList = (list: FileList | null) =>
+    Array.from(list ?? []).filter((file) => file.type.startsWith("image/"));
+
   const handleSend = async () => {
-    if (!client || !input.trim()) return;
+    if (!client || imagesProcessing) return;
     const text = input.trim();
-    setInput("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    const images = draftImagesRef.current;
+    if (!text && images.length === 0) return;
+
+    const turnId = `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
     // 如果 config 还没加载完，用空配置发送（后端会用 session.json 中的配置）
     const sendConfig = config ?? {
@@ -236,13 +322,64 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       configOptionsRaw: [],
     };
 
+    // 先上传图片附件（base64 走 WS），再把 attachmentId 组成 contentBlocks 随 turn 发出。
+    let contentBlocks: UserContentBlock[] | undefined;
+    if (images.length > 0) {
+      setImagesProcessing(true);
+      try {
+        const uploaded = await Promise.all(
+          images.map(async (image) => {
+            const blob = image.normalized?.blob ?? image.file;
+            const data = await blobToBase64(blob);
+            return client.uploadAttachment({
+              conversationId: sessionId,
+              turnId,
+              fileName: image.name,
+              mimeType: image.normalized?.mimeType ?? image.mimeType,
+              data,
+              width: image.normalized?.width ?? image.width,
+              height: image.normalized?.height ?? image.height,
+              wasCompressed: image.normalized?.wasCompressed,
+            });
+          }),
+        );
+        contentBlocks = [
+          ...(text ? [{ type: "text" as const, text }] : []),
+          ...uploaded.map((attachment) => ({
+            type: "image" as const,
+            mimeType: attachment.mimeType as "image/png" | "image/jpeg" | "image/webp",
+            source: { kind: "attachment" as const, attachmentId: attachment.id },
+            name: attachment.name,
+            sizeBytes: attachment.sizeBytes,
+            width: attachment.width,
+            height: attachment.height,
+            sha256: attachment.sha256,
+            wasCompressed: attachment.wasCompressed,
+          })),
+        ];
+      } catch (err) {
+        console.error("[ChatPage] uploadAttachment failed:", err);
+        setDraftImageError("图片上传失败: " + (err instanceof Error ? err.message : String(err)));
+        setImagesProcessing(false);
+        return;
+      }
+      setImagesProcessing(false);
+    }
+
+    // 上传成功后再清空输入（失败时保留草稿供重试）
+    setInput("");
+    clearDraftImages();
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+
     try {
       await client.sendTurn({
         conversationId: sessionId,
         input: text,
+        turnId,
         accessMode: sendConfig.accessMode,
         modelId: sendConfig.familyId || undefined,
         reasoningEffort: sendConfig.effort,
+        contentBlocks,
       });
     } catch (err) {
       console.error("[ChatPage] sendTurn failed:", err);
@@ -309,7 +446,9 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             <MessageBubble
               key={msg.id}
               message={msg}
+              conversationId={sessionId}
               showTimestamp={shouldShowTimestamp(msg, i, messages, isRunning)}
+              onPreviewImage={(url, name) => setPreviewImage({ url, name })}
             />
           ))
         )}
@@ -352,6 +491,24 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       {/* 底部输入区 */}
       <footer className="chat-input-area">
         <div className="input-wrapper">
+          {draftImages.length > 0 && (
+            <div className="draft-image-strip" aria-label="待发送图片">
+              {draftImages.map((image) => (
+                <div className="draft-image-thumb" key={image.id}>
+                  <img alt={image.name} src={image.objectUrl} />
+                  <button
+                    className="draft-image-remove"
+                    aria-label={`移除图片 ${image.name}`}
+                    onClick={() => removeDraftImage(image.id)}
+                    type="button"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {draftImageError && <div className="draft-image-error">{draftImageError}</div>}
           <textarea
             ref={textareaRef}
             className="chat-textarea"
@@ -361,9 +518,29 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             onKeyDown={handleKeyDown}
             rows={1}
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={IMAGE_ACCEPT}
+            multiple
+            hidden
+            onChange={(e) => {
+              void addDraftImages(filesFromList(e.currentTarget.files));
+              e.currentTarget.value = "";
+            }}
+          />
           <div className="input-bottom-row">
             <button className="input-config-btn" onClick={() => setShowConfigSheet(true)}>
               <Settings size={18} />
+            </button>
+            <button
+              className="input-config-btn"
+              aria-label="添加图片"
+              title="添加图片"
+              disabled={isRunning || imagesProcessing}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {imagesProcessing ? <Loader2 className="draft-image-spin" size={18} /> : <Image size={18} />}
             </button>
             <button
               className="context-ring"
@@ -390,7 +567,11 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
                 <Square size={18} />
               </button>
             ) : (
-              <button className="send-btn" onClick={handleSend} disabled={!input.trim()}>
+              <button
+                className="send-btn"
+                onClick={handleSend}
+                disabled={(!input.trim() && draftImages.length === 0) || imagesProcessing}
+              >
                 <Send size={18} />
               </button>
             )}
@@ -446,6 +627,28 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             <div className="context-usage-empty">暂无上下文占用数据</div>
           )}
         </Sheet>
+      )}
+
+      {/* 图片预览：全屏浮层经 Portal 逃逸父级 transform 裁剪 */}
+      {previewImage && (
+        <Portal>
+          <div className="image-preview-overlay" onClick={() => setPreviewImage(null)}>
+            <button
+              className="image-preview-close"
+              aria-label="关闭预览"
+              onClick={() => setPreviewImage(null)}
+              type="button"
+            >
+              <X size={22} />
+            </button>
+            <img
+              className="image-preview-full"
+              src={previewImage.url}
+              alt={previewImage.name}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </Portal>
       )}
     </div>
   );

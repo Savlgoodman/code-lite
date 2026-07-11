@@ -526,6 +526,112 @@ async def _handle_diff_get(
     await _send(ws, _envelope("result", requestId=request_id, payload={"diff": diff}))
 
 
+async def _handle_attachment_upload(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """上传图片附件（远端 WS 通道）：接收 base64 编码的图片数据，存储并返回元数据。
+
+    桌面端用 HTTP multipart upload；远端没有 HTTP 通道，用此 RPC 替代。
+    payload:
+      conversationId, turnId, fileName, mimeType, data (base64 string),
+      width, height, wasCompressed.
+    """
+    import base64
+    import io
+
+    from code_lite_backend.storage.attachments import (
+        ALLOWED_IMAGE_MIME_TYPES,
+        MAX_IMAGES_PER_TURN,
+    )
+
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    turn_id = str(payload.get("turnId") or "").strip()
+    file_name = str(payload.get("fileName") or "").strip() or "image"
+    mime_type = str(payload.get("mimeType") or "").strip().lower()
+    data_b64 = str(payload.get("data") or "")
+    width = payload.get("width")
+    height = payload.get("height")
+    was_compressed = payload.get("wasCompressed")
+
+    if not conversation_id or not turn_id:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_params"}))
+        return
+    if mime_type not in ALLOWED_IMAGE_MIME_TYPES:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "unsupported_mime_type", "mimeType": mime_type}))
+        return
+    if not data_b64:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_data"}))
+        return
+
+    conversation = services.conversation_store.get_conversation(conversation_id)
+    if conversation is None:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "conversation_not_found"}))
+        return
+
+    try:
+        data_bytes = base64.b64decode(data_b64)
+    except Exception:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "invalid_base64"}))
+        return
+
+    stream = io.BytesIO(data_bytes)
+    try:
+        metadata = services.attachment_store.save_image(
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            filename=file_name,
+            mime_type=mime_type,
+            stream=stream,
+            width=int(width) if isinstance(width, (int, float)) and width > 0 else None,
+            height=int(height) if isinstance(height, (int, float)) and height > 0 else None,
+            was_compressed=bool(was_compressed) if was_compressed is not None else None,
+        )
+        await _send(ws, _envelope("result", requestId=request_id, payload={"attachment": metadata}))
+    except ValueError as exc:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "save_failed", "error": str(exc)}))
+
+
+async def _handle_attachment_get(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """获取图片附件（远端 WS 通道）：返回 base64 编码的图片数据。
+
+    桌面端用 HTTP GET；远端没有 HTTP 通道，用此 RPC 替代。
+    payload: conversationId, attachmentId
+    返回: {data: base64 string, mimeType, name}
+    """
+    import base64
+
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    attachment_id = str(payload.get("attachmentId") or "").strip()
+
+    if not conversation_id or not attachment_id:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "missing_params"}))
+        return
+
+    stored = services.attachment_store.load_image(conversation_id, attachment_id)
+    if stored is None:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "not_found"}))
+        return
+
+    try:
+        data_bytes = stored.image_path.read_bytes()
+        data_b64 = base64.b64encode(data_bytes).decode("ascii")
+        await _send(ws, _envelope("result", requestId=request_id, payload={
+            "data": data_b64,
+            "mimeType": str(stored.metadata.get("mimeType") or "image/jpeg"),
+            "name": str(stored.metadata.get("name") or "image"),
+        }))
+    except Exception as exc:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "read_failed", "error": str(exc)}))
+
+
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     """本地/远程订阅入口（0709 阶段一）。
@@ -652,6 +758,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
                         "pairKey": key,
                         "roomId": bridge.config.room_id,
                     }))
+            elif method == "attachment.upload":
+                await _handle_attachment_upload(ws, services, request_id, payload)
+            elif method == "attachment.get":
+                await _handle_attachment_get(ws, services, request_id, payload)
             else:
                 await _send(
                     ws,

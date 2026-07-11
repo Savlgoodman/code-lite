@@ -465,4 +465,48 @@ export class ConversationClient {
   async resolveInput(inputRequestId: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>): Promise<void> {
     await this.transport.request("input.response", { inputRequestId, action, content });
   }
+
+  /**
+   * 上传单张图片附件（base64 走 WS 通道）。
+   * 桌面端用 HTTP multipart；远端无 HTTP 通道，改用此 RPC。返回附件元数据。
+   */
+  async uploadAttachment(params: {
+    conversationId: string;
+    turnId: string;
+    fileName: string;
+    mimeType: "image/png" | "image/jpeg" | "image/webp";
+    data: string;
+    width?: number;
+    height?: number;
+    wasCompressed?: boolean;
+  }): Promise<AttachmentMetadata> {
+    const result = await this.transport.request<{ attachment: AttachmentMetadata }>("attachment.upload", params);
+    return result.attachment;
+  }
+
+  /** 拉取图片附件内容（base64 走 WS 通道），供远端在无 HTTP 时渲染历史图片。 */
+  async getAttachment(conversationId: string, attachmentId: string): Promise<AttachmentData> {
+    return this.transport.request<AttachmentData>("attachment.get", { conversationId, attachmentId });
+  }
+}
+
+/** attachment.upload 返回的元数据（后端 AttachmentStore.save_image 产出）。 */
+export interface AttachmentMetadata {
+  id: string;
+  kind: "image";
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number;
+  height?: number;
+  sha256: string;
+  wasCompressed?: boolean;
+  createdAt?: string;
+}
+
+/** attachment.get 返回的图片内容（base64）。 */
+export interface AttachmentData {
+  data: string;
+  mimeType: string;
+  name: string;
 }

@@ -80,6 +80,8 @@ def _get_rpc_handlers() -> dict[str, Any]:
     """懒加载 WS RPC handlers，避免循环导入"""
     from code_lite_backend.api.routes.ws import (
         _handle_approval_decision,
+        _handle_attachment_get,
+        _handle_attachment_upload,
         _handle_conversation_archive,
         _handle_conversation_config_update,
         _handle_conversation_create,
@@ -111,6 +113,8 @@ def _get_rpc_handlers() -> dict[str, Any]:
         "conversation.delete": _handle_conversation_delete,
         "session.initialize": _handle_session_initialize,
         "diff.get": _handle_diff_get,
+        "attachment.upload": _handle_attachment_upload,
+        "attachment.get": _handle_attachment_get,
     }
 
 
@@ -164,6 +168,7 @@ _METHOD_MIN_ROLE: dict[str, str] = {
     "conversation.get": "viewer",
     "session.initialize": "viewer",
     "diff.get": "viewer",
+    "attachment.get": "viewer",
     # 目录浏览/新建会暴露并修改宿主机真实文件树，要求 operator（与新建会话同级）
     "fs.list": "operator",
     "fs.mkdir": "operator",
@@ -171,6 +176,7 @@ _METHOD_MIN_ROLE: dict[str, str] = {
     "conversation.config.update": "operator",
     "conversation.archive": "operator",
     "conversation.delete": "operator",
+    "attachment.upload": "operator",
     "turn.start": "operator",
     "turn.cancel": "operator",
     "approval.decision": "operator",
@@ -309,7 +315,9 @@ class RemoteBridge:
 
     async def _connect_and_run(self) -> None:
         logger.info("connecting to relay %s (room %s)", self._config.relay_url, self._config.room_id[:12])
-        async with websockets.connect(self._config.relay_url) as ws:
+        # max_size 放宽到 32 MiB：远端图片附件经 base64 走 WS，单张 10 MB 图片编码后约 13.3 MB，
+        # 默认 1 MiB 会导致中继帧过大直接断开。此上限覆盖单条 attachment.upload 消息。
+        async with websockets.connect(self._config.relay_url, max_size=32 * 1024 * 1024) as ws:
             self._ws = ws
             await ws.send(json.dumps({
                 "type": "hello",

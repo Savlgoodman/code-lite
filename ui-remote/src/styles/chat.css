@@ -60,8 +60,16 @@
 .message-row.user { justify-content: flex-end; }
 .message-row.assistant { justify-content: flex-start; padding-left: 4px; }
 
-.user-bubble {
+.user-message-column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
   max-width: 75%;
+}
+
+.user-bubble {
+  max-width: 100%;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -71,6 +79,85 @@
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ── 历史消息图片附件 ── */
+
+.message-attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.message-attachment-thumb {
+  width: 120px;
+  height: 120px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--sidebar);
+  padding: 0;
+  cursor: pointer;
+}
+
+.message-attachment-thumb:disabled { cursor: default; }
+
+.message-attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.message-attachment-loading {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--sidebar) 25%, var(--hover) 50%, var(--sidebar) 75%);
+  background-size: 200% 100%;
+  animation: attachment-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes attachment-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── 图片全屏预览 ── */
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.image-preview-full {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+
+.image-preview-close {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 .assistant-content {
@@ -273,6 +360,66 @@
 }
 
 .input-config-btn:active { background: var(--hover); }
+.input-config-btn:disabled { color: var(--subtle); cursor: not-allowed; }
+
+/* ── 草稿图片（待发送）── */
+
+.draft-image-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.draft-image-thumb {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+}
+
+.draft-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.draft-image-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: var(--orange);
+  color: var(--on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.draft-image-remove:active { background: var(--orange-pressed); }
+
+.draft-image-error {
+  color: var(--orange);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.draft-image-spin {
+  animation: draft-image-spin 0.8s linear infinite;
+}
+
+@keyframes draft-image-spin {
+  to { transform: rotate(360deg); }
+}
 
 .context-ring {
   display: flex;
