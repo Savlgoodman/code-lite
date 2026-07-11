@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Monitor, RefreshCw, Wifi, WifiOff, Shield, ShieldCheck, Eye, User, X } from "lucide-react";
+import { RefreshCw, Shield, ShieldCheck, Eye, User, X } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { getLocalTransport } from "../../services/agentClient";
 import "./RemoteControlSettings.css";
 
@@ -110,8 +111,10 @@ export function RemoteControlSettings() {
     setConfig(result);
   };
 
-  const pairUrl = config?.pairKey
-    ? `${relayUrl.replace("ws://", "code-lite://pair?relay=").replace("wss://", "code-lites://pair?relay=")}&key=${config.pairKey}`
+  // 配对深链：relay 与 name 做 URL 编码，保留真实中继地址，供 ui-remote 扫码解析。
+  const effectiveRelayUrl = relayUrl || config?.relayUrl || "";
+  const pairUrl = config?.pairKey && effectiveRelayUrl
+    ? `codelite://pair?relay=${encodeURIComponent(effectiveRelayUrl)}&key=${encodeURIComponent(config.pairKey)}`
     : "";
 
   if (loading) return <div style={{ padding: 20, color: "var(--text-muted)" }}>加载中...</div>;
@@ -236,22 +239,30 @@ export function RemoteControlSettings() {
                 手机配对
               </h3>
               <p style={{ margin: "0 0 16px", color: "var(--text-muted)", fontSize: "13px" }}>
-                在手机浏览器中打开 ui-remote，输入中继地址和 Pair Key 进行配对
+                在 ui-remote 中点击"扫码连接"扫描下方二维码，或手动输入中继地址和 Pair Key 进行配对
               </p>
 
               <div
                 style={{
-                  padding: "16px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "14px",
+                  padding: "20px 16px",
                   background: "var(--bg-tertiary)",
                   borderRadius: "var(--radius-md)",
-                  textAlign: "center",
                 }}
               >
+                <div style={{ padding: "12px", background: "#ffffff", borderRadius: "12px" }}>
+                  <QRCodeSVG value={pairUrl} size={188} level="M" marginSize={0} />
+                </div>
                 <div
                   style={{
+                    width: "100%",
                     fontFamily: "var(--font-family-mono)",
                     fontSize: "11px",
                     wordBreak: "break-all",
+                    textAlign: "center",
                     color: "var(--text-muted)",
                   }}
                 >

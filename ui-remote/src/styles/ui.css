@@ -477,3 +477,75 @@
 
 .test-result.success { color: var(--green); background: var(--green-soft); }
 .test-result.fail { color: var(--orange); background: var(--orange-soft); }
+
+/* ── 扫码连接 ── */
+
+.qr-scan-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 10px);
+  background: var(--sidebar);
+  color: var(--fg, var(--muted));
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color var(--dur-base) var(--ease-standard), background var(--dur-base) var(--ease-standard);
+}
+
+.qr-scan-trigger:hover { border-color: var(--muted); }
+
+.qr-scan-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-height: 60vh;
+  border-radius: var(--radius-md, 10px);
+  overflow: hidden;
+  background: #000;
+}
+
+.qr-scan-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.qr-scan-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 62%;
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.qr-scan-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  margin: 0;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.qr-scan-error {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--orange);
+  font-size: 14px;
+  line-height: 1.6;
+}

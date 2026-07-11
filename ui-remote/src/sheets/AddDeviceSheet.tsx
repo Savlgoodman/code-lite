@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
+import { QrCode } from "lucide-react";
 import { RelayTransport } from "../services/RelayTransport";
 import { computeRoomId } from "../services/ConnectionManager";
 import type { DeviceRecord } from "../services/DeviceStore";
 import { Sheet, Button } from "../components/ui";
+import { QrScanSheet } from "./QrScanSheet";
 
 export interface AddDeviceSheetProps {
   initial?: DeviceRecord; // 编辑时传入，添加时省略
@@ -17,6 +19,7 @@ export function AddDeviceSheet({ initial, onClose, onSave }: AddDeviceSheetProps
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"idle" | "success" | "fail">("idle");
   const [testError, setTestError] = useState("");
+  const [showScan, setShowScan] = useState(false);
 
   const isEdit = Boolean(initial);
   const title = isEdit ? "编辑设备" : "添加设备";
@@ -86,6 +89,12 @@ export function AddDeviceSheet({ initial, onClose, onSave }: AddDeviceSheetProps
         </>
       )}
     >
+      {!isEdit && (
+        <button type="button" className="qr-scan-trigger" onClick={() => setShowScan(true)}>
+          <QrCode size={18} />
+          <span>扫码连接</span>
+        </button>
+      )}
       <div className="field">
         <label>设备名称</label>
         <input
@@ -122,6 +131,19 @@ export function AddDeviceSheet({ initial, onClose, onSave }: AddDeviceSheetProps
       )}
       {testResult === "fail" && (
         <div className="test-result fail"> 连接失败: {testError}</div>
+      )}
+      {showScan && (
+        <QrScanSheet
+          onClose={() => setShowScan(false)}
+          onDetected={(pairing) => {
+            setRelayUrl(pairing.relayUrl);
+            setPairKey(pairing.pairKey);
+            if (pairing.name) setName(pairing.name);
+            setTestResult("idle");
+            setTestError("");
+            setShowScan(false);
+          }}
+        />
       )}
     </Sheet>
   );
