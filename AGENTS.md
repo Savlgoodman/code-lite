@@ -1,8 +1,31 @@
 # code-lite - Agent 协作规范
 
-本文件面向所有参与本仓库工作的 AI Coding Agent 和开发者。code-lite 是一个桌面端多 Agent 工作台，目标是接入 Codex、Claude Code、opencode 等 agent runtime，为用户完成编码任务和其他自动化任务，并支持远程连接、远程同步观看和后续授权协作。
+本文件面向所有参与本仓库工作的 AI Coding Agent 和开发者。code-lite 是一个桌面端多 Agent 工作台，目标是接入 Codex、Claude Code、opencode 等 agent runtime，为用户完成编码任务和其他自动化任务，并支持远程连接、远程同步观看、双端对等控制和后续授权协作。
 
-当前 UI 与 Tauri 桌面壳已进入原型阶段，Python backend 已具备本地流式事件接口和早期 adapter 结构。后续重点是把产品叙事、adapter 抽象、远程同步、权限审批和运行时配置统一到 code-lite 方向。
+产品由四类可独立运行、又通过统一协议协作的组件构成：
+
+1. **桌面端**：Tauri 2 桌面壳（`src-tauri/`）+ React 前端（`ui/`）+ Python Agent Hub（`backend/`）。这是主控端，直接拉起并驱动 agent runtime，产生对话与事件。
+2. **远程遥控端**：`ui-remote/`，React + Vite 前端，通过 Capacitor 同时打包为**安卓 App**，也支持以 **PWA / 浏览器**方式运行。它不直接连 agent，而是经中继服务器远程连接桌面端，浏览工作区、管理会话、与 agent 对话并观看同步。
+3. **中继服务器**：`proxy_server/`，FastAPI + WebSocket 的盲转发中继。桌面端（host）与远程端（remote）各自用 `roomId = SHA256(pairKey)` 加入同一房间，中继只按房间转发消息帧，不解析、不记录、不缓存 payload，也不持有原始 pairKey。
+4. **共享协议包**：`packages/`，桌面端与远程端共用的 TypeScript 包，保证两端对协议、消息、同步和传输的理解一致。
+
+当前 UI 与 Tauri 桌面壳已进入原型阶段，Python backend 已具备本地流式事件接口和早期 adapter 结构，远程连接与双端同步已可用。后续重点是把产品叙事、adapter 抽象、远程同步、权限审批和运行时配置统一到 code-lite 方向。
+
+## 仓库结构总览
+
+| 目录 | 角色 | 说明 |
+|------|------|------|
+| `src-tauri/` | 桌面壳 | Tauri 2 Rust 外壳，负责窗口、生命周期、拉起并托管 Python backend（sidecar 或 dev 模式）。默认窗口 `1200x756`，最小 `900x620`。后端端口在 50000-60000 间随机探测空闲端口，前端经 `ensure_backend` 返回的 `base_url` 自动跟随。 |
+| `ui/` | 桌面端前端 | React 18 + Vite，桌面主控界面：会话侧边栏、对话工作区、输入框、模型/思考强度选择、设置页等。由 backend 流式事件驱动，用 `streamdown` 渲染 Markdown。 |
+| `backend/` | Python Agent Hub | uv 管理依赖，提供本地流式接口与通用 ACP adapter，接入 Codex / Claude Code / opencode runtime。同时承担远程桥接（RemoteBridge），作为 host 连接中继。 |
+| `ui-remote/` | 远程遥控端 | React 18 + Vite，Capacitor 打包**安卓 App**，也支持 **PWA / 浏览器**运行。经中继远程连接桌面端：浏览工作区、管理会话、与 agent 对话、观看同步、扫码配对。环境判定见 `src/lib/environment.ts`（native / dev / pwa / web）。**改动前必读 `ui-remote/AGENTS.md`。** |
+| `proxy_server/` | 中继服务器 | FastAPI + WebSocket 盲转发中继。host 与 remote 用 `roomId = SHA256(pairKey)` 加入同一房间，中继只按房间转发帧，不解析/记录/缓存 payload，不持有原始 pairKey。 |
+| `packages/` | 共享协议包 | 桌面端与远程端共用的 TypeScript workspace 包：`@code-lite/protocol`（协议与线格式）、`@code-lite/chat-core`（会话客户端、消息归约、模型分组）、`@code-lite/sync`（双端同步管理与状态追踪）、`@code-lite/transport`（WS 传输）。经 tsconfig paths 与 vite alias 指向 `../packages/*/src`，两端共用同一份源码。 |
+| `docs/` | 文档 | 详细设计、架构、开发流程和排错说明，见下方文档入口。 |
+| `demo/` | 示例 | ACP mock、SDK probe、legacy nanobot 等参考用例，不作为主线功能。 |
+| `scripts/` `start-dev.ps1` `release.ps1` | 脚本 | Windows 开发启动、打包发布入口。 |
+
+**协议链路一句话**：`ui` ↔ `backend`（本地）在同一台机器上直连；`ui-remote` ↔ `proxy_server` ↔ `backend`（RemoteBridge）经中继盲转发；`ui` 与 `ui-remote` 通过 `packages/` 共享的协议与同步逻辑保持对齐。
 
 ## AI Coding 规范
 
@@ -16,6 +39,7 @@
 6. **优先阅读文档**：开始涉及需求、架构、Agent Adapter、远程同步、demo 或目录设计的任务前，先阅读本文件和相关 `docs/` 文档。
 7. **小步修改**：每次改动尽量围绕一个明确目标，不做无关重构，不顺手格式化无关文件。
 8. **可验证优先**：能用脚本、命令或静态检查验证的改动，应在完成后执行验证，并在回复中说明结果。
+9. **双端同步先征求意见**：涉及对话、对话样式、消息渲染、会话管理等桌面端（`ui/`）与远程端（`ui-remote/`）都存在的功能时，改一端前先判断是否需要两端一起更新，并主动征求用户意见后再动手。详见下方「双端同步约定」。
 
 对任意 Agent：请记住，本项目中任何文档和代码都必须以 UTF-8 的方式读取和写入。
 
@@ -44,6 +68,24 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 
 手动编辑文件时，也应确认编辑器保存编码为 UTF-8。
 
+## 双端同步约定
+
+桌面端（`ui/`）和远程遥控端（`ui-remote/`）是两套独立的前端代码，但面向的是同一套会话与 agent 交互。很多功能在两端都有对应实现，例如：
+
+- 对话消息的渲染与样式（Markdown、工具调用、计划进度、图片等）。
+- 会话列表与管理（归档、分组、进行中指示、切换等）。
+- 输入框、模型选择、思考强度、访问模式等交互。
+- 远程连接、配对与同步相关的行为。
+
+因此，当一个功能或样式改动落在上述这类**两端都存在**的区域时：
+
+1. **先判断影响范围**：明确这次改动只影响桌面端，还是远程端也有对应界面/逻辑需要跟进。共享逻辑通常应下沉到 `packages/`，纯展示与交互层则各端分别实现。
+2. **主动征求用户意见**：如果远程端也可能需要同步更新，不要默认只改一端、也不要擅自同时改两端，而应先向用户说明「这个改动桌面端和远程端都涉及，是否需要两边一起同步更新」，得到明确答复后再执行。
+3. **保持协议一致**：涉及 `packages/`（protocol / chat-core / sync / transport）的改动会同时影响两端，务必确认两端都能编译通过（各自 `npm run build`），避免只顾一端导致另一端协议错位。
+4. **提交时说清楚**：如果最终只更新了一端，在提交信息或回复中注明另一端尚未同步，方便后续跟进。
+
+判断不确定时，宁可先问用户，也不要单方面决定同步范围。
+
 ## 文档入口
 
 当前主要文档如下：
@@ -55,6 +97,7 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 | `docs/architecture/ARCHITECTURE.md` | 架构设计文档，记录 Tauri、Python Agent Hub、多 Agent Adapter、远程同步和权限边界 |
 | `docs/architecture/PROJECT_STRUCTURE.md` | 项目目录结构规划，记录目标代码目录、职责边界和命名迁移策略 |
 | `docs/guides/UI_DEVELOPMENT.md` | UI 与 Tauri 桌面壳开发文档，记录环境依赖、启动流程、目录职责和常见问题 |
+| `ui-remote/AGENTS.md` | 远程遥控端（`ui-remote/`）开发约定，记录技术栈、目录结构、组件模式、PWA / 安卓环境判定和构建要求 |
 | `docs/development/DEVELOPMENT_WORKFLOW.md` | 开发流程规范，记录 dev 集成、分支命名、master 使用范围、变基合并和版本升级要求 |
 | `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md` | ACP Agent Adapter 实施设计，记录 Codex、Claude Code、opencode 的主线接入方案 |
 | `docs/design/0703-AGENT-UNIFIED-ACP.md` | 统一前端交互协议设计，记录 session capabilities、模型、模式和事件映射 |
@@ -73,7 +116,8 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 2. 做架构、模块边界相关任务，先读 `docs/architecture/ARCHITECTURE.md` 和 `docs/architecture/PROJECT_STRUCTURE.md`。
 3. 做 UI、Tauri 桌面壳、前端交互和启动环境相关任务，先读 `docs/guides/UI_DEVELOPMENT.md`。
 4. 做 Codex、Claude Code、opencode、ACP adapter、runtime 事件、ACP 连接释放和进程清理相关任务，先读 `docs/design/0703-AGENT-ACP-IMPLEMENTATION.md`、`docs/design/0703-AGENT-UNIFIED-ACP.md`、`docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md` 和 `docs/refactor/0709-ACP-RUNTIME-FORCE-DISCONNECT.md`。
-5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/design/0702-REMOTE-SYNC.md`。
+5. 做远程连接、远程同步观看和远端权限相关任务，先读 `docs/design/0702-REMOTE-SYNC.md`、`docs/design/0709-REMOTE-CONTROL-DUAL-SYNC.md` 和 `docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md`；改动 `ui-remote/` 前必读 `ui-remote/AGENTS.md`。
+5.1 做对话、对话样式、会话管理等桌面端与远程端都涉及的功能，先读本文件「双端同步约定」，判断是否需要两端同步并征求用户意见。
 6. 做模型供应商、模型选择和 runtime 配置相关任务，先读 `docs/design/0703-RUNTIME-MODEL-PROVIDER.md`。
 7. 做运行时数据、聊天 UI、adapter 迁移、日志或诊断重构相关任务，先读 `docs/refactor/0703-RUNTIME-DATA-CHAT-UI.md` 和 `docs/refactor/0706-AGENT-ADAPTER-LOGGING-DIAGNOSTICS.md`。
 8. 做 ACP 协议、Python backend ACP client 或 SDK 探针相关调研，先读 `docs/research/0702-AGENT-ACP-RESEARCH.md` 和 `docs/research/0703-BACKEND-ACP-RESEARCH.md`。
@@ -82,14 +126,16 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 
 ## 开发与启动入口
 
-当前已落地的桌面 UI 原型由 `ui/`、`src-tauri/` 和 `backend/` 组成：
+桌面主控端由 `ui/`、`src-tauri/` 和 `backend/` 组成；远程遥控端 `ui-remote/` 与中继 `proxy_server/` 可按需单独启动。
 
 1. `ui/`：React + Vite 前端 UI，使用 `streamdown` 渲染 assistant Markdown，当前由 backend 流式事件驱动消息。
 2. `src-tauri/`：Tauri 2 桌面壳，默认窗口为 `1200x756`，最小窗口为 `900x620`。
 3. `backend/`：Python Agent Hub 原型，使用 uv 管理依赖，提供本地 NDJSON 流式接口；当前主线是通用 ACP adapter 与 Codex / Claude Code / opencode runtime descriptor，nanobot 仅作 legacy 兼容 adapter。
-4. `scripts/dev-tauri.ps1`：Windows 本地开发启动脚本，会临时设置 VS Build Tools、Cargo PATH 和代理环境。
+4. `ui-remote/`：远程遥控端，React + Vite + Capacitor；开发流程与约定见 `ui-remote/AGENTS.md`，`npm run build` = `tsc && vite build`。
+5. `proxy_server/`：FastAPI + WebSocket 中继，`requirements.txt` 声明依赖，独立进程运行；桌面端与远程端需连同一中继地址。
+6. `scripts/dev-tauri.ps1`：Windows 本地开发启动脚本，会临时设置 VS Build Tools、Cargo PATH 和代理环境。
 
-常用命令：
+桌面端常用命令：
 
 ```powershell
 npm install --prefix ui
@@ -122,7 +168,14 @@ npm run backend:dev
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-tauri.ps1 -Proxy http://127.0.0.1:7899
 ```
 
-完整开发步骤、环境依赖、排错说明和 UI 结构说明见 `docs/guides/UI_DEVELOPMENT.md`。
+### 端口说明
+
+- **后端端口随机化**：桌面壳启动时在 `50000-60000` 内探测一个空闲端口拉起 backend，前端经 `ensure_backend` 返回的 `base_url` 自动跟随，无需硬编码，避免端口冲突。`start-dev.ps1` 双终端开发流程会先选好空闲端口，再经 `CODE_LITE_BACKEND_PORT` 注入给 Tauri 终端复用（保留独立后端日志窗口）。
+- **前端桌面 dev 端口固定**：Tauri 加载的 Vite dev 端口（`tauri.conf.json` 中的 `1420`）保持不变，正式版不含 dev 端口。
+- **浏览器独立调试**：非 Tauri 直连时前端回退地址可用 `VITE_BACKEND_URL` 覆盖，默认 `http://127.0.0.1:18765`。
+- **中继端口**：`proxy_server` 默认 `18766`，桌面端 RemoteBridge 与远程端均连接该中继地址。
+
+完整开发步骤、环境依赖、排错说明和 UI 结构说明见 `docs/guides/UI_DEVELOPMENT.md`；远程端专项约定见 `ui-remote/AGENTS.md`。
 
 ## 分支开发流程
 
