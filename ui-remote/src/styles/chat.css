@@ -745,3 +745,72 @@
 
 .detail-state { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
 .detail-state.error { color: var(--orange); }
+
+/* ============================================
+ * 审批卡片（输入框上方）
+ * ============================================ */
+
+.m-approval-card {
+  margin: 8px 12px 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--orange);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+}
+.m-approval-card.risk-low { border-left-color: var(--muted); }
+.m-approval-card.risk-medium { border-left-color: var(--orange); }
+.m-approval-card.risk-high,
+.m-approval-card.risk-blocked { border-left-color: var(--orange-pressed); }
+
+.m-approval-head { display: flex; align-items: center; gap: 6px; }
+.m-approval-icon { display: flex; color: var(--orange); }
+.m-approval-eyebrow { flex: 1; font-size: 12px; font-weight: 600; color: var(--text); }
+.m-approval-risk { font-size: 11px; color: var(--muted); }
+
+.m-approval-name {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-approval-purpose {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.m-approval-args {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--sidebar);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-approval-actions { display: flex; gap: 8px; margin-top: 12px; }
+.m-approval-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.m-approval-btn:disabled { opacity: 0.5; cursor: default; }
+.m-approval-btn.deny { background: var(--panel); color: var(--text); }
+.m-approval-btn.deny:active { background: var(--active); }
+.m-approval-btn.allow { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.m-approval-btn.allow:active { background: var(--accent-pressed); }
