@@ -441,13 +441,13 @@ export function ChatComposer({
       }
     }
     onModelFamilyChange(familyId);
-    closeStatusMenu();
+    // 选择模型族后保持面板打开，方便继续调整思考强度。
   }
 
   function selectReasoning(value: string) {
     onReasoningEffortChange(value);
     onConfigChange("reasoning_effort", value);
-    closeStatusMenu();
+    // 选择思考强度后保持面板打开。
   }
 
   function selectFastMode(value: "off" | "on") {

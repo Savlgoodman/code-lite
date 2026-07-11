@@ -593,9 +593,9 @@
 }
 
 .status-menu-panel {
-  width: 206px;
-  max-width: min(206px, calc(100vw - 48px));
-  max-height: min(440px, calc(100vh - 150px));
+  width: 232px;
+  max-width: min(232px, calc(100vw - 48px));
+  max-height: min(560px, calc(100vh - 120px));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -681,14 +681,19 @@
 }
 
 .status-model-list {
-  max-height: 188px;
+  max-height: 288px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  overflow: hidden;
+  overflow-y: auto;
   padding: 4px 0 8px;
   opacity: 1;
+  scrollbar-width: none;
   animation: status-model-list-in 0.16s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.status-model-list::-webkit-scrollbar {
+  display: none;
 }
 
 .status-model-list.closing {
@@ -711,7 +716,7 @@
   }
 
   to {
-    max-height: 188px;
+    max-height: 288px;
     opacity: 1;
     padding-bottom: 8px;
     padding-top: 4px;
@@ -720,7 +725,7 @@
 
 @keyframes status-model-list-out {
   from {
-    max-height: 188px;
+    max-height: 288px;
     opacity: 1;
     padding-bottom: 8px;
     padding-top: 4px;
