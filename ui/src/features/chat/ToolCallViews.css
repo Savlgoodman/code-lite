@@ -139,18 +139,42 @@
   font-size: 12px;
 }
 
-.tool-call-head strong {
+.tool-call-head .tool-call-icon {
+  flex: 0 0 auto;
+}
+
+/* 命令名单行截断：shell 工具的 name 可能是整条长命令，不截断会撑高标题并把风险挤成竖排 */
+.tool-call-head strong.tool-call-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: #272c34;
   font-size: 13px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-call-head em {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--text-muted);
   font-style: normal;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 风险标签固定在行尾，不换行、不被挤压 */
+.tool-call-head .tool-call-risk {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
   white-space: nowrap;
 }
 

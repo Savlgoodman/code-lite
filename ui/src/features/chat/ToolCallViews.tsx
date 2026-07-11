@@ -121,8 +121,8 @@ function FileDiffPreview({
   );
 }
 
-/** 折叠高度阈值（px）：超过则默认截断，显示展开按钮。 */
-const COLLAPSED_PRE_MAX_HEIGHT = 200;
+/** 折叠高度阈值（px）：超过则默认截断，显示展开按钮。约 4 行代码高。 */
+const COLLAPSED_PRE_MAX_HEIGHT = 92;
 
 /**
  * 工具调用入参/输出的代码块：默认按高度截断，超出时点击展开全部。
@@ -183,9 +183,9 @@ export function ToolCallCard({ tool }: { tool: ToolCallItem }) {
             <Circle size={14} className={tool.status === "running" ? "spin-dot" : ""} />
           )}
         </span>
-        <strong>{tool.name}</strong>
-        <span>{formatRisk(tool.risk)}</span>
+        <strong className="tool-call-name" title={tool.name}>{tool.name}</strong>
         {tool.status === "complete" ? <em>{toolResultSummary(tool)}</em> : null}
+        <span className="tool-call-risk">{formatRisk(tool.risk)}</span>
       </summary>
       <div className="tool-call-detail">
         <span>入参</span>
