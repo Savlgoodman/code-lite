@@ -56,6 +56,7 @@ export type WireMethod =
   | "input.response"
   | "attachment.upload"
   | "diff.get"
+  | "fs.readFile"
   // 远控设备管理（仅宿主本地前端调用，不经中继）。见 0710 第 6 节。
   | "remote.config.get"
   | "remote.config.update"

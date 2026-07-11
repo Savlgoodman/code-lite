@@ -497,6 +497,22 @@ export class ConversationClient {
   async getAttachment(conversationId: string, attachmentId: string): Promise<AttachmentData> {
     return this.transport.request<AttachmentData>("attachment.get", { conversationId, attachmentId });
   }
+
+  /** 读取会话工作区内的单个文件（聊天正文文件引用查看）。路径受后端 workspace 限制。 */
+  async readFile(conversationId: string, path: string): Promise<FileReadResult> {
+    return this.transport.request<FileReadResult>("fs.readFile", { conversationId, path });
+  }
+}
+
+/** fs.readFile 返回：会话工作区内单个文件的内容与元信息。 */
+export interface FileReadResult {
+  path: string;
+  kind: "text" | "image";
+  mimeType: string;
+  encoding: "utf-8" | "base64";
+  content: string;
+  truncated: boolean;
+  sizeBytes: number;
 }
 
 /** attachment.upload 返回的元数据（后端 AttachmentStore.save_image 产出）。 */

@@ -395,6 +395,54 @@ async def _handle_fs_mkdir(
         await _send(ws, _envelope("error", requestId=request_id, payload={"code": "internal_error"}))
 
 
+def _conversation_workspace(services: AppServices, conversation_id: str) -> "Path":
+    """解析会话绑定的工作区，未记录则回退全局工作区。"""
+    from pathlib import Path
+
+    persisted = services.conversation_store.get_conversation(conversation_id) if conversation_id else None
+    if persisted and isinstance(persisted.get("session"), dict):
+        raw_workspace = persisted["session"].get("workspace")
+        if isinstance(raw_workspace, str) and raw_workspace.strip():
+            return Path(raw_workspace.strip())
+    return services.workspace
+
+
+async def _handle_fs_read_file(
+    ws: WebSocket,
+    services: AppServices,
+    request_id: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """读取会话工作区内的单个文件（供聊天正文文件引用查看）。
+
+    路径限制在会话 workspace 之内，防目录穿越与符号链接逃逸；大小超限截断或拒绝。
+    """
+    from code_lite_backend.services.file_reader import FileReadError, read_workspace_file
+
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    raw_path = str(payload.get("path") or "").strip()
+    workspace = _conversation_workspace(services, conversation_id)
+    try:
+        result = read_workspace_file(workspace, raw_path)
+    except FileReadError as exc:
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": exc.code}))
+        return
+    except Exception:
+        logger.exception("fs.readFile failed for path=%s", raw_path)
+        await _send(ws, _envelope("error", requestId=request_id, payload={"code": "internal_error"}))
+        return
+
+    await _send(ws, _envelope("result", requestId=request_id, payload={
+        "path": result.path,
+        "kind": result.kind,
+        "mimeType": result.mime_type,
+        "encoding": result.encoding,
+        "content": result.content,
+        "truncated": result.truncated,
+        "sizeBytes": result.size_bytes,
+    }))
+
+
 async def _handle_conversation_get(
     ws: WebSocket,
     services: AppServices,
@@ -717,6 +765,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 await _handle_fs_list(ws, services, request_id, payload)
             elif method == "fs.mkdir":
                 await _handle_fs_mkdir(ws, services, request_id, payload)
+            elif method == "fs.readFile":
+                await _handle_fs_read_file(ws, services, request_id, payload)
             elif method == "conversation.create":
                 await _handle_conversation_create(ws, services, request_id, payload)
             elif method == "conversation.config.update":
