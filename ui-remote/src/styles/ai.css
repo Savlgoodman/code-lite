@@ -90,6 +90,145 @@
   font-size: 15px;
 }
 
+/* 不可用（如 PWA 环境下的 AI 入口） */
+.settings-item-nav.disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.settings-item-nav.disabled:hover {
+  background: none;
+}
+
+.settings-item-nav.disabled .settings-item-label {
+  color: var(--muted);
+}
+
+/* ── 关于页 ── */
+
+.about-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.about-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  padding: 8px 0 4px;
+}
+
+.about-app-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.about-app-desc {
+  font-size: 13px;
+  color: var(--subtle);
+}
+
+.about-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.about-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin: 0;
+}
+
+.about-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.about-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.about-row:last-child { border-bottom: none; }
+
+.about-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.about-row-value {
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.about-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.about-yes { color: var(--green); }
+.about-no { color: var(--orange); }
+
+.about-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background var(--dur-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.about-link:active { background: var(--hover); }
+
+.about-link-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.about-link-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.about-link-url {
+  font-size: 12px;
+  color: var(--subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── 供应商设置 Sheet ── */
 
 .ai-settings-sheet { max-height: 82vh; }

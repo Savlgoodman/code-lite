@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Plus, Archive, Trash2, MessageSquare } from "lucide-react";
+import { Plus, Archive, Trash2, MessageSquare, Smartphone } from "lucide-react";
 import { Fab, EmptyState } from "../components/ui";
 import { useAiConversations } from "../hooks/useAiConversations";
 import { useAiProviders } from "../hooks/useAiProviders";
 import { aiConversationStore, type AiConversation } from "../services/AiConversationStore";
 import { formatMessageTime } from "../lib/formatters";
+import { isAiAvailable } from "../lib/environment";
 
 interface AiTabProps {
   onOpenConversation: (id: string) => void;
@@ -20,6 +21,19 @@ export function AiTab({ onOpenConversation, active = true }: AiTabProps) {
   useEffect(() => {
     void aiConversationStore.init().then(() => setReady(true));
   }, []);
+
+  // PWA / 生产静态部署：AI 不可用（无 /ai-proxy 转发 + 供应商多不支持 CORS）。
+  if (!isAiAvailable()) {
+    return (
+      <div className="tab-page">
+        <h2 className="page-title">AI 对话</h2>
+        <div className="page-subtitle">直连大模型</div>
+        <EmptyState icon={<Smartphone size={40} strokeWidth={1.5} />} title="仅 App 可用">
+          AI 对话需要 App 的原生网络能力，网页版暂不支持。请下载并使用 App 体验此功能。
+        </EmptyState>
+      </div>
+    );
+  }
 
   // 未归档，按最后互动时间（updatedAt）降序
   const list = conversations

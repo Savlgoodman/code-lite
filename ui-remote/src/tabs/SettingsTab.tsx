@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Moon, Sun, Check, Server, Archive, ChevronRight } from "lucide-react";
+import { Moon, Sun, Check, Server, Archive, ChevronRight, Smartphone, Info } from "lucide-react";
 import { useTheme, THEME_LABELS, type ThemeName } from "../hooks/useTheme";
 import { AiSettingsSheet } from "../sheets/AiSettingsSheet";
 import { AiArchivedSheet } from "../sheets/AiArchivedSheet";
+import { AboutSheet } from "../sheets/AboutSheet";
+import { isAiAvailable } from "../lib/environment";
 
 const THEME_SWATCHES: Record<ThemeName, { bg: string; accent: string; card: string }> = {
   mono: { bg: "#f6f5f3", accent: "#1f2328", card: "#ffffff" },
@@ -14,6 +16,8 @@ export function SettingsTab() {
   const isDark = mode === "dark";
   const [showAiSettings, setShowAiSettings] = useState(false);
   const [showAiArchived, setShowAiArchived] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const aiAvailable = isAiAvailable();
 
   return (
     <div className="tab-page">
@@ -62,16 +66,24 @@ export function SettingsTab() {
 
         <div className="settings-section">
           <h3>AI 对话</h3>
-          <ul>
-            <li className="settings-item settings-item-nav" onClick={() => setShowAiSettings(true)}>
-              <span className="settings-item-label"><Server size={17} /> 模型供应商配置</span>
-              <ChevronRight size={18} />
-            </li>
-            <li className="settings-item settings-item-nav" onClick={() => setShowAiArchived(true)}>
-              <span className="settings-item-label"><Archive size={17} /> 已归档对话</span>
-              <ChevronRight size={18} />
-            </li>
-          </ul>
+          {aiAvailable ? (
+            <ul>
+              <li className="settings-item settings-item-nav" onClick={() => setShowAiSettings(true)}>
+                <span className="settings-item-label"><Server size={17} /> 模型供应商配置</span>
+                <ChevronRight size={18} />
+              </li>
+              <li className="settings-item settings-item-nav" onClick={() => setShowAiArchived(true)}>
+                <span className="settings-item-label"><Archive size={17} /> 已归档对话</span>
+                <ChevronRight size={18} />
+              </li>
+            </ul>
+          ) : (
+            <ul>
+              <li className="settings-item settings-item-nav disabled" aria-disabled="true">
+                <span className="settings-item-label"><Smartphone size={17} /> AI 对话仅 App 可用</span>
+              </li>
+            </ul>
+          )}
         </div>
         <div className="settings-section">
           <h3>远程配置</h3>
@@ -86,13 +98,17 @@ export function SettingsTab() {
           <ul>
             <li className="settings-item">语言</li>
             <li className="settings-item">通知权限</li>
-            <li className="settings-item">关于 Code-Lite Remote</li>
+            <li className="settings-item settings-item-nav" onClick={() => setShowAbout(true)}>
+              <span className="settings-item-label"><Info size={17} /> 关于 Code-Lite Remote</span>
+              <ChevronRight size={18} />
+            </li>
           </ul>
         </div>
       </div>
 
-      {showAiSettings && <AiSettingsSheet onClose={() => setShowAiSettings(false)} />}
-      {showAiArchived && <AiArchivedSheet onClose={() => setShowAiArchived(false)} />}
+      {aiAvailable && showAiSettings && <AiSettingsSheet onClose={() => setShowAiSettings(false)} />}
+      {aiAvailable && showAiArchived && <AiArchivedSheet onClose={() => setShowAiArchived(false)} />}
+      {showAbout && <AboutSheet onClose={() => setShowAbout(false)} />}
     </div>
   );
 }

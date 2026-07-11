@@ -15,6 +15,7 @@
 
 import type { AiProvider, AiModel } from "./AiProviderStore";
 import type { AiImage, AiMessage } from "./AiConversationStore";
+import { isNativeApp } from "../lib/environment";
 
 /** 规范化 baseUrl：去掉结尾斜杠。 */
 function normalizeBaseUrl(baseUrl: string): string {
@@ -30,22 +31,14 @@ function authHeaders(provider: AiProvider): Record<string, string> {
 }
 
 /**
- * 判断是否运行在 Capacitor 原生环境（Android/iOS）。
- * 仅当确实在原生 shell 内才返回 true；浏览器 dev / Vite HMR 一律 false。
- */
-function isNative(): boolean {
-  const cap = (window as any).Capacitor;
-  if (!cap) return false;
-  const platform = cap.getPlatform?.() ?? cap.platform;
-  return platform === "android" || platform === "ios";
-}
-
-/**
- * dev 环境下把真实 URL 映射成同源代理路径（绕开 CORS，且保留流式）。
- * 原生环境直接返回原始 URL。
+ * 把真实 URL 映射为请求地址：
+ * - 原生 App：直接用原始 URL（原生 HTTP 不受 CORS 约束，未来接安卓原生模块）。
+ * - 浏览器（dev）：映射到同源 /ai-proxy 转发，绕开 CORS 且保留流式。
+ *
+ * 注意：生产 PWA 环境不会走到这里——AI 入口已由 isAiAvailable() 整体禁用。
  */
 function proxyUrl(url: string): string {
-  if (isNative()) return url;
+  if (isNativeApp()) return url;
   return `/ai-proxy/${url}`;
 }
 

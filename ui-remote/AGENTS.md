@@ -35,7 +35,7 @@ src/
 
   tabs/                 # 底部 Tab 对应的四个主页面板
     RemoteTab.tsx       #   远程：按项目分组的会话列表
-    AiTab.tsx           #   AI：直连大模型（占位）
+    AiTab.tsx           #   AI：独立对话模块（会话列表；环境不可用时显示“仅 App 可用”）
     DevicesTab.tsx      #   设备：多设备管理
     SettingsTab.tsx     #   设置：外观（主题/深色）等
 
@@ -276,6 +276,46 @@ import { Sheet, Button, Fab, EmptyState, Select, EffortSlider, Portal } from "..
 
 大致数据流：`services`（连接/存储）→ `hooks`（订阅/派生状态）→ `pages`/`tabs`/`sheets`
 （取数并组织）→ `components/ui`（纯展示）。数据向下流，事件通过回调向上冒泡。
+
+---
+
+## AI 功能的环境可用性
+
+AI 对话是**独立于 code-lite 业务**的附加模块，直连大模型 API（`/v1/chat/completions`
+与 `/v1/responses`）。它的可用性**取决于运行环境**，判定集中在 `lib/environment.ts`
+的 `isAiAvailable()`，**新增任何 AI 入口都必须先过这道闸**。
+
+### 为什么要按环境区分
+
+浏览器的 CORS 是拦在“网页 JS 读取跨域响应”这一层的安全机制，**任何网页内代码都无法绕过**。
+而多数大模型供应商（如 beeapi）不返回 `Access-Control-Allow-Origin`，甚至预检 OPTIONS
+直接 403 —— 浏览器网页因此无法直连。三种环境的处理各不相同：
+
+| 环境 | 判定 | AI 是否可用 | 请求走向 |
+|---|---|---|---|
+| **原生 App**（Capacitor Android/iOS） | `isNativeApp()` | ✅ 可用 | 直连目标 URL（原生 HTTP 不受 CORS 约束；后续接安卓原生模块） |
+| **开发环境**（Vite dev） | `import.meta.env.DEV` | ✅ 可用 | 经同源 `/ai-proxy` 中间件转发（见 `vite.config.ts`），绕开 CORS 且保留流式 |
+| **PWA / 生产静态部署** | 上面两者皆否 | ❌ 禁用 | 无 `/ai-proxy` 转发、供应商又不给 CORS 头 → 入口与页面统一显示“仅 App 可用” |
+
+### 实现约定
+
+- **唯一判定点**：`lib/environment.ts` 的 `isAiAvailable()`。别在组件里各自判断
+  `import.meta.env` 或 `Capacitor.getPlatform()`，一律走这个函数。
+- **入口 gate**：
+  - `tabs/AiTab.tsx`：不可用时提前 return “仅 App 可用”空状态，不渲染会话列表/FAB。
+  - `tabs/SettingsTab.tsx`：不可用时 AI 段落渲染为禁用项（`.settings-item-nav.disabled`），
+    且不挂载 `AiSettingsSheet` / `AiArchivedSheet`。
+- **请求转发**：`services/aiClient.ts` 的 `proxyUrl()` 依据 `isNativeApp()` 决定直连
+  还是走 `/ai-proxy`。生产 PWA 不会走到这里，因为入口已被 gate 掉。
+- **`/ai-proxy` 仅存在于 dev**：它是 `vite.config.ts` 里的 dev 中间件，`vite build` 产物
+  **不包含**它。若将来要在服务器上让网页版也能用 AI，需在服务器（nginx/caddy/node）
+  固化一个同源反向代理，并相应放开 `isAiAvailable()` —— 但当前策略是网页版不做 AI。
+
+### 待办（安卓原生直连）
+
+原生 App 目前仍用浏览器 `fetch`（为保留流式），因此在 Android WebView 里同样受 CORS
+约束，遇到不返回 CORS 头的供应商仍会失败。后续需接一个 **Android 原生 HTTP 模块**
+（能绕 WebView CORS，最好支持流式 SSE），届时 `aiClient` 的原生分支改为调用该模块。
 
 ---
 
