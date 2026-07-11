@@ -5,6 +5,7 @@ import { useConversationState } from "../hooks/useConversations";
 import { connectionManager } from "../services/ConnectionManager";
 import { useSessionConfig } from "../hooks/useSessionConfig";
 import { MessageBubble } from "../components/MessageBubble";
+import { DetailOverlay, type DetailRoute } from "../components/DetailOverlay";
 import { ConfigSheet } from "../sheets/ConfigSheet";
 import { ConfigBar } from "../components/ConfigBar";
 import { EmptyState, Button, Sheet, Portal } from "../components/ui";
@@ -65,6 +66,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const [draftImageError, setDraftImageError] = useState<string | null>(null);
   const [imagesProcessing, setImagesProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
+  const [detailRoute, setDetailRoute] = useState<DetailRoute | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -449,6 +451,8 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
               conversationId={sessionId}
               showTimestamp={shouldShowTimestamp(msg, i, messages, isRunning)}
               onPreviewImage={(url, name) => setPreviewImage({ url, name })}
+              onOpenTool={(target) => setDetailRoute({ kind: "tool", target })}
+              onOpenDiff={(target) => setDetailRoute({ kind: "diff", target })}
             />
           ))
         )}
@@ -628,6 +632,9 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
           )}
         </Sheet>
       )}
+
+      {/* 工具/diff 详情页浮层：叠在会话页之上，右侧滑入 */}
+      <DetailOverlay route={detailRoute} onBack={() => setDetailRoute(null)} />
 
       {/* 图片预览：全屏浮层经 Portal 逃逸父级 transform 裁剪 */}
       {previewImage && (

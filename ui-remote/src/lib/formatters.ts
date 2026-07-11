@@ -31,3 +31,11 @@ export function formatFullDateTime(value: number) {
     hour12: false,
   }).format(new Date(value));
 }
+
+/** 工具调用风险等级文案（与桌面端一致）。 */
+export function formatRisk(risk?: "low" | "medium" | "high" | "blocked") {
+  if (risk === "high") return "高风险";
+  if (risk === "medium") return "中风险";
+  if (risk === "blocked") return "已阻止";
+  return "低风险";
+}
