@@ -238,6 +238,29 @@ class RemoteBridge:
         logger.info("peer %s kicked", peer_id)
         return True
 
+    def _register_peer(self, peer_id: str) -> None:
+        """登记（或覆盖）一个远端 peer 会话。
+
+        握手阶段（中继在 host 重连时先补发 peer.joined 再发 ready）与主循环里的
+        peer.joined 分支共用此逻辑，避免两处重复且保证 peer 一定被登记。
+        """
+        if not peer_id or self._ws is None:
+            return
+        logger.info("remote peer joined: %s", peer_id)
+        # 每个 peer 一个独立会话（含独立 pump_tasks），互不串台（0710 第 4.1 节）。
+        peer = _PeerSession(self._ws, peer_id)
+        # 默认权限跟随配置（0709 设计 8.4）：远端默认 operator（随时介入），
+        # 仅当宿主开启"新接入设备默认只读"时才落为 viewer，由宿主在设置页升权。
+        peer.role = "viewer" if self._config.default_readonly else "operator"
+        self._remote_peers[peer_id] = peer
+        # 通知本地前端刷新设备列表（并可据此提示有新设备接入）
+        self._notify_local({
+            "type": "remote.peer.joined",
+            "peerId": peer_id,
+            "role": peer.role,
+            "defaultReadonly": self._config.default_readonly,
+        })
+
     def _notify_local(self, event: dict[str, Any]) -> None:
         """向本地前端（宿主）推一条 presence 事件，走全局频道总线。
 
@@ -308,14 +331,18 @@ class RemoteBridge:
 
     async def _run(self) -> None:
         while self._running:
+            started = time.monotonic()
             try:
                 await self._connect_and_run()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.warning("remote bridge disconnected: %s", e)
-                if self._running:
-                    await asyncio.sleep(5)
+            # 退避对所有退出路径生效（含正常 return），保证连接尝试之间至少间隔 5s，
+            # 任何单点回归都不会把中继/CPU 打爆（reconnect storm 兜底）。
+            if self._running:
+                elapsed = time.monotonic() - started
+                await asyncio.sleep(max(0.0, 5.0 - elapsed))
 
     async def _connect_and_run(self) -> None:
         logger.info("connecting to relay %s (room %s)", self._config.relay_url, self._config.room_id[:12])
@@ -328,12 +355,32 @@ class RemoteBridge:
                 "role": "host",
                 "roomId": self._config.room_id,
             }))
-            resp = json.loads(await ws.recv())
-            logger.info("relay hello response: %s", resp)
-            if resp.get("type") != "ready":
-                logger.error("relay rejected: %s", resp)
-                return
-            logger.info("connected to relay")
+            # 握手：等待 ready，但容忍 ready 之前先到达的控制帧。
+            # 中继在 host 重连且房间已有等待中的 remote 时，会先补发一批 peer.joined
+            # 再发 ready（见 proxy_server handle_hello）。旧代码只 recv 一次并断言首帧即
+            # ready，于是把 peer.joined 误判为 rejected 直接 return；而 _run 的重连退避
+            # 只在 except 分支，正常 return 会立即重连 → 疯狂爆破中继（reconnect storm）。
+            pending_peers: list[str] = []
+            while True:
+                frame = json.loads(await ws.recv())
+                ftype = frame.get("type")
+                if ftype == "ready":
+                    logger.info("connected to relay")
+                    break
+                if ftype == "peer.joined":
+                    # 先缓存，待 self._ws 就位后统一登记（保持与主循环一致的 peer 会话）。
+                    pending_peers.append(frame.get("peerId", ""))
+                    continue
+                if ftype == "ping":
+                    await ws.send(json.dumps({"type": "pong"}))
+                    continue
+                # 真正的拒绝（bad_room/room_has_host 等）：抛出交由 _run 退避重连。
+                logger.error("relay rejected: %s", frame)
+                raise ConnectionError(f"relay rejected: {frame}")
+
+            # ready 之后 self._ws 已可用，登记握手期间收到的 peer。
+            for pid in pending_peers:
+                self._register_peer(pid)
 
             try:
                 async for raw in ws:
@@ -347,22 +394,7 @@ class RemoteBridge:
                     if msg_type == "ping":
                         await ws.send(json.dumps({"type": "pong"}))
                     elif msg_type == "peer.joined":
-                        peer_id = msg.get("peerId", "")
-                        logger.info("remote peer joined: %s", peer_id)
-                        # 每个 peer 一个独立会话（含独立 pump_tasks），互不串台（0710 第 4.1 节）。
-                        peer = _PeerSession(ws, peer_id)
-                        # 默认权限跟随配置（0709 设计 8.4）：远端默认 operator（随时介入），
-                        # 仅当宿主开启"新接入设备默认只读"时才落为 viewer，由宿主在设置页升权。
-                        # 首连确认作为更强的管控（设备列表 + 踢出）已提供，弹窗确认为后续增强。
-                        peer.role = "viewer" if self._config.default_readonly else "operator"
-                        self._remote_peers[peer_id] = peer
-                        # 通知本地前端刷新设备列表（并可据此提示有新设备接入）
-                        self._notify_local({
-                            "type": "remote.peer.joined",
-                            "peerId": peer_id,
-                            "role": peer.role,
-                            "defaultReadonly": self._config.default_readonly,
-                        })
+                        self._register_peer(msg.get("peerId", ""))
                     elif msg_type == "peer.left":
                         peer_id = msg.get("peerId", "")
                         logger.info("remote peer left: %s", peer_id)

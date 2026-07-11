@@ -191,6 +191,27 @@ class RelayHandshakeTest(unittest.IsolatedAsyncioTestCase):
         # remote 断开后房间应被完全清理
         self.assertIsNone(registry.get("room-cl"))
 
+    async def test_host_receives_peer_joined_before_ready_when_remote_waiting(self) -> None:
+        """回归：remote 先连（waiting），host 后上线时，中继会先给 host 发 peer.joined
+        再发 ready。host 握手必须容忍 ready 之前的 peer.joined，否则会误判为 rejected
+        并立即重连，打爆中继（reconnect storm）。此测试锁定该帧顺序。"""
+        # remote 先连，进入 waiting
+        remote = await websockets.connect(RELAY_URI)
+        resp = await _send_hello(remote, "remote", "room-order")
+        self.assertEqual(resp["type"], "waiting")
+
+        # host 后上线：不走 _send_hello（它会跳过中间帧），逐帧断言顺序
+        host = await websockets.connect(RELAY_URI)
+        await host.send(json.dumps({"type": "hello", "role": "host", "roomId": "room-order"}))
+        first = await _recv_json(host)
+        self.assertEqual(first["type"], "peer.joined")
+        self.assertEqual(first["peerId"], resp["peerId"])
+        second = await _recv_json(host)
+        self.assertEqual(second["type"], "ready")
+
+        await host.close()
+        await remote.close()
+
     async def test_bad_hello_rejected(self) -> None:
         async with websockets.connect(RELAY_URI) as ws:
             await ws.send(json.dumps({"type": "not_hello"}))
