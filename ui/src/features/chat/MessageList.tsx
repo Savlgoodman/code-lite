@@ -256,6 +256,7 @@ interface MessageListProps {
 export function MessageList({ isRunning, isWaitingForUser = false, messages, sessionId, updatedAt }: MessageListProps) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const isPinnedToBottomRef = useRef(true);
   const smoothScrollFrameRef = useRef<number | null>(null);
   const smoothScrollActiveRef = useRef(false);
@@ -364,6 +365,54 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
       behavior,
       top: element.scrollHeight
     });
+  }
+
+  // 拖动右侧滚动条 thumb：把指针在轨道内的位移映射到 scrollTop。
+  function handleScrollbarPointerDown(event: React.PointerEvent<HTMLElement>) {
+    const element = scrollRef.current;
+    const track = scrollbarTrackRef.current;
+    if (!element || !track) {
+      return;
+    }
+    event.preventDefault();
+    cancelSmoothScroll();
+
+    const trackHeight = track.clientHeight;
+    const thumbHeight = (scrollbarState.thumbHeight / 100) * trackHeight;
+    const thumbTravel = Math.max(1, trackHeight - thumbHeight);
+    const contentRange = element.scrollHeight - element.clientHeight;
+    const startPointerY = event.clientY;
+    const startScrollTop = element.scrollTop;
+
+    // 若按在轨道空白处（非 thumb 本身），先把 thumb 中心跳到指针位置。
+    const clickedThumb = (event.target as HTMLElement).tagName.toLowerCase() === "i";
+    let anchorPointerY = startPointerY;
+    let anchorScrollTop = startScrollTop;
+    if (!clickedThumb) {
+      const trackRect = track.getBoundingClientRect();
+      const desiredThumbTop = clamp(startPointerY - trackRect.top - thumbHeight / 2, 0, thumbTravel);
+      anchorScrollTop = (desiredThumbTop / thumbTravel) * contentRange;
+      element.scrollTop = anchorScrollTop;
+      anchorPointerY = startPointerY;
+    }
+
+    const captureTarget = event.currentTarget;
+    captureTarget.setPointerCapture(event.pointerId);
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const deltaY = moveEvent.clientY - anchorPointerY;
+      const nextScrollTop = clamp(anchorScrollTop + (deltaY / thumbTravel) * contentRange, 0, contentRange);
+      element.scrollTop = nextScrollTop;
+    };
+    const handleUp = (upEvent: PointerEvent) => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      if (captureTarget.hasPointerCapture(upEvent.pointerId)) {
+        captureTarget.releasePointerCapture(upEvent.pointerId);
+      }
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
   }
 
   useEffect(() => {
@@ -478,7 +527,11 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
         </div>
       </section>
       {scrollbarState.visible ? (
-        <div className="chat-scrollbar" aria-hidden="true">
+        <div
+          className="chat-scrollbar"
+          ref={scrollbarTrackRef}
+          onPointerDown={handleScrollbarPointerDown}
+        >
           <i style={{ height: `${scrollbarState.thumbHeight}%`, top: `${scrollbarState.thumbTop}%` }} />
         </div>
       ) : null}

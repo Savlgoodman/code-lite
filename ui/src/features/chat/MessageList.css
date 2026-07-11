@@ -31,26 +31,38 @@
 .chat-scrollbar {
   position: absolute;
   top: 52px;
-  right: 6px;
+  right: 2px;
   bottom: 122px;
   z-index: 4;
-  width: 6px;
+  width: 14px;
+  padding: 0 4px;
   border-radius: 999px;
   background: transparent;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .chat-scrollbar i {
   position: absolute;
-  right: 0;
-  left: 0;
+  right: 4px;
+  left: 4px;
   min-height: 28px;
-  border-radius: inherit;
+  border-radius: 999px;
   background: rgba(75, 82, 92, 0.28);
+  cursor: grab;
+  transition: background 0.16s ease;
+}
+
+.chat-scrollbar i:active {
+  cursor: grabbing;
 }
 
 .chat-workspace:hover .chat-scrollbar i {
   background: rgba(75, 82, 92, 0.38);
+}
+
+.chat-scrollbar:hover i,
+.chat-scrollbar i:active {
+  background: rgba(75, 82, 92, 0.55);
 }
 
 .chat-content {
