@@ -32,7 +32,7 @@ export function DiffDetailPage({ diff, conversationId, onBack }: DiffDetailPageP
   const [state, setState] = useState<LoadState>(diff.legacyContent ? "loaded" : "idle");
 
   useEffect(() => {
-    if (diff.legacyContent || state !== "idle") return;
+    if (diff.legacyContent) return;
     const client = connectionManager.getClient();
     if (!client) {
       setState("error");
@@ -53,7 +53,9 @@ export function DiffDetailPage({ diff, conversationId, onBack }: DiffDetailPageP
     return () => {
       cancelled = true;
     };
-  }, [conversationId, diff.diffId, diff.legacyContent, state]);
+    // 仅按会话/diff 标识触发；state 不入依赖，否则内部 setState("loading")
+    // 会重跑本 effect，其 cleanup 置 cancelled=true 丢弃刚到的响应。
+  }, [conversationId, diff.diffId, diff.legacyContent]);
 
   const lines = content ? buildDiffLines(content) : [];
   const fileName = diff.path.split(/[\\/]/).pop() || diff.path;

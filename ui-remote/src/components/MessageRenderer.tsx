@@ -3,7 +3,7 @@ import { code } from "@streamdown/code";
 import { createMathPlugin } from "@streamdown/math";
 import { Streamdown, type AnimateOptions, type Components, type ControlsConfig, type ExtraProps } from "streamdown";
 import { FileText } from "lucide-react";
-import { classifyHref, type FileRef } from "@code-lite/chat-render";
+import { classifyHref, decodeFileRefSentinel, rewriteFileRefsForRender, type FileRef } from "@code-lite/chat-render";
 import "katex/dist/katex.min.css";
 
 /** 文件引用上下文：让 streamdown 的 a 组件拿到点击回调（跳详情页）与图片加载器。 */
@@ -68,7 +68,9 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"tabl
 
 function MarkdownLink({ children, node: _node, ...props }: ComponentProps<"a"> & ExtraProps) {
   const { onOpenFileRef } = useContext(FileRefContext);
-  const href = typeof props.href === "string" ? props.href : "";
+  const rawHref = typeof props.href === "string" ? props.href : "";
+  // harden 会把本地文件链接改写成 [blocked]；渲染前已用哨兵 URL 绕过，这里还原真实路径。
+  const href = decodeFileRefSentinel(rawHref) ?? rawHref;
   const label = typeof children === "string" ? children : href;
   const fileRef = href ? classifyHref(href, label) : null;
 
@@ -166,7 +168,8 @@ const streamdownAnimation: AnimateOptions = {
 
 export const MessageRenderer = memo(function MessageRenderer({ content, streaming }: MessageRendererProps) {
   const isStreaming = Boolean(streaming);
-  const normalized = normalizeMathDelimiters(content);
+  // 先把本地文件链接改写成哨兵 URL（绕过 harden），再做数学定界归一。
+  const normalized = normalizeMathDelimiters(rewriteFileRefsForRender(content));
 
   return (
     <div className="streamdown-shell">

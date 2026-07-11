@@ -89,6 +89,16 @@ const TEXT_EXTS = new Set([
 const EXTERNAL_SCHEME = /^(https?|mailto|tel|ftp):/i;
 const WINDOWS_ABS = /^[a-zA-Z]:[\\/]/;
 
+/**
+ * 本地文件引用哨兵 URL 前缀。
+ *
+ * streamdown 内置的 rehype-harden 会在自定义 `a` 组件运行前，把非 http(s) 的链接
+ * （如 `H:\...`、`file://...`）改写成 “[blocked]” 文本——即便配了通配 allowedLinkPrefixes，
+ * 它对通配也只放行 http/https。为了让本地文件链接活着走到我们的渲染层，先把它们编码成
+ * 一个 https 哨兵 URL（harden 放行），渲染时再由 decodeFileRefSentinel 还原真实路径。
+ */
+const SENTINEL_PREFIX = "https://code-lite.fileref/open?p=";
+
 function extOf(path: string): string {
   const clean = path.split(/[?#]/)[0];
   const base = clean.split(/[\\/]/).pop() ?? "";
@@ -157,4 +167,43 @@ export function classifyHref(href: string, label: string): FileRef | null {
   }
   // 其它未知扩展名统一按文本打开。
   return { kind: "text", path, label, ext };
+}
+
+/** 把原始链接地址编码为 https 哨兵 URL（供 markdown 预处理时替换）。 */
+export function encodeFileRefSentinel(href: string): string {
+  return SENTINEL_PREFIX + encodeURIComponent(href);
+}
+
+/**
+ * 若 href 是哨兵 URL，还原出被编码的原始地址；否则返回 null。
+ * 渲染层（MarkdownLink）用它把哨兵还原后再交给 classifyHref。
+ */
+export function decodeFileRefSentinel(href: string): string | null {
+  if (!href.startsWith(SENTINEL_PREFIX)) return null;
+  const encoded = href.slice(SENTINEL_PREFIX.length);
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return encoded;
+  }
+}
+
+// Markdown 内联链接地址：[label](url)（url 可带尖括号或标题）。前置 `!` 的图片语法不改写
+// （图片走 <img>，我们只接管 <a>；把图片写成 [label](x.png) 链接形式才会被内联渲染）。
+const MD_LINK_TARGET = /(\[[^\]]*\]\()(\s*<?)([^)>\s]+)(>?[^)]*\))/g;
+
+/**
+ * 预处理 markdown：把指向本地文件的链接地址改写成 https 哨兵 URL，
+ * 使其能穿过 streamdown 的 harden 层，最终由渲染层还原并高亮。
+ * 非本地文件（http(s)/mailto/锚点等）原样保留。
+ */
+export function rewriteFileRefsForRender(markdown: string): string {
+  if (!markdown || markdown.indexOf("](") === -1) return markdown;
+  return markdown.replace(MD_LINK_TARGET, (whole, open: string, pre: string, url: string, tail: string, offset: number) => {
+    // 跳过图片语法 ![label](url)：open 前一个字符是 '!'。
+    if (offset > 0 && markdown[offset - 1] === "!") return whole;
+    const ref = classifyHref(url, "");
+    if (!ref) return whole;
+    return `${open}${pre}${encodeFileRefSentinel(url)}${tail}`;
+  });
 }
