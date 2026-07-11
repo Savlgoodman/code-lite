@@ -10,7 +10,7 @@
  * 版本号变化时会清理旧缓存。
  */
 
-const CACHE_VERSION = "code-lite-remote-v1";
+const CACHE_VERSION = "code-lite-remote-v2";
 const APP_SHELL = ["/", "/index.html", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
