@@ -52,10 +52,22 @@ export function sessionViewFromSnapshot(snapshot: {
 }): SessionViewState {
   const messages = snapshot.messages ?? [];
   let activeAssistantMessageId: string | null = null;
+  let contextUsage: UsageStats | null = null;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i].role === "assistant" && messages[i].streaming) {
-      activeAssistantMessageId = messages[i].id;
-      break;
+    const msg = messages[i];
+    if (msg.role === "assistant") {
+      if (msg.streaming && !activeAssistantMessageId) {
+        activeAssistantMessageId = msg.id;
+      }
+      // 从最后一条带有效 usage 的 assistant 消息恢复 contextUsage（0710 回归修复）。
+      if (!contextUsage && msg.usage && typeof msg.usage === "object") {
+        const u = msg.usage as UsageStats;
+        if (u.contextUsedTokens !== undefined || u.contextWindowTokens !== undefined) {
+          contextUsage = u;
+        }
+      }
+      // 两个都找到了即可退出。
+      if (activeAssistantMessageId && contextUsage) break;
     }
   }
   return {
@@ -63,7 +75,7 @@ export function sessionViewFromSnapshot(snapshot: {
     messages,
     activeAssistantMessageId,
     running: snapshot.session?.status === "running",
-    contextUsage: null,
+    contextUsage,
     pendingApproval: null,
     pendingInput: null,
   };
