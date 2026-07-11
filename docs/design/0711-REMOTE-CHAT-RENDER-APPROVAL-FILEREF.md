@@ -409,6 +409,10 @@ res  { path, kind, mimeType, encoding: "utf-8"|"base64", content, truncated, siz
 
 ## 10. 任务拆解与提交计划
 
+> 实现状态（2026-07-11）：全部完成。计划中的 5、6 两步（工具组/编辑组 + 详情页导航）
+> 合并为一次提交（二者需一并落地才有意义），其余按计划逐步提交。分支
+> `feat/remote-0711-chat-render-approval-fileref`。
+
 每完成一个小任务提交一次（`AGENTS.md` 提交规范：有文档时每步一提交）。
 
 1. `docs: 新增远端聊天渲染/审批/文件引用设计文档`（本文件）。
