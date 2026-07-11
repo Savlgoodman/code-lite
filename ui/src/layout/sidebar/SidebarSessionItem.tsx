@@ -1,4 +1,4 @@
-import { Archive } from "lucide-react";
+import { Archive, LoaderCircle } from "lucide-react";
 import { useState, type FocusEvent } from "react";
 
 import { AgentIcon } from "../../components/AgentIcon";
@@ -55,7 +55,15 @@ export function SidebarSessionItem({
       >
         <AgentIcon agent={session.agent} className="sidebar-session-agent" size="sm" />
         <span className="sidebar-session-title">{session.title}</span>
-        <span className="sidebar-session-time">{formatTimeLabel(session.updatedAt)}</span>
+        {session.status === "running" ? (
+          <LoaderCircle
+            aria-label="会话进行中"
+            className="sidebar-session-running spin-icon"
+            size={14}
+          />
+        ) : (
+          <span className="sidebar-session-time">{formatTimeLabel(session.updatedAt)}</span>
+        )}
       </button>
       <button
         aria-label={confirmingArchive ? `确认归档对话：${session.title}` : `归档对话：${session.title}`}

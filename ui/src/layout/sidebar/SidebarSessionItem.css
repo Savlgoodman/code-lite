@@ -54,6 +54,12 @@
   transition: opacity 120ms ease;
 }
 
+.sidebar-session-running {
+  flex: 0 0 auto;
+  color: var(--accent, var(--text-secondary));
+  transition: opacity 120ms ease;
+}
+
 .sidebar-session-archive {
   position: absolute;
   top: 50%;
@@ -75,7 +81,10 @@
 
 .sidebar-session-row:hover .sidebar-session-time,
 .sidebar-session-row:focus-within .sidebar-session-time,
-.sidebar-session-row.confirming-archive .sidebar-session-time {
+.sidebar-session-row.confirming-archive .sidebar-session-time,
+.sidebar-session-row:hover .sidebar-session-running,
+.sidebar-session-row:focus-within .sidebar-session-running,
+.sidebar-session-row.confirming-archive .sidebar-session-running {
   opacity: 0;
 }
 
