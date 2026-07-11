@@ -255,6 +255,8 @@ interface MessageListProps {
 
 export function MessageList({ isRunning, isWaitingForUser = false, messages, sessionId, updatedAt }: MessageListProps) {
   const scrollRef = useRef<HTMLElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const isPinnedToBottomRef = useRef(true);
   const smoothScrollFrameRef = useRef<number | null>(null);
   const smoothScrollActiveRef = useRef(false);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
@@ -281,6 +283,8 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
   const runningThinkingText = isCompactPrompt(compactSourceMessage?.content) ? "正在压缩" : "正在思考";
   const canShowRunningThinking = isRunning && !isWaitingForUser;
   const shouldShowThinkingImmediately = canShowRunningThinking && (!latestStreamingAssistant || !latestStreamingAssistant.content.trim());
+
+  isPinnedToBottomRef.current = isPinnedToBottom;
 
   function isAtBottom(element: HTMLElement) {
     return element.scrollHeight - element.scrollTop - element.clientHeight <= 8;
@@ -415,6 +419,24 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
     };
   }, [sessionId]);
 
+  // 内容高度变化（如工具调用卡片展开/收起、图片加载）时重算磁吸与滚动条，
+  // 避免展开的卡片撑高后贴底位置错位、把页面滚动"卡住"。
+  useEffect(() => {
+    const content = contentRef.current;
+    const element = scrollRef.current;
+    if (!content || !element || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (isPinnedToBottomRef.current && !smoothScrollActiveRef.current) {
+        element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      }
+      updateScrollbarState(element);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [sessionId]);
+
   useEffect(() => {
     if (isPinnedToBottom) {
       requestAnimationFrame(() => scrollToBottom("auto"));
@@ -434,7 +456,7 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
   return (
     <>
       <section className="chat-scroll" ref={scrollRef}>
-        <div className="chat-content">
+        <div className="chat-content" ref={contentRef}>
           {messages.map((message, index) => (
             <MessageItem
               isCompactTurn={message.role === "assistant" && isCompactPrompt(messages[index - 1]?.content)}
