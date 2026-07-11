@@ -9,6 +9,7 @@
 
 import { ConversationClient } from "@code-lite/chat-core";
 import { SyncManager } from "@code-lite/sync";
+import type { TransportStatus } from "@code-lite/transport";
 import { RelayTransport } from "../services/RelayTransport";
 import { Preferences } from "@capacitor/preferences";
 
@@ -28,6 +29,9 @@ export class ConnectionManager {
   private transport: RelayTransport | null = null;
   private config: ConnectionConfig | null = null;
   private onHostStatusChange: ((online: boolean) => void) | null = null;
+  private onStatusChange: ((status: TransportStatus) => void) | null = null;
+  // 宿主是否在线（host.online/offline 驱动）。socket 断开期间视为不可达。
+  private hostOnline = false;
 
   async loadStoredConfig(): Promise<ConnectionConfig | null> {
     // 优先从 Capacitor Preferences 读取 (Android 持久化)
@@ -103,24 +107,45 @@ export class ConnectionManager {
     const roomId = await computeRoomId(config.pairKey);
 
     // 创建 transport
-    this.transport = new RelayTransport({
+    const transport = new RelayTransport({
       relayUrl: config.relayUrl,
       roomId,
       onHostStatusChange: (online) => {
         console.log("[ConnectionManager] Host status:", online);
-        this.onHostStatusChange?.(online);
+        this.hostOnline = online;
+        // 宿主重连上线：本端 socket 未断，但宿主刚重建了本 peer 的 pump，
+        // 需重放订阅让宿主重新推事件，否则会话页收不到后续更新（假卡死）。
+        if (online) {
+          this.transport?.resubscribeAll();
+          this.client?.loadList().catch(() => { /* 列表刷新失败不阻断 */ });
+        }
+        this.emitConnected();
       },
+    });
+    this.transport = transport;
+
+    // 传输层状态：socket 断开/重连/关闭都要反映到 UI 在线态。
+    transport.onStatus((status) => {
+      console.log("[ConnectionManager] Transport status:", status);
+      this.onStatusChange?.(status);
+      this.emitConnected();
+    });
+
+    // 本端 socket 断线自动重连成功：重放订阅已在基类完成，这里刷新列表补齐状态。
+    transport.onReconnected(() => {
+      console.log("[ConnectionManager] Reconnected, refreshing list");
+      this.client?.loadList().catch(() => { /* 列表刷新失败不阻断 */ });
     });
 
     // 创建 sync manager (role: "remote")
     this.sync = new SyncManager({
-      transport: this.transport,
+      transport,
       role: "remote",
     });
 
     // 创建 client
     this.client = new ConversationClient({
-      transport: this.transport,
+      transport,
       sync: this.sync,
     });
 
@@ -130,6 +155,25 @@ export class ConnectionManager {
     await this.client.start();
 
     return this.client;
+  }
+
+  /** 综合传输层状态与宿主在线态，向 UI 广播"是否真正可用"。 */
+  private emitConnected(): void {
+    const status = this.transport?.status ?? "closed";
+    const usable = status === "connected" && this.hostOnline;
+    this.onHostStatusChange?.(usable);
+  }
+
+  /** 当前传输层连接状态（供 UI 显示"重连中/离线"）。 */
+  getStatus(): TransportStatus {
+    return this.transport?.status ?? "closed";
+  }
+
+  /** 手动重连：有限次自动重连耗尽后，用户点击"重新连接"时调用。 */
+  async reconnect(): Promise<void> {
+    const t = this.transport;
+    if (!t) return;
+    await t.connect();
   }
 
   disconnect(): void {
@@ -146,14 +190,21 @@ export class ConnectionManager {
       this.transport = null;
     }
     this.config = null;
+    this.hostOnline = false;
   }
 
   isConnected(): boolean {
-    return this.client !== null;
+    const status = this.transport?.status ?? "closed";
+    return status === "connected" && this.hostOnline;
   }
 
   setHostStatusCallback(cb: (online: boolean) => void): void {
     this.onHostStatusChange = cb;
+  }
+
+  /** 设置传输层状态回调：供 UI 区分"重连中/离线"态。 */
+  setStatusCallback(cb: (status: TransportStatus) => void): void {
+    this.onStatusChange = cb;
   }
 }
 

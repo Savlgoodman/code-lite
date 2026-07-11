@@ -1,16 +1,19 @@
 import { useState } from "react";
-import { Folder, ArrowDownWideNarrow, Plus, FolderPlus } from "lucide-react";
+import { Folder, ArrowDownWideNarrow, Plus, FolderPlus, WifiOff } from "lucide-react";
 import type { Session } from "@code-lite/protocol";
+import type { TransportStatus } from "@code-lite/transport";
 import { useConversationState } from "../hooks/useConversations";
 import { connectionManager } from "../services/ConnectionManager";
 import { AgentIcon } from "../components/AgentIcon";
 import { NewConversationSheet } from "../sheets/NewConversationSheet";
 import { Fab, EmptyState } from "../components/ui";
 
-export function RemoteTab({ connected, deviceName, onOpenSession, active = true }: {
+export function RemoteTab({ connected, transportStatus, deviceName, onOpenSession, onReconnect, active = true }: {
   connected: boolean;
+  transportStatus: TransportStatus;
   deviceName: string;
   onOpenSession: (id: string) => void;
+  onReconnect: () => void;
   /** 由 HomePager 注入：仅激活 Tab 渲染 FAB，避免跨页叠加 */
   active?: boolean;
 }) {
@@ -47,12 +50,29 @@ export function RemoteTab({ connected, deviceName, onOpenSession, active = true 
 
   const title = deviceName ? `${deviceName} 的远程 code-lite` : "远程 code-lite";
 
-  if (!connected) {
+  if (!connected || transportStatus === "closed") {
+    const statusLabel =
+      transportStatus === "connecting" ? "连接中…" :
+      transportStatus === "reconnecting" ? "重连中…" :
+      "未连接";
     return (
       <div className="tab-page">
         <h2 className="page-title">{title}</h2>
-        <div className="page-subtitle offline">未连接</div>
-        <EmptyState icon="◎">请在"设备"页面添加并连接一台设备</EmptyState>
+        <div className="page-subtitle offline">{statusLabel}</div>
+        {transportStatus === "closed" ? (
+          <>
+            <EmptyState icon={<WifiOff size={32} />}>
+              连接已断开，请在"设备"页面添加并连接一台设备
+            </EmptyState>
+            {active && deviceName && (
+              <Fab onClick={onReconnect} aria-label="重新连接" title="重新连接">
+                <WifiOff size={24} />
+              </Fab>
+            )}
+          </>
+        ) : (
+          <EmptyState icon="◎">{statusLabel}</EmptyState>
+        )}
       </div>
     );
   }

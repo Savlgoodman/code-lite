@@ -69,6 +69,14 @@ export interface WsTransportConfig {
   /** 是否启用应用层心跳（中继 true，本地 false）。 */
   heartbeat?: boolean;
   heartbeatIntervalMs?: number;
+  /** 是否在非主动关闭时自动重连（默认 true）。 */
+  reconnect?: boolean;
+  /** 最大重连尝试次数，超过后置为 closed 并停止（默认 6）。 */
+  maxReconnectAttempts?: number;
+  /** 指数退避基数毫秒（默认 1000）。 */
+  reconnectBaseMs?: number;
+  /** 指数退避上限毫秒（默认 30000）。 */
+  reconnectMaxMs?: number;
 }
 
 /** 握手上下文：子类用它发送原始帧、监听原始帧、标记就绪。 */
@@ -90,6 +98,13 @@ export class WsTransport implements Transport {
   private readonly rawHandlers = new Set<(msg: Record<string, unknown>) => void>();
   private readonly subscribedChannels = new Set<string>();
   private heartbeatTimer: TimerHandle | null = null;
+  // 重连状态：主动 close() 置 true 以抑制自动重连；重连尝试计数与定时器句柄。
+  private manualClose = false;
+  private reconnectAttempts = 0;
+  private reconnectTimer: TimerHandle | null = null;
+  private readonly reconnectedHandlers = new Set<() => void>();
+  // 最近入站帧时间戳（心跳存活判定用）。
+  private lastInboundAt = 0;
 
   constructor(private readonly config: WsTransportConfig) {}
 
@@ -98,13 +113,30 @@ export class WsTransport implements Transport {
   }
 
   private setStatus(s: TransportStatus): void {
+    if (this._status === s) return;
     this._status = s;
     for (const h of this.statusHandlers) h(s);
+  }
+
+  /**
+   * 注册重连成功回调：连接断开后自动重连并握手成功时触发。
+   * 上层据此重订阅当前频道、重拉列表，补齐断线期间错过的状态。
+   */
+  onReconnected(handler: () => void): () => void {
+    this.reconnectedHandlers.add(handler);
+    return () => this.reconnectedHandlers.delete(handler);
   }
 
   // ─── 连接 ────────────────────────────────────────────────
 
   async connect(): Promise<void> {
+    // 主动连接（含手动重连）：清除重连抑制与退避计数、取消排队中的重连。
+    this.manualClose = false;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
     if (this.connectPromise) return this.connectPromise;
     this.connectPromise = this.openSocket();
@@ -115,21 +147,27 @@ export class WsTransport implements Transport {
     }
   }
 
-  private async openSocket(): Promise<void> {
-    const url = await this.config.urlProvider();
-    this.setStatus("connecting");
-    await new Promise<void>((resolve, reject) => {
-      const socket = this.config.socketFactory(url);
-      this.ws = socket;
-      socket.onmessage = (ev) => this.handleRawMessage(ev.data as string);
-      socket.onerror = () => {
-        this.setStatus("closed");
-        reject(new TransportError("WebSocket connection failed", "connect_failed"));
-      };
-      socket.onclose = () => this.handleClose();
-      socket.onopen = () => {
-        void this.runHandshake(resolve, reject);
-      };
+  private openSocket(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      Promise.resolve(this.config.urlProvider()).then((url) => {
+        this.setStatus(this.reconnectAttempts > 0 ? "reconnecting" : "connecting");
+        // 每次建连清空 rawHandlers，避免重连后 onHandshake 重复注册导致帧被多次处理。
+        this.rawHandlers.clear();
+        const socket = this.config.socketFactory(url);
+        this.ws = socket;
+        socket.onmessage = (ev) => this.handleRawMessage(ev.data as string);
+        socket.onerror = () => {
+          // 交给 onclose 统一处理重连；此处仅 reject 首次 connect 的 awaiter。
+          reject(new TransportError("WebSocket connection failed", "connect_failed"));
+        };
+        socket.onclose = () => this.handleClose();
+        socket.onopen = () => {
+          void this.runHandshake(resolve, reject);
+        };
+      }, (err) => {
+        this.handleClose();
+        reject(err instanceof Error ? err : new TransportError(String(err), "url_failed"));
+      });
     });
   }
 
@@ -145,10 +183,18 @@ export class WsTransport implements Transport {
       if (this.config.onHandshake) {
         await this.config.onHandshake(ctx);
       }
+      const wasReconnect = this.reconnectAttempts > 0;
+      this.reconnectAttempts = 0;
       this.setStatus("connected");
       if (this.config.heartbeat) this.startHeartbeat();
       resolve();
+      // 重连成功：重放订阅并通知上层补齐断线期间错过的状态。
+      if (wasReconnect) this.onReconnectSuccess();
     } catch (err) {
+      // 握手失败（如中继 room_has_host）视为终态，不自动重连；关闭 socket。
+      this.manualClose = true;
+      this.ws?.close();
+      this.ws = null;
       this.setStatus("closed");
       reject(err instanceof Error ? err : new TransportError(String(err), "handshake_failed"));
     }
@@ -162,10 +208,70 @@ export class WsTransport implements Transport {
     }
     this.pending.clear();
     this.ws = null;
-    this.setStatus("closed");
+    const reconnectEnabled = this.config.reconnect !== false;
+    const maxAttempts = this.config.maxReconnectAttempts ?? 6;
+    if (!this.manualClose && reconnectEnabled && this.reconnectAttempts < maxAttempts) {
+      this.scheduleReconnect();
+    } else {
+      this.setStatus("closed");
+    }
+  }
+
+  /** 按指数退避排队一次重连尝试。 */
+  private scheduleReconnect(): void {
+    this.setStatus("reconnecting");
+    const base = this.config.reconnectBaseMs ?? 1000;
+    const max = this.config.reconnectMaxMs ?? 30000;
+    const delay = Math.min(base * 2 ** this.reconnectAttempts, max);
+    this.reconnectAttempts += 1;
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.manualClose) return;
+      // openSocket 失败会触发 onclose → handleClose → 下一轮重连（或耗尽后 closed）。
+      this.openSocket().catch(() => { /* 由 onclose 驱动后续重连，无需在此处理 */ });
+    }, delay);
+  }
+
+  /** 重连成功后：重放订阅 + 触发上层回调。 */
+  private onReconnectSuccess(): void {
+    this.resubscribeAll();
+    for (const h of this.reconnectedHandlers) h();
+  }
+
+  /**
+   * 重放当前所有已订阅频道（重新发 subscribe）。
+   * 用于两种场景：本端重连后自动恢复；或宿主重连后（本端 socket 未断）
+   * 由上层主动调用，让宿主为本 peer 重建事件 pump。
+   */
+  resubscribeAll(): void {
+    for (const channel of this.subscribedChannels) {
+      try {
+        this.send({ v: WIRE_VERSION, kind: "req", method: "subscribe", requestId: createRequestId(), payload: { channel } });
+      } catch { /* 单个频道重订阅失败不阻断其余 */ }
+    }
+  }
+
+  /** 心跳探测判定连接已死时强制重连（关闭当前 socket 触发 onclose）。 */
+  private forceReconnect(): void {
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      try {
+        ws.onclose = null;
+        ws.close();
+      } catch { /* 忽略关闭异常 */ }
+    }
+    this.handleClose();
   }
 
   close(): void {
+    this.manualClose = true;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
     this.clearHeartbeat();
     this.subscribedChannels.clear();
     this.ws?.close();
@@ -187,6 +293,8 @@ export class WsTransport implements Transport {
   }
 
   private handleRawMessage(raw: string): void {
+    // 记录最近入站时间：任何帧（含中继 ping/pong）都算连接存活证据。
+    this.lastInboundAt = Date.now();
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(raw) as Record<string, unknown>;
@@ -341,9 +449,21 @@ export class WsTransport implements Transport {
   private startHeartbeat(): void {
     this.clearHeartbeat();
     const interval = this.config.heartbeatIntervalMs ?? 20000;
+    // 连续静默超过该阈值判定连接已死：浏览器 onclose 在 TCP 静默断开时可能长时间
+    // 不触发，靠 ping 后仍无任何入站帧来主动发现掉线，触发强制重连。
+    const silenceLimit = interval * 2.5;
+    this.lastInboundAt = Date.now();
     this.heartbeatTimer = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
+      if (this.ws?.readyState !== WebSocket.OPEN) return;
+      // 上一轮 ping 后仍无任何入站帧（含 pong）→ 判定掉线，强制重连。
+      if (Date.now() - this.lastInboundAt > silenceLimit) {
+        this.forceReconnect();
+        return;
+      }
+      try {
         this.sendRaw({ type: "ping" });
+      } catch {
+        this.forceReconnect();
       }
     }, interval);
   }

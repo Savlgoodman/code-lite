@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Radio, Sparkles, Network, Settings } from "lucide-react";
+import type { TransportStatus } from "@code-lite/transport";
 import { RemoteTab } from "./tabs/RemoteTab";
 import { AiTab } from "./tabs/AiTab";
 import { DevicesTab } from "./tabs/DevicesTab";
@@ -30,6 +31,7 @@ const TABS: TabItem[] = [
 export function App() {
   const [activeTab, setActiveTab] = useState<TabId>("remote");
   const [connected, setConnected] = useState(false);
+  const [transportStatus, setTransportStatus] = useState<TransportStatus>("idle");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeAiConversationId, setActiveAiConversationId] = useState<string | null>(null);
   const [deviceName, setDeviceName] = useState<string>("");
@@ -70,7 +72,7 @@ export function App() {
       }
     })();
 
-    // 设置 host 状态回调 (使用 ref 避免闭包过期)
+    // 设置 host 状态回调 + 传输层状态回调（使用 ref 避免闭包过期）
     connectionManager.setHostStatusCallback((online) => {
       setConnected(online);
       const id = activeDeviceIdRef.current;
@@ -79,7 +81,10 @@ export function App() {
         refreshDevices();
       }
     });
-  }, []);
+    connectionManager.setStatusCallback((status) => {
+      setTransportStatus(status);
+    });
+  }, [refreshDevices]);
 
   const showError = (msg: string) => {
     setErrorToast(msg);
@@ -92,6 +97,7 @@ export function App() {
 
     connectionManager.disconnect();
     setConnected(false);
+    setTransportStatus("idle");
 
     await deviceStore.setActiveDeviceId(id);
     setDeviceName(device.name);
@@ -103,7 +109,7 @@ export function App() {
         pairKey: device.pairKey,
         deviceName: device.name,
       });
-      setConnected(true);
+      // connected/transportStatus 由回调设置
       setActiveSessionId(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -117,11 +123,21 @@ export function App() {
     if (id === activeDeviceId) {
       connectionManager.disconnect();
       setConnected(false);
+      setTransportStatus("idle");
       setDeviceName("");
     }
     await deviceStore.removeDevice(id);
     await refreshDevices();
   }, [activeDeviceId, refreshDevices]);
+
+  const handleReconnect = useCallback(async () => {
+    try {
+      await connectionManager.reconnect();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showError("重连失败: " + msg);
+    }
+  }, []);
 
   const handleAddDevice = useCallback(async (name: string, relayUrl: string, pairKey: string) => {
     const record: DeviceRecord = {
@@ -157,8 +173,10 @@ export function App() {
     <RemoteTab
       key="remote"
       connected={connected}
+      transportStatus={transportStatus}
       deviceName={deviceName}
       onOpenSession={setActiveSessionId}
+      onReconnect={handleReconnect}
     />,
     <AiTab key="ai" onOpenConversation={setActiveAiConversationId} />,
     <DevicesTab

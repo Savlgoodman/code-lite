@@ -37,6 +37,8 @@ export class LocalTransport extends WsTransport {
       encodeFrame: (envelope: WireEnvelope) => envelope as unknown as Record<string, unknown>,
       decodeFrame: (raw: Record<string, unknown>) => raw as unknown as WireEnvelope,
       heartbeat: false,
+      // 桌面本地链路暂不启用自动重连（保持原有行为）；后端重启的自愈作为后续增强。
+      reconnect: false,
     };
     super(config);
   }
