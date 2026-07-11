@@ -22,11 +22,14 @@ export interface FontSizeOption {
   size: number;
 }
 
+export type ModelSelectorStyle = "classic" | "slider";
+
 export interface AppearanceState {
   themeMode: ThemeMode;
   fontFamilyId: string;
   customFontFamily: string;
   fontSizeId: string;
+  modelSelectorStyle: ModelSelectorStyle;
 }
 
 // ─── 常量 ───
@@ -78,6 +81,7 @@ const DEFAULT_STATE: AppearanceState = {
   fontFamilyId: "default",
   customFontFamily: "",
   fontSizeId: "medium",
+  modelSelectorStyle: "classic",
 };
 
 // ─── 状态管理 ───
@@ -95,6 +99,7 @@ function loadState(): AppearanceState {
       fontFamilyId: parsed.fontFamilyId ?? DEFAULT_STATE.fontFamilyId,
       customFontFamily: parsed.customFontFamily ?? DEFAULT_STATE.customFontFamily,
       fontSizeId: parsed.fontSizeId ?? DEFAULT_STATE.fontSizeId,
+      modelSelectorStyle: parsed.modelSelectorStyle ?? DEFAULT_STATE.modelSelectorStyle,
     };
   } catch {
     return { ...DEFAULT_STATE };
@@ -220,6 +225,12 @@ export function setFontSize(sizeId: string): void {
   currentState = { ...currentState, fontSizeId: sizeId };
   saveState(currentState);
   applyFontSizeToDOM(currentState);
+  notifyListeners();
+}
+
+export function setModelSelectorStyle(style: ModelSelectorStyle): void {
+  currentState = { ...currentState, modelSelectorStyle: style };
+  saveState(currentState);
   notifyListeners();
 }
 

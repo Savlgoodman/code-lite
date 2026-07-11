@@ -617,6 +617,19 @@
   min-height: 206px;
 }
 
+.status-menu-panel.slider-mode {
+  width: 320px;
+  max-width: min(320px, calc(100vw - 48px));
+}
+
+.status-effort-slider-block {
+  padding: 4px 8px 8px;
+}
+
+.status-effort-slider-block .status-menu-title {
+  padding: 0 1px 10px;
+}
+
 .status-menu-title {
   padding: 0 9px 4px;
   color: var(--text-tertiary);

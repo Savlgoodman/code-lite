@@ -1,18 +1,25 @@
-import { Palette, Sun, Moon, Monitor } from "lucide-react";
+import { Palette, Sun, Moon, Monitor, SlidersHorizontal, List } from "lucide-react";
 import {
   useAppearance,
   setThemeMode,
   setFontFamily,
   setFontSize,
+  setModelSelectorStyle,
   FONT_PRESETS,
   FONT_SIZE_OPTIONS,
   type ThemeMode,
+  type ModelSelectorStyle,
 } from "../../services/themeStore";
 
 const THEME_OPTIONS: { id: ThemeMode; label: string; description: string; icon: typeof Sun }[] = [
   { id: "light", label: "浅色", description: "始终使用浅色主题", icon: Sun },
   { id: "dark", label: "深色", description: "始终使用深色主题", icon: Moon },
   { id: "system", label: "跟随系统", description: "自动匹配操作系统主题", icon: Monitor },
+];
+
+const MODEL_SELECTOR_OPTIONS: { id: ModelSelectorStyle; label: string; description: string; icon: typeof Sun }[] = [
+  { id: "classic", label: "经典下拉", description: "紧凑的下拉菜单，逐项选择模型与思考强度", icon: List },
+  { id: "slider", label: "火焰拖动条", description: "加宽面板，思考强度以拖动条呈现，最高挡点燃火焰特效", icon: SlidersHorizontal },
 ];
 
 export function AppearanceSettings() {
@@ -43,6 +50,79 @@ export function AppearanceSettings() {
                 key={option.id}
                 type="button"
                 onClick={() => setThemeMode(option.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  padding: "12px 14px",
+                  border: `1px solid ${isActive ? "var(--accent-primary)" : "var(--border-secondary)"}`,
+                  borderRadius: "var(--radius-md)",
+                  background: isActive ? "var(--accent-secondary)" : "var(--bg-elevated)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "all var(--transition-base)",
+                  color: "var(--text-primary)",
+                }}
+              >
+                <Icon
+                  size={18}
+                  style={{
+                    color: isActive ? "var(--accent-primary)" : "var(--text-muted)",
+                    flexShrink: 0,
+                  }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: "14px" }}>{option.label}</div>
+                  <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
+                    {option.description}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    width: "18px",
+                    height: "18px",
+                    borderRadius: "50%",
+                    border: `2px solid ${isActive ? "var(--accent-primary)" : "var(--border-primary)"}`,
+                    display: "grid",
+                    placeItems: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {isActive && (
+                    <div
+                      style={{
+                        width: "10px",
+                        height: "10px",
+                        borderRadius: "50%",
+                        background: "var(--accent-primary)",
+                      }}
+                    />
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ─── 模型选择框样式 ─── */}
+      <div className="settings-card">
+        <h3 style={{ margin: "0 0 4px", color: "var(--text-primary)", fontSize: "15px", fontWeight: 600 }}>
+          模型选择框样式
+        </h3>
+        <p style={{ margin: "0 0 16px", color: "var(--text-muted)", fontSize: "13px" }}>
+          选择输入框底部模型选择框的呈现方式
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          {MODEL_SELECTOR_OPTIONS.map((option) => {
+            const Icon = option.icon;
+            const isActive = appearance.modelSelectorStyle === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setModelSelectorStyle(option.id)}
                 style={{
                   display: "flex",
                   alignItems: "center",

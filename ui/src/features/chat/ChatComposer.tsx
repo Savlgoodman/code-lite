@@ -33,6 +33,8 @@ import type {
 } from "../../types";
 import { groupModelsByFamily, type ModelFamily as ModelFamilyGrouping } from "@code-lite/chat-core";
 import { loadBillingPrices } from "../../services/billingStore";
+import { useAppearance } from "../../services/themeStore";
+import { EffortSlider } from "./EffortSlider";
 import { ApprovalCard } from "./ApprovalCard";
 import { buildSessionBillingSummary } from "./billing";
 import { ContextRing } from "./ContextRing";
@@ -150,6 +152,8 @@ export function ChatComposer({
   selectedConfig,
   selectedModelFamily,
 }: ChatComposerProps) {
+  const appearance = useAppearance();
+  const useSliderSelector = appearance.modelSelectorStyle === "slider";
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
   const [isStatusMenuRendered, setIsStatusMenuRendered] = useState(false);
   const [isStatusMenuClosing, setIsStatusMenuClosing] = useState(false);
@@ -764,8 +768,103 @@ export function ChatComposer({
                             isStatusMenuClosing ? "closing" : "",
                           ].filter(Boolean).join(" ")}
                         >
-                          <div className="status-menu-panel status-primary-menu" role="menu">
-                            {hasReasoningPicker ? (
+                          <div
+                            className={`status-menu-panel status-primary-menu ${useSliderSelector ? "slider-mode" : ""}`}
+                            role="menu"
+                          >
+                            {useSliderSelector ? (
+                              <>
+                                {hasReasoningPicker ? (
+                                  <div className="status-effort-slider-block">
+                                    <div className="status-menu-title">思考强度</div>
+                                    <EffortSlider
+                                      value={reasoningEffort}
+                                      options={reasoningValues}
+                                      onChange={selectReasoning}
+                                    />
+                                  </div>
+                                ) : null}
+                                {hasReasoningPicker && (hasFastModePicker || currentFamily) ? (
+                                  <div className="status-dropdown-divider" />
+                                ) : null}
+                                {hasFastModePicker ? (
+                                  <>
+                                    <button
+                                      aria-expanded={isSpeedListOpen}
+                                      className={`status-dropdown-item status-model-trigger ${isSpeedListOpen ? "expanded" : ""}`}
+                                      onClick={() => toggleStatusSection("speed")}
+                                      role="menuitem"
+                                      type="button"
+                                    >
+                                      <span>速率</span>
+                                      <ChevronDown size={14} />
+                                    </button>
+                                    {isSpeedListOpen || closingStatusSection === "speed" ? (
+                                      <div
+                                        className={`status-model-list ${!isSpeedListOpen ? "closing" : ""}`}
+                                        role="group"
+                                        aria-label="速率"
+                                      >
+                                        <div className="status-model-list-title">速率</div>
+                                        {[
+                                          { value: "off" as const, label: "1x 普通速率" },
+                                          { value: "on" as const, label: "1.5x 高速" },
+                                        ].map((option) => (
+                                          <button
+                                            key={option.value}
+                                            className={`status-dropdown-item ${option.value === fastModeValue ? "selected" : ""}`}
+                                            onClick={() => selectFastMode(option.value)}
+                                            role="menuitem"
+                                            type="button"
+                                          >
+                                            <span>{option.label}</span>
+                                            {option.value === fastModeValue ? <Check size={14} /> : null}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : null}
+                                {hasFastModePicker && currentFamily ? (
+                                  <div className="status-dropdown-divider" />
+                                ) : null}
+                                {currentFamily ? (
+                                  <>
+                                    <button
+                                      aria-expanded={isModelListOpen}
+                                      className={`status-dropdown-item status-model-trigger ${isModelListOpen ? "expanded" : ""}`}
+                                      onClick={() => toggleStatusSection("model")}
+                                      role="menuitem"
+                                      type="button"
+                                    >
+                                      <span>{currentFamily.label}</span>
+                                      <ChevronDown size={14} />
+                                    </button>
+                                    {isModelListOpen || closingStatusSection === "model" ? (
+                                      <div
+                                        className={`status-model-list ${!isModelListOpen ? "closing" : ""}`}
+                                        role="group"
+                                        aria-label="模型"
+                                      >
+                                        <div className="status-model-list-title">模型</div>
+                                        {modelFamilies.map((family) => (
+                                          <button
+                                            key={family.id}
+                                            className={`status-dropdown-item ${family.id === currentFamily?.id ? "selected" : ""}`}
+                                            onClick={() => selectFamily(family.id)}
+                                            role="menuitem"
+                                            type="button"
+                                          >
+                                            <span>{family.label}</span>
+                                            {family.id === currentFamily?.id ? <Check size={14} /> : null}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : null}
+                              </>
+                            ) : hasReasoningPicker ? (
                               <>
                                 <div className="status-menu-title">推理</div>
                                 {reasoningValues.map((value) => (
