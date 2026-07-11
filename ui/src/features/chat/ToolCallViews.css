@@ -6,14 +6,14 @@
 }
 
 .tool-call-group {
-  border: 1px solid #e5e1dc;
+  border: 1px solid var(--border-secondary);
   border-radius: 8px;
   background: var(--bg-elevated);
 }
 
 .tool-call-group-head {
   padding: 9px 10px;
-  color: #505861;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 13px;
 }
@@ -29,9 +29,9 @@
 
 .file-edit-group {
   overflow: hidden;
-  border: 1px solid #dfe8df;
+  border: 1px solid var(--border-secondary);
   border-radius: 8px;
-  background: #fbfdfb;
+  background: var(--bg-elevated);
 }
 
 .file-edit-group-head {
@@ -40,7 +40,7 @@
   align-items: center;
   gap: 7px;
   padding: 9px 10px;
-  color: #465246;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 13px;
 }
@@ -48,7 +48,7 @@
 .file-edit-group-head strong {
   min-width: 0;
   overflow: hidden;
-  color: #263026;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -56,7 +56,7 @@
 }
 
 .file-edit-group[open] .file-edit-group-head {
-  border-bottom: 1px solid #e4ece3;
+  border-bottom: 1px solid var(--border-tertiary);
 }
 
 .file-edit-group > .tool-file-diff-list {
@@ -71,12 +71,12 @@
 }
 
 .tool-call-card.error {
-  border-color: #f0c8bd;
+  border-color: var(--color-error);
 }
 
 .tool-call-card.approval {
-  border-color: #f2d0b4;
-  background: #fff8f3;
+  border-color: var(--approval-border);
+  background: var(--approval-bg);
 }
 
 .tool-call-pre-wrap {
@@ -92,9 +92,9 @@
   overflow-y: hidden;
   margin: 0;
   border-radius: 8px;
-  background: #f2f1ef;
+  background: var(--bg-secondary);
   padding: 10px 12px;
-  color: #30353d;
+  color: var(--text-primary);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -108,7 +108,7 @@
   left: 0;
   height: 44px;
   border-radius: 0 0 8px 8px;
-  background: linear-gradient(to bottom, rgba(242, 241, 239, 0), #f2f1ef 92%);
+  background: linear-gradient(to bottom, transparent, var(--bg-secondary) 92%);
   pointer-events: none;
 }
 
@@ -134,7 +134,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #59616b;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
 }
@@ -148,7 +148,7 @@
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: #272c34;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -186,7 +186,7 @@
 }
 
 .tool-call-detail span {
-  color: #7a8087;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 
@@ -198,9 +198,9 @@
 
 .tool-file-diff {
   overflow: hidden;
-  border: 1px solid #e1e6df;
+  border: 1px solid var(--border-secondary);
   border-radius: 8px;
-  background: #fbfcfb;
+  background: var(--bg-elevated);
 }
 
 .tool-file-diff-head {
@@ -209,19 +209,19 @@
   align-items: center;
   gap: 7px;
   padding: 7px 9px;
-  color: #454d44;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
 }
 
 .tool-file-diff[open] .tool-file-diff-head {
-  border-bottom: 1px solid #e6ebe4;
+  border-bottom: 1px solid var(--border-tertiary);
 }
 
 .tool-file-diff-head strong {
   min-width: 0;
   overflow: hidden;
-  color: #252d26;
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -230,14 +230,14 @@
 
 .tool-file-diff-head em {
   border-radius: 999px;
-  background: #edf6ee;
-  color: #377348;
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
   font-style: normal;
   padding: 2px 7px;
 }
 
 .tool-file-diff-head small {
-  color: #748072;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -251,22 +251,22 @@
 }
 
 .diff-stats-label {
-  color: #687466;
+  color: var(--text-muted);
   font-weight: 500;
 }
 
 .diff-stats-add {
-  color: #238047;
+  color: var(--diff-add-text);
 }
 
 .diff-stats-remove {
-  color: #b44533;
+  color: var(--diff-remove-text);
 }
 
 .tool-file-diff-icon {
   display: grid;
   place-items: center;
-  color: #5c8d66;
+  color: var(--color-success);
 }
 
 .tool-file-diff-preview {
@@ -274,7 +274,7 @@
   max-height: 360px;
   margin: 0;
   border-radius: 0;
-  background: #f8faf7;
+  background: var(--bg-secondary);
   padding: 8px 0;
   font-size: 12px;
   line-height: 1.55;
@@ -282,14 +282,14 @@
 
 .tool-file-diff-state {
   padding: 10px;
-  background: #f8faf7;
-  color: #737c72;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .tool-file-diff-state.error {
-  background: #fff6f3;
-  color: #a44533;
+  background: var(--diff-remove-bg);
+  color: var(--diff-remove-text);
 }
 
 .diff-line {
@@ -300,23 +300,23 @@
 }
 
 .diff-line.add {
-  background: #eef9ef;
-  color: #236331;
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
 }
 
 .diff-line.remove {
-  background: #fff0ed;
-  color: #9a3c2b;
+  background: var(--diff-remove-bg);
+  color: var(--diff-remove-text);
 }
 
 .diff-line.context {
-  color: #687066;
+  color: var(--text-secondary);
 }
 
 .tool-call-icon {
   display: grid;
   place-items: center;
-  color: #7a8087;
+  color: var(--text-tertiary);
 }
 
 .tool-call-card.complete .tool-call-icon {

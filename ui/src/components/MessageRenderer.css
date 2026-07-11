@@ -22,21 +22,22 @@
 .markdown-link {
   border: 0;
   background: transparent;
-  color: #0b63ce;
+  color: var(--color-info);
   font-weight: 700;
   text-decoration: none;
 }
 
 .streamdown-body a:hover,
 .markdown-link:hover {
-  color: #084a9b;
+  color: var(--color-info);
+  filter: brightness(0.9);
   text-decoration: underline;
 }
 
 .streamdown-body a:focus-visible,
 .markdown-link:focus-visible {
   border-radius: 4px;
-  outline: 2px solid rgba(11, 99, 206, 0.28);
+  outline: 2px solid color-mix(in srgb, var(--color-info) 40%, transparent);
   outline-offset: 2px;
 }
 
@@ -93,10 +94,10 @@
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border: 1px solid rgba(222, 219, 215, 0.88);
+  border: 1px solid var(--border-primary);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 6px 16px rgba(30, 35, 42, 0.08);
+  background: var(--bg-elevated-alpha);
+  box-shadow: var(--shadow-md);
   backdrop-filter: blur(10px);
   pointer-events: auto;
 }
@@ -117,7 +118,7 @@
 
 .streamdown-body [data-streamdown="code-block-copy-button"]:hover,
 .streamdown-body [data-streamdown="code-block-download-button"]:hover {
-  background: rgba(32, 36, 43, 0.08);
+  background: var(--hover-overlay);
   color: var(--text-primary);
 }
 
@@ -155,7 +156,7 @@
   min-width: max-content;
   margin: 0;
   background: var(--sdm-bg, transparent);
-  color: var(--sdm-fg, #30353d);
+  color: var(--sdm-fg, var(--text-primary));
 }
 
 .streamdown-body [data-streamdown="code-block-body"] code {
@@ -190,7 +191,7 @@
   border: 1px solid var(--border-secondary);
   border-radius: 8px;
   background: var(--bg-elevated);
-  scrollbar-color: #ddd8d2 transparent;
+  scrollbar-color: var(--border-primary) transparent;
   scrollbar-width: thin;
 }
 
