@@ -100,10 +100,17 @@ async def _handle_subscribe(
     _ensure_channel_pump(ws, services, channel, tasks)  # 订阅同步建立
     snapshot: dict[str, Any] | None = None
     latest_sequence = 0
+    pending_approvals: list[dict[str, Any]] = []
+    pending_inputs: list[dict[str, Any]] = []
     if channel != GLOBAL_CHANNEL:
         snapshot = services.conversation_recorder.snapshot(channel)  # 无 await
         if services.event_store is not None:
             latest_sequence = await services.event_store.get_latest_sequence(channel)
+        # 挂起的审批/输入请求随快照回传，供重新附着时恢复卡片（避免假死）。
+        if services.approvals is not None:
+            pending_approvals = services.approvals.list_for_conversation(channel)
+        if services.inputs is not None:
+            pending_inputs = services.inputs.list_for_conversation(channel)
 
     await _send(
         ws,
@@ -114,6 +121,8 @@ async def _handle_subscribe(
             payload={
                 "snapshot": snapshot,
                 "latestSequence": latest_sequence,
+                "pendingApprovals": pending_approvals,
+                "pendingInputs": pending_inputs,
             },
         ),
     )
@@ -187,7 +196,26 @@ async def _handle_approval_decision(
 ) -> None:
     approval_id = str(payload.get("approvalId") or "").strip()
     decision = str(payload.get("decision") or "").strip()
-    resolved = await services.approvals.resolve(approval_id, decision == "allow")
+    allowed = decision == "allow"
+    resolved = await services.approvals.resolve(approval_id, allowed)
+    if resolved is not None:
+        # 更新会话状态并向会话频道广播 approval.resolved，
+        # 让本端与对端立即清除审批卡片（不再等 run.completed，修复卡死）。
+        services.conversation_recorder.update_session(
+            resolved.conversation_id,
+            {"status": "running" if allowed else "error"},
+        )
+        if services.event_bus is not None:
+            services.event_bus.publish(
+                resolved.conversation_id,
+                {
+                    "type": "approval.resolved",
+                    "conversationId": resolved.conversation_id,
+                    "turnId": resolved.turn_id,
+                    "approvalId": approval_id,
+                    "decision": "allow" if allowed else "deny",
+                },
+            )
     await _send(ws, _envelope("result", requestId=request_id, payload={"ok": resolved is not None}))
 
 
@@ -212,6 +240,17 @@ async def _handle_input_response(
             pending.conversation_id,
             {"status": "running" if action in {"accept", "decline"} else "error"},
         )
+        # 广播 agent.input.completed，让本端与对端清除输入请求卡片。
+        if services.event_bus is not None:
+            services.event_bus.publish(
+                pending.conversation_id,
+                {
+                    "type": "agent.input.completed",
+                    "conversationId": pending.conversation_id,
+                    "turnId": pending.turn_id,
+                    "inputRequestId": input_request_id,
+                },
+            )
     await _send(ws, _envelope("result", requestId=request_id, payload={"ok": pending is not None}))
 
 

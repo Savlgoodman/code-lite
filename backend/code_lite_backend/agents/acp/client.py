@@ -284,16 +284,17 @@ class AcpClientHandler:
         route = self._route_for_session(session_id)
         context = route.context if route is not None else self.context
         approval_id = f"approval-{uuid.uuid4().hex}"
-        future = await self.approvals.create(
-            approval_id=approval_id,
-            conversation_id=context.conversation_id,
-            turn_id=context.turn_id,
-        )
         event = self.mapper.map_permission_request(
             tool_call=tool_call,
             options=options,
             ctx=context,
             approval_id=approval_id,
+        )
+        future = await self.approvals.create(
+            approval_id=approval_id,
+            conversation_id=context.conversation_id,
+            turn_id=context.turn_id,
+            payload=event,
         )
         await self._put(event, route=route)
 
@@ -345,13 +346,10 @@ class AcpClientHandler:
             mode_payload.get("tool_call_id"),
         ) or None
         input_id = f"input-{uuid.uuid4().hex}"
-        future = await self.inputs.create(
-            input_id=input_id,
-            conversation_id=context.conversation_id,
-            turn_id=context.turn_id,
-        )
-        await self._put({
+        event = {
             "type": "agent.input.required",
+            "conversationId": context.conversation_id,
+            "turnId": context.turn_id,
             "inputRequestId": input_id,
             "mode": mode,
             "message": str(raw.get("message") or "需要你的输入"),
@@ -363,7 +361,14 @@ class AcpClientHandler:
                 "source": "acp.elicitation.create",
                 "rawInput": sanitize_log_value(raw),
             },
-        }, route=route)
+        }
+        future = await self.inputs.create(
+            input_id=input_id,
+            conversation_id=context.conversation_id,
+            turn_id=context.turn_id,
+            payload=event,
+        )
+        await self._put(event, route=route)
 
         response = await future
         return _input_response_to_acp(response)
