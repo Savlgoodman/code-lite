@@ -788,6 +788,13 @@ export type AgentEvent =
       plan?: PlanSnapshot;
     }
   | {
+      type: "approval.resolved";
+      conversationId: string;
+      turnId: string;
+      approvalId: string;
+      decision: "allow" | "deny";
+    }
+  | {
       type: "agent.input.required";
       conversationId: string;
       turnId: string;

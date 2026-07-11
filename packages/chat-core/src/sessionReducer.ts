@@ -45,10 +45,50 @@ export function emptySessionView(session: Session | null = null): SessionViewSta
   };
 }
 
-/** 用快照 {session, messages} 初始化视图（附着即快照，0710 第 5.2 节）。 */
+/** 把后端回传的 approval.required 展示 payload 还原为 ApprovalRequest。 */
+function approvalFromPayload(payload: Record<string, unknown>): ApprovalRequest | null {
+  const approvalId = typeof payload.approvalId === "string" ? payload.approvalId : null;
+  if (!approvalId) return null;
+  return {
+    approvalId,
+    argumentsText: formatJson(
+      payload.argumentsText ? payload.argumentsText : payload.arguments,
+    ),
+    impact: typeof payload.impact === "string" ? payload.impact : "",
+    name: typeof payload.name === "string" ? payload.name : "",
+    plan: (payload.plan as ApprovalRequest["plan"]) ?? undefined,
+    purpose: typeof payload.purpose === "string" ? payload.purpose : "",
+    risk: (payload.risk as ApprovalRequest["risk"]) ?? "low",
+    risks: Array.isArray(payload.risks) ? (payload.risks as string[]) : [],
+    rollback: typeof payload.rollback === "string" ? payload.rollback : "",
+    toolCallId: typeof payload.toolCallId === "string" ? payload.toolCallId : undefined,
+  };
+}
+
+/** 把后端回传的 agent.input.required 展示 payload 还原为 InputRequest。 */
+function inputFromPayload(payload: Record<string, unknown>): InputRequest | null {
+  const inputRequestId =
+    typeof payload.inputRequestId === "string" ? payload.inputRequestId : null;
+  if (!inputRequestId) return null;
+  return {
+    inputRequestId,
+    message: typeof payload.message === "string" ? payload.message : "",
+    mode: typeof payload.mode === "string" ? payload.mode : "form",
+    schema: (payload.schema as InputRequest["schema"]) ?? undefined,
+    toolCallId: typeof payload.toolCallId === "string" ? payload.toolCallId : undefined,
+  };
+}
+
+/**
+ * 用快照 {session, messages} 初始化视图（附着即快照，0710 第 5.2 节）。
+ * pendingApprovals / pendingInputs 由 subscribe 结果回传，用于重新附着时恢复
+ * 待审批 / 待输入卡片，修复挂起审批切走再回来的假死（0711 设计第 8.3 节）。
+ */
 export function sessionViewFromSnapshot(snapshot: {
   session: Session | null;
   messages: ChatMessage[];
+  pendingApprovals?: Array<Record<string, unknown>>;
+  pendingInputs?: Array<Record<string, unknown>>;
 }): SessionViewState {
   const messages = snapshot.messages ?? [];
   let activeAssistantMessageId: string | null = null;
@@ -70,14 +110,30 @@ export function sessionViewFromSnapshot(snapshot: {
       if (activeAssistantMessageId && contextUsage) break;
     }
   }
+  let pendingApproval: ApprovalRequest | null = null;
+  for (const payload of snapshot.pendingApprovals ?? []) {
+    const restored = approvalFromPayload(payload);
+    if (restored) {
+      pendingApproval = restored;
+      break;
+    }
+  }
+  let pendingInput: InputRequest | null = null;
+  for (const payload of snapshot.pendingInputs ?? []) {
+    const restored = inputFromPayload(payload);
+    if (restored) {
+      pendingInput = restored;
+      break;
+    }
+  }
   return {
     session: snapshot.session,
     messages,
     activeAssistantMessageId,
     running: snapshot.session?.status === "running",
     contextUsage,
-    pendingApproval: null,
-    pendingInput: null,
+    pendingApproval,
+    pendingInput,
   };
 }
 
@@ -122,6 +178,23 @@ export function reduceAgentEvent(state: SessionViewState, event: AgentEvent): Se
   }
 
   const assistantId = state.activeAssistantMessageId;
+
+  // 审批被处理：立即清除待审批卡片（不依赖 run.completed），修复卡死。
+  // 即使丢了 assistantId（重新附着场景）也要清，故放在 assistantId 守卫之前。
+  if (event.type === "approval.resolved") {
+    if (state.pendingApproval?.approvalId !== event.approvalId) {
+      return state;
+    }
+    const next: SessionViewState = {
+      ...state,
+      pendingApproval: null,
+      session:
+        state.session && state.session.status === "approval"
+          ? { ...state.session, status: event.decision === "allow" ? "running" : "idle" }
+          : state.session,
+    };
+    return next;
+  }
 
   // 终端事件即使丢了 assistantId 也要解除 running，避免永久卡"运行中"。
   if (!assistantId) {

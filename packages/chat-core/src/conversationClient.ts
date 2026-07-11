@@ -313,9 +313,18 @@ export class ConversationClient {
 
   private readonly handleSnapshot = (channel: string, payload: unknown): void => {
     if (channel === GLOBAL_CHANNEL) return;
-    const snap = payload as { snapshot?: { session: Session | null; messages: ChatMessage[] } | null };
+    const snap = payload as {
+      snapshot?: { session: Session | null; messages: ChatMessage[] } | null;
+      pendingApprovals?: Array<Record<string, unknown>>;
+      pendingInputs?: Array<Record<string, unknown>>;
+    };
     if (!snap?.snapshot) return;
-    const view = sessionViewFromSnapshot(snap.snapshot);
+    // 挂起审批/输入随快照恢复，避免重新附着后审批卡片丢失导致假死。
+    const view = sessionViewFromSnapshot({
+      ...snap.snapshot,
+      pendingApprovals: snap.pendingApprovals,
+      pendingInputs: snap.pendingInputs,
+    });
     this.views = { ...this.views, [channel]: view };
     if (view.activeAssistantMessageId) {
       this.activeAssistantId[channel] = view.activeAssistantMessageId;
