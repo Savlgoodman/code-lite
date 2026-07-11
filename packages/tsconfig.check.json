@@ -15,8 +15,9 @@
       "@code-lite/protocol": ["./protocol/src/index.ts"],
       "@code-lite/transport": ["./transport/src/index.ts"],
       "@code-lite/chat-core": ["./chat-core/src/index.ts"],
-      "@code-lite/sync": ["./sync/src/index.ts"]
+      "@code-lite/sync": ["./sync/src/index.ts"],
+      "@code-lite/chat-render": ["./chat-render/src/index.ts"]
     }
   },
-  "include": ["protocol/src", "transport/src", "chat-core/src", "sync/src"]
+  "include": ["protocol/src", "transport/src", "chat-core/src", "sync/src", "chat-render/src"]
 }
