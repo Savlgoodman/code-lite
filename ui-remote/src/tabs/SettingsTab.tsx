@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { Moon, Sun, Check, Server, Archive, ChevronRight, Smartphone, Info } from "lucide-react";
 import { useTheme, THEME_LABELS, type ThemeName } from "../hooks/useTheme";
-import { AiSettingsSheet } from "../sheets/AiSettingsSheet";
-import { AiArchivedSheet } from "../sheets/AiArchivedSheet";
 import { AboutSheet } from "../sheets/AboutSheet";
 import { isAiAvailable } from "../lib/environment";
 
@@ -11,11 +9,14 @@ const THEME_SWATCHES: Record<ThemeName, { bg: string; accent: string; card: stri
   warm: { bg: "#f9f4ef", accent: "#8c7851", card: "#f25042" },
 };
 
-export function SettingsTab() {
+interface SettingsTabProps {
+  onOpenAiSettings?: () => void;
+  onOpenAiArchived?: () => void;
+}
+
+export function SettingsTab({ onOpenAiSettings, onOpenAiArchived }: SettingsTabProps) {
   const { theme, mode, setTheme, toggleMode } = useTheme();
   const isDark = mode === "dark";
-  const [showAiSettings, setShowAiSettings] = useState(false);
-  const [showAiArchived, setShowAiArchived] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const aiAvailable = isAiAvailable();
 
@@ -68,11 +69,11 @@ export function SettingsTab() {
           <h3>AI 对话</h3>
           {aiAvailable ? (
             <ul>
-              <li className="settings-item settings-item-nav" onClick={() => setShowAiSettings(true)}>
+              <li className="settings-item settings-item-nav" onClick={onOpenAiSettings}>
                 <span className="settings-item-label"><Server size={17} /> 模型供应商配置</span>
                 <ChevronRight size={18} />
               </li>
-              <li className="settings-item settings-item-nav" onClick={() => setShowAiArchived(true)}>
+              <li className="settings-item settings-item-nav" onClick={onOpenAiArchived}>
                 <span className="settings-item-label"><Archive size={17} /> 已归档对话</span>
                 <ChevronRight size={18} />
               </li>
@@ -106,8 +107,6 @@ export function SettingsTab() {
         </div>
       </div>
 
-      {aiAvailable && showAiSettings && <AiSettingsSheet onClose={() => setShowAiSettings(false)} />}
-      {aiAvailable && showAiArchived && <AiArchivedSheet onClose={() => setShowAiArchived(false)} />}
       {showAbout && <AboutSheet onClose={() => setShowAbout(false)} />}
     </div>
   );

@@ -11,6 +11,9 @@ import { AddDeviceSheet } from "./sheets/AddDeviceSheet";
 import { HomePager } from "./components/HomePager";
 import { ChatOverlay } from "./components/ChatOverlay";
 import { AiChatOverlay } from "./components/AiChatOverlay";
+import { SettingsOverlay } from "./components/SettingsOverlay";
+import { AiSettingsPage } from "./pages/AiSettingsPage";
+import { AiArchivedPage } from "./pages/AiArchivedPage";
 
 type TabId = "remote" | "ai" | "devices" | "settings";
 
@@ -20,7 +23,6 @@ interface TabItem {
   icon: React.ReactNode;
 }
 
-/** Tab 顺序即横向分页顺序（索引 = 面板位置）。 */
 const TABS: TabItem[] = [
   { id: "remote", label: "远程", icon: <Radio size={24} /> },
   { id: "ai", label: "AI", icon: <Sparkles size={24} /> },
@@ -39,8 +41,9 @@ export function App() {
   const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
   const [editingDevice, setEditingDevice] = useState<DeviceRecord | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [showAiSettings, setShowAiSettings] = useState(false);
+  const [showAiArchived, setShowAiArchived] = useState(false);
 
-  // 用 ref 避免回调闭包捕获过期的 activeDeviceId
   const activeDeviceIdRef = useRef(activeDeviceId);
   activeDeviceIdRef.current = activeDeviceId;
 
@@ -52,7 +55,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    // 启动: 迁移 legacy 数据 → 加载设备列表 → 自动连接活跃设备
     (async () => {
       await deviceStore.migrate();
       await refreshDevices();
@@ -72,7 +74,6 @@ export function App() {
       }
     })();
 
-    // 设置 host 状态回调 + 传输层状态回调（使用 ref 避免闭包过期）
     connectionManager.setHostStatusCallback((online) => {
       setConnected(online);
       const id = activeDeviceIdRef.current;
@@ -109,12 +110,10 @@ export function App() {
         pairKey: device.pairKey,
         deviceName: device.name,
       });
-      // connected/transportStatus 由回调设置
       setActiveSessionId(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       showError("切换设备失败: " + msg);
-      // 回滚到之前的设备
       await refreshDevices();
     }
   }, [devices, refreshDevices]);
@@ -167,6 +166,7 @@ export function App() {
   }, [refreshDevices]);
 
   const chatOpen = activeSessionId !== null || activeAiConversationId !== null;
+  const settingsPageOpen = showAiSettings || showAiArchived;
   const activeIndex = TABS.findIndex((t) => t.id === activeTab);
 
   const panes = [
@@ -188,7 +188,11 @@ export function App() {
       onAdd={handleAddDevice}
       onEdit={handleEditDevice}
     />,
-    <SettingsTab key="settings" />,
+    <SettingsTab
+      key="settings"
+      onOpenAiSettings={() => setShowAiSettings(true)}
+      onOpenAiArchived={() => setShowAiArchived(true)}
+    />,
   ];
 
   return (
@@ -197,14 +201,22 @@ export function App() {
         index={activeIndex}
         onIndexChange={(i) => setActiveTab(TABS[i].id)}
         panes={panes}
-        behind={chatOpen}
+        behind={chatOpen || settingsPageOpen}
       />
 
       <ChatOverlay sessionId={activeSessionId} onBack={() => setActiveSessionId(null)} />
 
       <AiChatOverlay conversationId={activeAiConversationId} onBack={() => setActiveAiConversationId(null)} />
 
-      {!chatOpen && (
+      <SettingsOverlay open={showAiSettings} onClose={() => setShowAiSettings(false)}>
+        <AiSettingsPage onBack={() => setShowAiSettings(false)} />
+      </SettingsOverlay>
+
+      <SettingsOverlay open={showAiArchived} onClose={() => setShowAiArchived(false)}>
+        <AiArchivedPage onBack={() => setShowAiArchived(false)} />
+      </SettingsOverlay>
+
+      {!chatOpen && !settingsPageOpen && (
         <nav className="bottom-tab-bar">
           {TABS.map((tab) => (
             <button
@@ -219,7 +231,6 @@ export function App() {
         </nav>
       )}
 
-      {/* 编辑设备 Modal Sheet */}
       {editingDevice && (
         <AddDeviceSheet
           initial={editingDevice}
@@ -231,7 +242,6 @@ export function App() {
         />
       )}
 
-      {/* 错误提示 Toast */}
       {errorToast && (
         <div className="error-toast-overlay" onClick={() => setErrorToast(null)}>
           <div className="error-toast" onClick={(e) => e.stopPropagation()}>
