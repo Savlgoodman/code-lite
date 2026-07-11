@@ -1,6 +1,21 @@
 /* ── Reset & 全局基础 ── */
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+button, a, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+input, textarea, select {
+  -webkit-tap-highlight-color: transparent;
+}
 
 html, body, #root {
   height: 100%;
