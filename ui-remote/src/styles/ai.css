@@ -229,9 +229,7 @@
   white-space: nowrap;
 }
 
-/* ── 供应商设置 Sheet ── */
-
-.ai-settings-sheet { max-height: 82vh; }
+/* ── 供应商设置 ── */
 
 .ai-provider-list,
 .ai-provider-form,
@@ -409,7 +407,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 44vh;
   overflow-y: auto;
 }
 
