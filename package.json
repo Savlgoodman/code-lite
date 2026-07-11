@@ -1,6 +1,6 @@
 {
   "name": "code-lite",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "backend:dev": "uv run --project backend python -m code_lite_backend.main",
