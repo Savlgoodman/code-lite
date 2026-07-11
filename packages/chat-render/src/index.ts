@@ -6,4 +6,5 @@
  */
 
 export * from "./fileDiffs";
+export * from "./fileRefs";
 export * from "./grouping";
