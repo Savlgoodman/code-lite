@@ -127,9 +127,11 @@ async def handle_hello(ws: WebSocket, payload: dict, room: Room) -> dict | None:
         room.host = ws
         room.last_host_seen = time.time()
         logger.info("host joined room %s (%d waiting remotes)", room.room_id[:12], len(room.remotes))
-        # 如果有等待中的 remote，通知它们 host 上线
+        # host 上线时：先给等待中的 remote 发 host.online，再给新 host 重发所有 peer.joined。
+        # 修复：host 重连后 remote bridge 的 _remote_peers 是空的，需重建 peer session。
         for remote in room.remotes.values():
             await safe_send_json(remote.ws, make_envelope("host.online"))
+            await safe_send_json(ws, make_envelope("peer.joined", peerId=remote.peer_id))
         return make_envelope("ready", role="host")
 
     else:
