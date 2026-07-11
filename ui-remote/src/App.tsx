@@ -9,6 +9,7 @@ import { deviceStore, type DeviceRecord } from "./services/DeviceStore";
 import { AddDeviceSheet } from "./sheets/AddDeviceSheet";
 import { HomePager } from "./components/HomePager";
 import { ChatOverlay } from "./components/ChatOverlay";
+import { AiChatOverlay } from "./components/AiChatOverlay";
 
 type TabId = "remote" | "ai" | "devices" | "settings";
 
@@ -30,6 +31,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabId>("remote");
   const [connected, setConnected] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeAiConversationId, setActiveAiConversationId] = useState<string | null>(null);
   const [deviceName, setDeviceName] = useState<string>("");
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
@@ -148,7 +150,7 @@ export function App() {
     await refreshDevices();
   }, [refreshDevices]);
 
-  const chatOpen = activeSessionId !== null;
+  const chatOpen = activeSessionId !== null || activeAiConversationId !== null;
   const activeIndex = TABS.findIndex((t) => t.id === activeTab);
 
   const panes = [
@@ -158,7 +160,7 @@ export function App() {
       deviceName={deviceName}
       onOpenSession={setActiveSessionId}
     />,
-    <AiTab key="ai" />,
+    <AiTab key="ai" onOpenConversation={setActiveAiConversationId} />,
     <DevicesTab
       key="devices"
       devices={devices}
@@ -181,6 +183,8 @@ export function App() {
       />
 
       <ChatOverlay sessionId={activeSessionId} onBack={() => setActiveSessionId(null)} />
+
+      <AiChatOverlay conversationId={activeAiConversationId} onBack={() => setActiveAiConversationId(null)} />
 
       {!chatOpen && (
         <nav className="bottom-tab-bar">
