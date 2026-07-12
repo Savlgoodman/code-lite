@@ -46,8 +46,23 @@ if (-not (Get-Command "uv.exe" -ErrorAction SilentlyContinue)) {
   throw "uv.exe not found. Install uv or add uv to PATH."
 }
 
-# ── Clean up orphaned backend processes ───────────────────────────────
-# Find and kill any process occupying the target port to avoid "address already in use"
+# ── Clean up orphaned DEV backend processes ───────────────────────────
+# 重要：只清理带 "--role dev" 标记的开发后端，绝不误伤已安装发行版后端（--role prod）
+# 或任何其他占用该端口的进程。DEV/PROD 隔离靠该进程命令行标记实现。
+
+# 判断某个 PID 的命令行是否为 DEV code-lite 后端（含 code_lite_backend.main 且带 --role dev）
+function Test-DevBackendPid {
+  param([int]$ProcessId)
+  if (-not $ProcessId) { return $false }
+  try {
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+  } catch { return $false }
+  if (-not $proc) { return $false }
+  $cmd = [string]$proc.CommandLine
+  return ($cmd -match 'code_lite_backend\.main' -and $cmd -match '--role\s+dev')
+}
+
+# Find and kill the process occupying the target port ONLY if it is a DEV backend
 $portOwnerPid = $null
 try {
   $conn = Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction SilentlyContinue
@@ -57,25 +72,30 @@ try {
 } catch { }
 
 if ($portOwnerPid) {
-  Write-Host "Found orphaned backend process (PID: $portOwnerPid), terminating..." -ForegroundColor Yellow
-  try {
-    Stop-Process -Id $portOwnerPid -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    $stillRunning = Get-Process -Id $portOwnerPid -ErrorAction SilentlyContinue
-    if ($stillRunning) {
-      Write-Host "Process did not exit, force killing..." -ForegroundColor Yellow
-      Stop-Process -Id $portOwnerPid -Force -ErrorAction SilentlyContinue
-      Start-Sleep -Seconds 1
-    }
-  } catch { }
-  Write-Host "Orphaned process cleaned up." -ForegroundColor Green
+  if (Test-DevBackendPid -ProcessId $portOwnerPid) {
+    Write-Host "Found orphaned DEV backend on port $BackendPort (PID: $portOwnerPid), terminating..." -ForegroundColor Yellow
+    try {
+      Stop-Process -Id $portOwnerPid -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 2
+      $stillRunning = Get-Process -Id $portOwnerPid -ErrorAction SilentlyContinue
+      if ($stillRunning) {
+        Write-Host "Process did not exit, force killing..." -ForegroundColor Yellow
+        Stop-Process -Id $portOwnerPid -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+      }
+    } catch { }
+    Write-Host "Orphaned DEV backend cleaned up." -ForegroundColor Green
+  } else {
+    Write-Host "Port $BackendPort is held by a non-DEV process (PID: $portOwnerPid); leaving it untouched. If backend fails to bind, re-run without -BackendPort to auto-pick a free port." -ForegroundColor Yellow
+  }
 }
 
-# Also clean up backend processes matched by command line pattern
-$orphanedBackends = Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%code_lite_backend.main%'" -ErrorAction SilentlyContinue
+# Also clean up DEV backend processes matched by command line pattern (ONLY --role dev)
+$orphanedBackends = Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%code_lite_backend.main%'" -ErrorAction SilentlyContinue |
+  Where-Object { [string]$_.CommandLine -match '--role\s+dev' }
 if ($orphanedBackends) {
   foreach ($proc in $orphanedBackends) {
-    Write-Host "Found orphaned backend (PID: $($proc.ProcessId)), terminating..." -ForegroundColor Yellow
+    Write-Host "Found orphaned DEV backend (PID: $($proc.ProcessId)), terminating..." -ForegroundColor Yellow
     Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
   }
   Start-Sleep -Seconds 1
@@ -106,7 +126,7 @@ $backendScript += @"
 cd /d "$repoRoot"
 echo Code Lite Backend - $backendUrl
 echo Press Ctrl+C to stop the backend.
-uv run --project backend python -m code_lite_backend.main --host 127.0.0.1 --port $BackendPort
+uv run --project backend python -m code_lite_backend.main --host 127.0.0.1 --port $BackendPort --role dev
 echo Backend stopped.
 pause
 "@

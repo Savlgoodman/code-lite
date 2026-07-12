@@ -30,6 +30,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-file", default=None)
     parser.add_argument("--workspace", default=str(DEFAULT_WORKSPACE))
     parser.add_argument(
+        "--role",
+        default="prod",
+        choices=["dev", "prod"],
+        help=(
+            "Process role marker. 'dev' marks a from-source development backend so dev "
+            "tooling (start-dev.ps1) can target only its own processes and never kill an "
+            "installed production backend. Defaults to prod."
+        ),
+    )
+    parser.add_argument(
         "--agent-adapter",
         default=None,
         choices=["router", "nanobot", "codex", "claude_code"],
@@ -90,6 +100,7 @@ def main() -> None:
         agent_adapter_override=args.agent_adapter,
     )
     configure_logging(log_file=args.log_file, logs_dir=runtime_config.logs_dir)
+    logger.info("Starting Code Lite backend: role=%s env=%s port=%s", args.role, runtime_config.env, args.port)
     app = create_app(runtime_config=runtime_config, workspace=workspace)
     _setup_shutdown_hooks(app)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
