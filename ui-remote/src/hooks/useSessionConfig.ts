@@ -11,6 +11,37 @@ export interface SessionConfig {
   modes: SessionMode[];
   configOptions: SessionConfigOption[];
   configOptionsRaw: SessionConfigOption[];
+  /** 速率（fast mode）：on 表示高速档，off 表示普通速率。 */
+  fastMode: "on" | "off";
+  /** 当前会话是否支持速率切换（codex 恒支持，其余看 caps 是否暴露 fast 选项）。 */
+  fastSupported: boolean;
+  /** 会话已保存的 selectedConfig 原样保留，保存时无损合并（避免抹掉桌面端设过的项）。 */
+  selectedConfig: Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** 把后端多种写法归一为 on / off。 */
+function normalizeFastMode(value: unknown): "on" | "off" {
+  if (typeof value === "boolean") return value ? "on" : "off";
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["on", "true", "fast", "high", "1.5x", "1"].includes(normalized)) return "on";
+  return "off";
+}
+
+function fastModeFromSelected(selected: unknown): "on" | "off" {
+  if (!isRecord(selected)) return "off";
+  const raw = selected.fast_mode ?? selected.fastMode ?? selected["fast-mode"] ?? selected.fast;
+  return normalizeFastMode(raw);
+}
+
+/** 从 caps 判断当前会话是否支持速率切换。 */
+function detectFastSupport(agentId: string, configOptions: SessionConfigOption[]): boolean {
+  const id = agentId.trim().toLowerCase();
+  if (id === "codex" || id.includes("codex")) return true;
+  return configOptions.some((o) => o.id === "fast_mode" || o.id === "fast-mode" || o.id === "fast");
 }
 
 export function useSessionConfig(
@@ -36,7 +67,7 @@ export function useSessionConfig(
         console.error("[ChatPage] session.initialize failed:", err);
       }
 
-      // 2. 拉取会话已保存的配置（accessMode / modelFamily / reasoningEffort）
+      // 2. 拉取会话已保存的配置（accessMode / modelFamily / reasoningEffort / selectedConfig）
       try {
         const snap = await client.request<any>("conversation.get", { conversationId: sessionId });
         const sessionObj = snap?.session;
@@ -53,6 +84,7 @@ export function useSessionConfig(
       const models = c.models ?? [];
       const modes = c.modes ?? [];
       const configOptions = c.configOptions ?? [];
+      const agentId = String(c.agent?.id ?? "");
       const grouping = groupModelsByFamily(models);
 
       const savedAccessMode = savedConfig?.accessMode;
@@ -70,6 +102,17 @@ export function useSessionConfig(
         effort = String(savedConfig?.reasoningEffort ?? reasoningOpt?.currentValue ?? "medium");
       }
 
+      const fastSupported = detectFastSupport(agentId, configOptions);
+      const fastOpt = configOptions.find(
+        (o: SessionConfigOption) => o.id === "fast_mode" || o.id === "fast-mode" || o.id === "fast",
+      );
+      // 优先取会话已保存的 selectedConfig.fast_mode，其次回退到 caps 里 fast 选项的当前值。
+      const fastMode = !fastSupported
+        ? "off"
+        : savedConfig?.selectedConfig
+          ? fastModeFromSelected(savedConfig.selectedConfig)
+          : normalizeFastMode(fastOpt?.currentValue);
+
       setConfig({
         familyId,
         effort,
@@ -78,6 +121,9 @@ export function useSessionConfig(
         modes,
         configOptions,
         configOptionsRaw: configOptions,
+        fastMode,
+        fastSupported,
+        selectedConfig: isRecord(savedConfig?.selectedConfig) ? { ...savedConfig.selectedConfig } : {},
       });
     };
     loadCaps();
@@ -90,11 +136,19 @@ export function useSessionConfig(
       setConfig((prev) => {
         if (!prev) return prev;
         const changes = (payload as any).changes ?? {};
+        const nextSelected = isRecord(changes.selectedConfig)
+          ? { ...changes.selectedConfig }
+          : prev.selectedConfig;
+        const nextFast = isRecord(changes.selectedConfig)
+          ? fastModeFromSelected(changes.selectedConfig)
+          : prev.fastMode;
         return {
           ...prev,
           familyId: changes.modelFamily ?? changes.model ?? prev.familyId,
           effort: changes.reasoningEffort ?? changes.effort ?? prev.effort,
           accessMode: changes.accessMode ?? prev.accessMode,
+          fastMode: prev.fastSupported ? nextFast : "off",
+          selectedConfig: nextSelected,
         };
       });
     });

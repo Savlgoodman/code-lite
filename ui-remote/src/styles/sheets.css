@@ -179,3 +179,24 @@
 }
 
 .dir-browser-error { color: var(--orange); }
+
+/* 会话配置：速率开关行 */
+.config-fast-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.config-fast-row:active { background: var(--hover); }
+
+.config-fast-desc { color: var(--text); }
