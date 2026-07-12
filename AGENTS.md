@@ -113,6 +113,7 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 | `docs/design/0709-REMOTE-CONTROL-DUAL-SYNC.md` | 远程控制与双端对等同步设计，记录事件总线、附着快照、单会话互锁、中继盲转发和落地顺序 |
 | `docs/design/0710-REMOTE-CONTROL-PROTOCOL-FIX.md` | 远程控制协议修复与双端同步收敛，记录 turn.start 参数 bug、中继信封路由、WsSession 统一 dispatch、会话生命周期双向同步和最小安全模型 |
 | `docs/design/0711-REMOTE-CHAT-RENDER-APPROVAL-FILEREF.md` | 远端聊天渲染增强、审批流修复与文件引用渲染设计，记录 @code-lite/chat-render 共享库、工具组/文件编辑组/详情页、approval.resolved 广播与挂起审批快照恢复、fs.readFile 受控读取与文件引用高亮 |
+| `docs/design/0712-REMOTE-NAV-AND-STREAMING.md` | 远端导航栈架构与 AI 流式环境策略，记录 navStore 栈式路由、统一 ScreenTransition 转场、安卓返回键/PWA popstate 接线、Sheet 瞬态层与 AI 三环境（dev 转发 / PWA 禁用 / 安卓原生插件）流式取舍 |
 | `docs/design/0703-RUNTIME-MODEL-PROVIDER.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
 | `docs/guides/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
 | `demo/acp-demo/README.md` | ACP mock、Python SDK probe 和 Codex ACP smoke 使用说明 |
