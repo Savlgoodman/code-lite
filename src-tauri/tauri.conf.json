@@ -1,7 +1,7 @@
 {
   "$schema": "../ui/node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Code Lite",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "com.codelite.app",
   "build": {
     "beforeDevCommand": "npm run dev --prefix ui -- --host 127.0.0.1 --port 1420 --strictPort",
