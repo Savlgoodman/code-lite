@@ -214,7 +214,7 @@ perf/events-0701-stream-cache
 2. 在合并后执行编译、打包和发布验证。
 3. 用户明确授权的紧急文档或流程修正。
 
-所有合并尽量采用变基合并：功能分支先 `rebase dev`，再快进合并到 `dev`；`dev` 达到可发布状态后先完成集成验证，再在 `dev` 上完成独立版本升级提交，之后快进合并到 `master`。如 `dev` 与 `master` 分叉，应先 `git rebase master`，再 `git merge --ff-only dev`。
+所有合并必须采用变基合并，保持 Git 提交树线性整洁：功能分支先 `rebase dev`，再快进合并到 `dev`；`dev` 达到可发布状态后先完成集成验证，再在 `dev` 上完成独立版本升级提交，之后 `git rebase master` 再 `git merge --ff-only dev` 快进合并到 `master`。发布合并禁止使用 `--no-ff` 或普通 merge 产生 merge commit。
 
 每次发布前，必须先在 `dev` 分支进行一次独立版本升级提交，然后才能合并至 `master` 并执行编译、打包和发布验证。版本升级使用统一入口，例如 `npm run version:set -- 0.1.3` 或修改 `VERSION` 后运行 `npm run version:sync`。版本提交只包含版本相关文件，不混入功能代码。
 

@@ -85,7 +85,7 @@ git merge --ff-only feat/settings-0630-model-provider
 
 如历史已经分叉且不能快进，应优先回到功能分支继续 `rebase dev`，避免无意义 merge commit。只有在需要保留分支上下文或用户明确要求时，才使用非快进合并。
 
-`dev` 累积到可以发布的程度后，先完成集成验证，并在 `dev` 上完成独立版本升级提交，再合入 `master`：
+`dev` 累积到可以发布的程度后，先完成集成验证，并在 `dev` 上完成独立版本升级提交，再变基合并到 `master`。发布合并必须使用变基 + 快进，禁止产生 merge commit，以保持 Git 提交树线性整洁：
 
 ```powershell
 git switch dev
@@ -93,23 +93,16 @@ npm run version:set -- 0.1.3
 git status --short
 git add VERSION package.json ui/package.json ui/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
 git commit -m "chore: 升级版本到 0.1.3"
-git switch master
-git pull
-git merge --ff-only dev
-```
-
-如果 `master` 与 `dev` 已经分叉，应先将 `dev` 变基到最新 `master`：
-
-```powershell
-git switch dev
 git rebase master
 git switch master
 git merge --ff-only dev
 ```
 
+无论 `master` 与 `dev` 是否分叉，合并前都应先在 `dev` 上 `git rebase master`，确保快进合并成功。如果 rebase 有冲突，在 `dev` 上解决后再切回 `master` 执行 `--ff-only`。
+
 ## 版本升级与发布
 
-发布前必须先在 `dev` 分支完成一次独立版本升级提交，再将 `dev` 快进合并到 `master`，最后在 `master` 上执行编译、打包和发布验证。
+发布前必须先在 `dev` 分支完成一次独立版本升级提交，再将 `dev` 变基到 `master` 后快进合并，最后在 `master` 上执行编译、打包和发布验证。
 
 版本升级提交要求：
 
@@ -126,10 +119,12 @@ npm run version:set -- 0.1.3
 git status --short
 git add VERSION package.json ui/package.json ui/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
 git commit -m "chore: 升级版本到 0.1.3"
+git rebase master
 git switch master
-git pull
 git merge --ff-only dev
 ```
+
+发布合并必须使用变基 + 快进（`rebase` + `--ff-only`），禁止使用 `--no-ff` 或普通 merge 产生 merge commit。目标是保持 `master` 提交树完全线性，每个提交都是有意义的功能或版本节点。
 
 合并到 `master` 后，再执行编译、打包和发布验证。编译验证必须晚于 `master` 快进合并，以确认最终发布分支可构建：
 
