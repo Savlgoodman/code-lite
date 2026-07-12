@@ -81,44 +81,37 @@
   -webkit-overflow-scrolling: touch;
 }
 
-/* ── Chat Overlay：从右侧拉入，返回时向右推出 ── */
+/* ── Screen Layer：统一的整页转场层（ScreenTransition 原语）──
+ *
+ * 导航栈里每个页面都套一层 .screen-layer。from-right 从右侧滑入（整页默认），
+ * from-bottom 从底部滑入（底部弹层语义）。enter/exit 停在屏幕外，shown（无相位类）到位。
+ * 栈内多层通过 DOM 顺序天然叠放，靠后的盖在上层。
+ */
 
-.chat-overlay {
-  position: absolute;
+.screen-layer {
+  position: fixed;
   inset: 0;
   z-index: var(--z-chat);
   background: var(--bg);
-  transform: translateX(0);
+  transform: translate(0, 0);
   transition: transform var(--dur-slow) var(--ease-page);
   will-change: transform;
 }
 
-/* 进入前 / 退出后：停在屏幕右侧外 */
-.chat-overlay.enter,
-.chat-overlay.exit {
+/* 进入前 / 退出后的停靠位：按方向停在屏幕外 */
+.screen-layer.from-right.enter,
+.screen-layer.from-right.exit {
   transform: translateX(100%);
 }
 
-/* 底层主界面在 chat 打开时轻微左移并压暗，营造层级纵深 */
+.screen-layer.from-bottom.enter,
+.screen-layer.from-bottom.exit {
+  transform: translateY(100%);
+}
+
+/* 底层主界面在有页面压栈时轻微左移并压暗，营造层级纵深 */
 .home-pager.behind {
   transform: translateX(-12%);
   filter: brightness(0.96);
   transition: transform var(--dur-slow) var(--ease-page), filter var(--dur-slow) var(--ease-page);
-}
-
-/* ── Detail Overlay：会话内工具/diff 详情页，叠在会话页之上从右滑入 ── */
-
-.detail-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  background: var(--bg);
-  transform: translateX(0);
-  transition: transform var(--dur-slow) var(--ease-page);
-  will-change: transform;
-}
-
-.detail-overlay.enter,
-.detail-overlay.exit {
-  transform: translateX(100%);
 }

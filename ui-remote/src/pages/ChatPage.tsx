@@ -7,11 +7,12 @@ import { useSessionConfig } from "../hooks/useSessionConfig";
 import type { FileRef } from "@code-lite/chat-render";
 import { MessageBubble } from "../components/MessageBubble";
 import { FileRefProvider } from "../components/MessageRenderer";
-import { DetailOverlay, type DetailRoute } from "../components/DetailOverlay";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { ConfigSheet } from "../sheets/ConfigSheet";
 import { ConfigBar } from "../components/ConfigBar";
 import { EmptyState, Button, Sheet, Portal } from "../components/ui";
+import { useNav } from "../hooks/useNav";
+import { useDismissable } from "../hooks/useDismissable";
 import {
   IMAGE_ACCEPT,
   MAX_DRAFT_IMAGES,
@@ -71,7 +72,11 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const [draftImageError, setDraftImageError] = useState<string | null>(null);
   const [imagesProcessing, setImagesProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
-  const [detailRoute, setDetailRoute] = useState<DetailRoute | null>(null);
+  const nav = useNav();
+  // 系统返回键优先关闭这些瞬态层，再回落到弹出会话页
+  useDismissable(previewImage !== null, () => setPreviewImage(null));
+  useDismissable(showContextModal, () => setShowContextModal(false));
+  useDismissable(showConfigSheet, () => setShowConfigSheet(false));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -467,7 +472,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       {/* 消息流 */}
       <FileRefProvider
         onOpenFileRef={(fileRef: FileRef) =>
-          setDetailRoute({ kind: "fileref", target: { fileRef, conversationId: sessionId } })
+          nav.push({ kind: "detail", route: { kind: "fileref", target: { fileRef, conversationId: sessionId } } })
         }
         loadImage={async (fileRef: FileRef) => {
           if (!client) throw new Error("no client");
@@ -486,8 +491,8 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
                 conversationId={sessionId}
                 showTimestamp={shouldShowTimestamp(msg, i, messages, isRunning)}
                 onPreviewImage={(url, name) => setPreviewImage({ url, name })}
-                onOpenTool={(target) => setDetailRoute({ kind: "tool", target })}
-                onOpenDiff={(target) => setDetailRoute({ kind: "diff", target })}
+                onOpenTool={(target) => nav.push({ kind: "detail", route: { kind: "tool", target } })}
+                onOpenDiff={(target) => nav.push({ kind: "detail", route: { kind: "diff", target } })}
               />
             ))
           )}
@@ -691,8 +696,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
         </Sheet>
       )}
 
-      {/* 工具/diff 详情页浮层：叠在会话页之上，右侧滑入 */}
-      <DetailOverlay route={detailRoute} onBack={() => setDetailRoute(null)} />
+      {/* 工具/diff/文件引用详情页：交由导航栈渲染（nav.push detail），叠在会话页之上 */}
 
       {/* 图片预览：全屏浮层经 Portal 逃逸父级 transform 裁剪 */}
       {previewImage && (
