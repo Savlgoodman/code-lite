@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 
 import { AgentSelectionPanel } from "../features/chat/AgentSelectionPanel";
 import { ChatWorkspace } from "../features/chat/ChatWorkspace";
@@ -62,6 +62,8 @@ import type {
 
 const DRAFT_SESSION_ID = "__draft_session__";
 const STREAM_DELTA_FLUSH_MS = 60;
+// 稳定的空图片数组引用，避免每次渲染都新建 [] 触发下游 memo/effect 重跑。
+const EMPTY_DRAFT_IMAGES: DraftImage[] = [];
 type ActiveView = "chat" | "overview" | "settings";
 type PendingApprovalState = ApprovalRequest & { conversationId: string };
 type PendingInputState = InputRequest & { conversationId: string };
@@ -435,10 +437,13 @@ export function ChatPage() {
   const [activeView, setActiveView] = useState<ActiveView>("chat");
   const [archivedSessionIds, setArchivedSessionIds] = useState<Set<string>>(() => new Set());
   const [searchText, setSearchText] = useState("");
-  const [draft, setDraft] = useState("");
-  const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
-  const [draftImageError, setDraftImageError] = useState<string | null>(null);
-  const [imagesProcessing, setImagesProcessing] = useState(false);
+  // composer 草稿态按会话隔离（与 configBySession/capabilitiesBySession 同构）。
+  // 不能用全局 useState：那样会导致草稿跨会话串、以及 imagesProcessing 泄漏到
+  // 别的会话把发送按钮误禁用。派生的当前会话值见下方 draft/draftImages 等。
+  const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
+  const [draftImagesBySession, setDraftImagesBySession] = useState<Record<string, DraftImage[]>>({});
+  const [draftImageErrorBySession, setDraftImageErrorBySession] = useState<Record<string, string | null>>({});
+  const [imagesProcessingBySession, setImagesProcessingBySession] = useState<Record<string, boolean>>({});
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
   const [showAgentSelection, setShowAgentSelection] = useState(false);
   const [newSessionWorkspace, setNewSessionWorkspace] = useState("");
@@ -472,10 +477,6 @@ export function ChatPage() {
     configBySessionRef.current = configBySession;
   }, [configBySession]);
 
-  useEffect(() => {
-    draftImagesRef.current = draftImages;
-  }, [draftImages]);
-
   useEffect(() => { activeSessionIdRef.current = activeSessionId; }, [activeSessionId]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -486,6 +487,7 @@ export function ChatPage() {
   // 使用 ref 存储最新的 config，确保 sendMessage 读取到最新值（避免闭包捕获旧值）
   const configBySessionRef = useRef<Record<string, SessionConfig>>({});
   const draftImagesRef = useRef<DraftImage[]>([]);
+  const draftImagesBySessionRef = useRef<Record<string, DraftImage[]>>({});
 
   const activeSession = sessions.find((item) => item.id === activeSessionId) ?? sessions[0];
   const activeView_ = views[activeSession.id];
@@ -500,6 +502,59 @@ export function ChatPage() {
   const sessionAgent = activeSession.agent ?? (isDraftSessionId(activeSession.id) ? activeAgent : null);
   const contextUsage = activeView_?.contextUsage ?? null;
   const activeTurnId = client.getActiveTurnId(activeSession.id) ?? null;
+
+  // ─── 派生：当前会话的 composer 草稿态（按会话隔离，见 *BySession 定义）───
+  // 键统一用 activeSessionId：与下方 setter（写 activeSessionIdRef.current）以及
+  // configBySession/capabilitiesBySession 的取值口径一致，保证读写命中同一桶。
+  const draft = draftBySession[activeSessionId] ?? "";
+  const draftImages = draftImagesBySession[activeSessionId] ?? EMPTY_DRAFT_IMAGES;
+  const draftImageError = draftImageErrorBySession[activeSessionId] ?? null;
+  const imagesProcessing = imagesProcessingBySession[activeSessionId] ?? false;
+
+  // 当前会话的草稿 setter：把全局 setDraft 等调用改写为只更新当前会话这一桶。
+  // 保留原有的「值 or 函数式更新」两种签名，避免大面积改调用点。
+  const setDraft = useCallback((value: SetStateAction<string>) => {
+    const sessionId = activeSessionIdRef.current;
+    setDraftBySession((prev) => {
+      const current = prev[sessionId] ?? "";
+      const next = typeof value === "function" ? (value as (p: string) => string)(current) : value;
+      if (next === current) return prev;
+      return { ...prev, [sessionId]: next };
+    });
+  }, []);
+  const setDraftImages = useCallback((value: SetStateAction<DraftImage[]>) => {
+    const sessionId = activeSessionIdRef.current;
+    setDraftImagesBySession((prev) => {
+      const current = prev[sessionId] ?? EMPTY_DRAFT_IMAGES;
+      const next = typeof value === "function" ? (value as (p: DraftImage[]) => DraftImage[])(current) : value;
+      if (next === current) return prev;
+      return { ...prev, [sessionId]: next };
+    });
+  }, []);
+  const setDraftImageError = useCallback((value: string | null) => {
+    const sessionId = activeSessionIdRef.current;
+    setDraftImageErrorBySession((prev) => {
+      if ((prev[sessionId] ?? null) === value) return prev;
+      return { ...prev, [sessionId]: value };
+    });
+  }, []);
+  const setImagesProcessing = useCallback((value: boolean) => {
+    const sessionId = activeSessionIdRef.current;
+    setImagesProcessingBySession((prev) => {
+      if ((prev[sessionId] ?? false) === value) return prev;
+      return { ...prev, [sessionId]: value };
+    });
+  }, []);
+
+  // draftImagesRef 跟随当前会话的图片，供 sendMessage/清理等从 ref 读最新值。
+  useEffect(() => {
+    draftImagesRef.current = draftImages;
+  }, [draftImages]);
+
+  // 所有会话的图片桶（供卸载时统一 revoke object URL，避免非当前会话的图片泄漏）。
+  useEffect(() => {
+    draftImagesBySessionRef.current = draftImagesBySession;
+  }, [draftImagesBySession]);
 
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !archivedSessionIds.has(session.id)),
@@ -797,8 +852,10 @@ export function ChatPage() {
       for (const timer of Object.values(configSaveTimerRef.current)) {
         window.clearTimeout(timer);
       }
-      for (const image of draftImagesRef.current) {
-        revokeDraftImage(image);
+      for (const images of Object.values(draftImagesBySessionRef.current)) {
+        for (const image of images) {
+          revokeDraftImage(image);
+        }
       }
     };
   }, []);
@@ -840,14 +897,32 @@ export function ChatPage() {
     });
   }
 
-  function clearDraftImages() {
-    setDraftImages((current) => {
-      for (const image of current) {
+  // 清空指定会话的草稿（文本+图片+错误）。用于发送后清理来源会话——
+  // draft→real 迁移时活动会话已切到真实 id，不能只清当前会话，否则来源
+  // draft 桶残留、图片 object URL 泄漏。
+  function clearDraftForSession(sessionId: string) {
+    setDraftBySession((prev) => {
+      if (!(sessionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
+    setDraftImagesBySession((prev) => {
+      const images = prev[sessionId];
+      if (!images) return prev;
+      for (const image of images) {
         revokeDraftImage(image);
       }
-      return [];
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
     });
-    setDraftImageError(null);
+    setDraftImageErrorBySession((prev) => {
+      if (!(sessionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
   }
 
   function removeDraftImage(imageId: string) {
@@ -961,7 +1036,7 @@ export function ChatPage() {
       setDraftSession(null);
       setActiveSessionId(session.id);
       setActiveView("chat");
-      setDraft("");
+      clearDraftForSession(DRAFT_SESSION_ID);
     } catch (error) {
       console.error("Failed to create conversation:", error);
       // fallback: 创建本地 draft session
@@ -1185,9 +1260,9 @@ export function ChatPage() {
       ];
     }
 
-    // 立即清输入（乐观 UI 反馈）
-    setDraft("");
-    clearDraftImages();
+    // 立即清输入（乐观 UI 反馈）。清来源会话本身：draft→real 迁移后活动会话
+    // 已切到真实 id，按 sessionId 清才能连带 revoke 来源 draft 桶的图片。
+    clearDraftForSession(sessionId);
 
     try {
       await client.sendTurn({
@@ -1202,10 +1277,14 @@ export function ChatPage() {
         contentBlocks: contentBlocks as unknown[],
       });
     } catch (error) {
-      // 发起失败时恢复输入
-      setDraft(text);
-      setDraftImages(images);
-      setDraftImageError(error instanceof Error ? error.message : String(error));
+      // 发起失败时恢复输入到来源会话（可能已迁移为真实 id）。
+      const restoreId = conversationId ?? sessionId;
+      setDraftBySession((prev) => ({ ...prev, [restoreId]: text }));
+      setDraftImagesBySession((prev) => ({ ...prev, [restoreId]: images }));
+      setDraftImageErrorBySession((prev) => ({
+        ...prev,
+        [restoreId]: error instanceof Error ? error.message : String(error),
+      }));
     }
   }
 
