@@ -28,7 +28,7 @@ code-lite 的移动端远程控制界面（React 18 + TypeScript + Vite，Capaci
 ```
 src/
   main.tsx              # 入口：挂载 App，引入 streamdown 与 styles/index.css
-  App.tsx               # 应用外壳：Tab 状态、连接生命周期、HomePager + ChatOverlay 组合
+  App.tsx               # 应用外壳：Tab 状态、连接生命周期、HomePager + NavHost 组合
 
   pages/                # 整页级视图（占满视口的独立页面）
     ChatPage.tsx        #   会话页：消息流 / 输入区 / 配置栏 / 上下文弹窗
@@ -48,7 +48,8 @@ src/
   components/           # 可复用展示组件
     ui/                 #   与业务无关的 UI 原子（见下），统一从 index.ts 桶导出
     HomePager.tsx       #   主界面横向分页容器（Tab 平移 + 手指拖拽）
-    ChatOverlay.tsx     #   会话页浮层（右侧滑入 / 推出）
+    NavHost.tsx         #   遍历导航栈渲染整页（配合 ui/ScreenTransition 统一转场）
+    DetailOverlay.tsx   #   会话内详情页的页面切换（DetailContent，转场交给导航栈）
     AgentIcon.tsx       #   agent 图标
     ConfigBar.tsx       #   会话页配置信息栏（模型/访问模式/思考强度 chip）
     MessageBubble.tsx   #   单条消息
@@ -185,7 +186,7 @@ src/
 | `tokens.css` | 全部设计令牌 + 主题定义。**只有这里能写死颜色** |
 | `base.css` | reset、`html/body`、`.app-shell`、`.page-title` 等全局基元 |
 | `ui.css` | `components/ui/` 原子的样式（按钮/FAB/Sheet/Select/滑块…） |
-| `navigation.css` | Tab 栏、HomePager、ChatOverlay 转场 |
+| `navigation.css` | Tab 栏、HomePager、`.screen-layer`（ScreenTransition）转场 |
 | `lists.css` | 列表类页面（会话/设备/设置）、主题选择器、开关 |
 | `chat.css` | 会话页：消息、输入区、配置栏、上下文、思考流光、toast |
 | `sheets.css` | 抽屉内专属（agent 网格、目录浏览器等） |
@@ -200,18 +201,20 @@ src/
 ### UI 原子（`components/ui/`，统一从 `index.ts` 桶导入）
 
 ```tsx
-import { Sheet, Button, Fab, EmptyState, Select, EffortSlider, Portal } from "../components/ui";
+import { Sheet, Button, Input, Fab, EmptyState, Select, EffortSlider, Portal, ScreenTransition } from "../components/ui";
 ```
 
 | 组件 | 用途 | 关键点 |
 |---|---|---|
 | `Button` | 通用按钮 | `variant="primary"\|"secondary"`、`block`；透传原生 button 属性 |
+| `Input` | 文本输入 | 防御式读值（onChange/onInput/onBlur/onPaste + rAF 兜底），解决安卓 WebView 粘贴不触发 onChange；用 `value` + `onValueChange`，别再用裸 `<input>` 收表单值 |
 | `Fab` | 悬浮操作按钮 | `variant="primary"\|"secondary"`、`active`；**经 Portal 渲染到 body**（脱离 HomePager 的 transform）；仅在所属 Tab 激活时渲染 |
 | `Sheet` | 底部抽屉弹层 | 见下，所有弹窗的基座 |
 | `Select` | 自定义下拉 | 内联展开面板（原生 `<select>` 面板无法跨端定制）；`options: {value,label}[]` |
 | `EffortSlider` | 思考强度滑块 | 圆形滑块 + 挡位点；最高挡触发 WebGL 火焰（`useWebglFire` + `effortShaders`） |
 | `EmptyState` | 空状态占位 | `icon` / `title` / children 说明文字 |
 | `Portal` | 渲染到 `document.body` | 全屏浮层的逃逸舱，绕开父级 transform 裁剪 |
+| `ScreenTransition` | 整页进出场转场原语 | 唯一的 rAF 相位机；`from="right"\|"bottom"`；配合 NavHost + 导航栈，别再各页自写动画 |
 
 ### Sheet：所有弹窗的基座
 
@@ -242,15 +245,28 @@ import { Sheet, Button, Fab, EmptyState, Select, EffortSlider, Portal } from "..
 - 嵌套弹层（如 `NewConversationSheet` 里的 `DirectoryBrowser`）作为 `Sheet` 的兄弟节点
   渲染，各自独立。
 
-### 导航组件（`components/`）
+### 导航栈（`services/navStore` + `hooks/useNav` + `components/NavHost`）
+
+远端全应用只有一份「全屏层级」真源：**底部 Tab 是根基座**，其上叠加的所有整页
+（会话页、AI 对话页、模型供应商配置及其子页、已归档页、会话内详情页）都是 `navStore`
+栈的条目。导航动词只有 `push` / `pop` / `replaceTop` / `reset`（经 `useNav()` 拿到）。
+**完整设计见 `docs/design/0712-REMOTE-NAV-AND-STREAMING.md`。**
 
 - **`HomePager`**——四个 Tab 排成横向轨道，`translateX` 平移切换，支持手指拖拽
   （纵向滚动优先、边缘阻尼、过阈值提交）。向每个 pane 注入 `active` 布尔，pane 据此
   决定是否渲染 FAB 等全屏浮层（所有 pane 同时挂载，不 gate 会互相叠加）。
-- **`ChatOverlay`**——会话页浮层，`sessionId` 出现时从右滑入，置空时推出并在动画后卸载。
+- **`NavHost`**——遍历导航栈，每个条目套一层 `ScreenTransition` 渲染整页；已弹出条目在
+  离场动画期间保留，动画结束再卸载。
+- **`ScreenTransition`（`components/ui/`）**——唯一的整页转场原语（rAF 相位机），
+  收敛了旧的 ChatOverlay/AiChatOverlay/SettingsOverlay/DetailOverlay 四套重复动画。
+- **系统返回**——`useSystemBack`（`App` 只调一次）把安卓 `@capacitor/app` backButton 与
+  浏览器/PWA `popstate` 都接到 `navStore.back()`：优先关最上层瞬态层（经 `useDismissable`
+  注册的 Sheet/预览），再弹出栈顶页面，栈到根才放行退出。
 
-新增页面转场沿用这两者的模式：**用 CSS transform + class 切换驱动动画**，元素在动画
-期间保留在 DOM，动画结束再卸载。
+**新增页面**：在 `ScreenEntry` 增一个变体 → `NavHost` 的 `ScreenBody` 加一个 `case` →
+触发处 `nav.push(...)`。转场自动统一，不要再各写一套动画，也不要在页内自建「返回」面包屑
+（`onBack` 已由 NavHost 绑定为 pop，透传给 header 返回按钮即可）。新增弹层基于 `Sheet`，
+并在打开时 `useDismissable` 注册关闭，使系统返回能先关它。
 
 ### 编写组件的约定
 
@@ -305,17 +321,16 @@ AI 对话是**独立于 code-lite 业务**的附加模块，直连大模型 API�
   - `tabs/AiTab.tsx`：不可用时提前 return “仅 App 可用”空状态，不渲染会话列表/FAB。
   - `tabs/SettingsTab.tsx`：不可用时 AI 段落渲染为禁用项（`.settings-item-nav.disabled`），
     且不挂载 `AiSettingsSheet` / `AiArchivedSheet`。
-- **请求转发**：`services/aiClient.ts` 的 `proxyUrl()` 依据 `isNativeApp()` 决定直连
-  还是走 `/ai-proxy`。生产 PWA 不会走到这里，因为入口已被 gate 掉。
+- **请求转发**：HTTP 传输经 `services/httpTransport.ts` 的 seam 按环境分流——dev 走
+  `/ai-proxy`，原生走 `capacitor-stream-http-v2` 原生 HTTP（绕 WebView CORS，事件桥接为
+  ReadableStream 保留逐字流式）。生产 PWA 不会走到这里，因为入口已被 gate 掉。
+  `aiClient` 只认 `openStream` / `collectText`，不关心底层实现。
 - **`/ai-proxy` 仅存在于 dev**：它是 `vite.config.ts` 里的 dev 中间件，`vite build` 产物
   **不包含**它。若将来要在服务器上让网页版也能用 AI，需在服务器（nginx/caddy/node）
   固化一个同源反向代理，并相应放开 `isAiAvailable()` —— 但当前策略是网页版不做 AI。
 
-### 待办（安卓原生直连）
-
-原生 App 目前仍用浏览器 `fetch`（为保留流式），因此在 Android WebView 里同样受 CORS
-约束，遇到不返回 CORS 头的供应商仍会失败。后续需接一个 **Android 原生 HTTP 模块**
-（能绕 WebView CORS，最好支持流式 SSE），届时 `aiClient` 的原生分支改为调用该模块。
+三种环境的传输走向、原生插件选型与流式取舍（原生拿不到 HTTP status、须真机验证、
+改动后需 `npx cap sync android`）详见 **`docs/design/0712-REMOTE-NAV-AND-STREAMING.md` 第 3 节**。
 
 ---
 
