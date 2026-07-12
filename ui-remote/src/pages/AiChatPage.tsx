@@ -12,6 +12,7 @@ import {
 } from "../services/AiConversationStore";
 import { aiProviderStore, type AiModel, type AiProvider } from "../services/AiProviderStore";
 import { streamChat, blobToDataUrl } from "../services/aiClient";
+import { useDismissable } from "../hooks/useDismissable";
 import {
   IMAGE_ACCEPT,
   MAX_DRAFT_IMAGES,
@@ -42,6 +43,10 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   const [resolved, setResolved] = useState<{ model: AiModel; provider: AiProvider } | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+
+  // 系统返回键优先关闭这些瞬态层
+  useDismissable(previewImage !== null, () => setPreviewImage(null));
+  useDismissable(showModelSheet, () => setShowModelSheet(false));
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

@@ -9,11 +9,9 @@ import { connectionManager } from "./services/ConnectionManager";
 import { deviceStore, type DeviceRecord } from "./services/DeviceStore";
 import { AddDeviceSheet } from "./sheets/AddDeviceSheet";
 import { HomePager } from "./components/HomePager";
-import { ChatOverlay } from "./components/ChatOverlay";
-import { AiChatOverlay } from "./components/AiChatOverlay";
-import { SettingsOverlay } from "./components/SettingsOverlay";
-import { AiSettingsPage } from "./pages/AiSettingsPage";
-import { AiArchivedPage } from "./pages/AiArchivedPage";
+import { NavHost } from "./components/NavHost";
+import { useNav } from "./hooks/useNav";
+import { useSystemBack } from "./hooks/useSystemBack";
 
 type TabId = "remote" | "ai" | "devices" | "settings";
 
@@ -34,15 +32,17 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabId>("remote");
   const [connected, setConnected] = useState(false);
   const [transportStatus, setTransportStatus] = useState<TransportStatus>("idle");
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [activeAiConversationId, setActiveAiConversationId] = useState<string | null>(null);
   const [deviceName, setDeviceName] = useState<string>("");
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
   const [editingDevice, setEditingDevice] = useState<DeviceRecord | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
-  const [showAiSettings, setShowAiSettings] = useState(false);
-  const [showAiArchived, setShowAiArchived] = useState(false);
+
+  const nav = useNav();
+  // 安卓返回键 / 浏览器 popstate 单点接线到导航栈
+  useSystemBack();
+  // 全屏层级（会话/AI 对话/设置子页/详情）打开时，主界面后退形成纵深、隐藏 Tab 栏
+  const navOpen = nav.depth > 0;
 
   const activeDeviceIdRef = useRef(activeDeviceId);
   activeDeviceIdRef.current = activeDeviceId;
@@ -110,13 +110,13 @@ export function App() {
         pairKey: device.pairKey,
         deviceName: device.name,
       });
-      setActiveSessionId(null);
+      nav.reset();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       showError("切换设备失败: " + msg);
       await refreshDevices();
     }
-  }, [devices, refreshDevices]);
+  }, [devices, refreshDevices, nav]);
 
   const handleDeleteDevice = useCallback(async (id: string) => {
     if (id === activeDeviceId) {
@@ -165,8 +165,6 @@ export function App() {
     await refreshDevices();
   }, [refreshDevices]);
 
-  const chatOpen = activeSessionId !== null || activeAiConversationId !== null;
-  const settingsPageOpen = showAiSettings || showAiArchived;
   const activeIndex = TABS.findIndex((t) => t.id === activeTab);
 
   const panes = [
@@ -175,10 +173,10 @@ export function App() {
       connected={connected}
       transportStatus={transportStatus}
       deviceName={deviceName}
-      onOpenSession={setActiveSessionId}
+      onOpenSession={(id) => nav.push({ kind: "chat", sessionId: id })}
       onReconnect={handleReconnect}
     />,
-    <AiTab key="ai" onOpenConversation={setActiveAiConversationId} />,
+    <AiTab key="ai" onOpenConversation={(id) => nav.push({ kind: "aiChat", conversationId: id })} />,
     <DevicesTab
       key="devices"
       devices={devices}
@@ -190,8 +188,8 @@ export function App() {
     />,
     <SettingsTab
       key="settings"
-      onOpenAiSettings={() => setShowAiSettings(true)}
-      onOpenAiArchived={() => setShowAiArchived(true)}
+      onOpenAiSettings={() => nav.push({ kind: "aiSettings" })}
+      onOpenAiArchived={() => nav.push({ kind: "aiArchived" })}
     />,
   ];
 
@@ -201,22 +199,12 @@ export function App() {
         index={activeIndex}
         onIndexChange={(i) => setActiveTab(TABS[i].id)}
         panes={panes}
-        behind={chatOpen || settingsPageOpen}
+        behind={navOpen}
       />
 
-      <ChatOverlay sessionId={activeSessionId} onBack={() => setActiveSessionId(null)} />
+      <NavHost />
 
-      <AiChatOverlay conversationId={activeAiConversationId} onBack={() => setActiveAiConversationId(null)} />
-
-      <SettingsOverlay open={showAiSettings} onClose={() => setShowAiSettings(false)}>
-        <AiSettingsPage onBack={() => setShowAiSettings(false)} />
-      </SettingsOverlay>
-
-      <SettingsOverlay open={showAiArchived} onClose={() => setShowAiArchived(false)}>
-        <AiArchivedPage onBack={() => setShowAiArchived(false)} />
-      </SettingsOverlay>
-
-      {!chatOpen && !settingsPageOpen && (
+      {!navOpen && (
         <nav className="bottom-tab-bar">
           {TABS.map((tab) => (
             <button
