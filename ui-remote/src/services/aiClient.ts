@@ -5,17 +5,20 @@
  * - chat_completions：POST {baseUrl}/chat/completions
  * - responses：POST {baseUrl}/responses
  *
- * 用浏览器原生 fetch + ReadableStream 做真流式（SSE），无新依赖。
- * - dev（浏览器）：请求经 /ai-proxy 同源转发，绕开 CORS，流式透传。
- * - 原生（Android/iOS）：直连目标 URL。注意此路径受 WebView CORS 约束，
- *   供应商需返回 CORS 头，否则会被预检拦截（此为 fetch + 真流式的固有取舍）。
+ * HTTP 传输经 httpTransport 的 seam 按环境选择（见该文件与
+ * docs/design/0712-REMOTE-NAV-AND-STREAMING.md）：
+ * - dev（浏览器）：请求经 /ai-proxy 同源转发，绕开 CORS，fetch 流式透传。
+ * - 原生（Android/iOS）：capacitor-stream-http-v2 原生 HTTP 绕开 WebView CORS，
+ *   事件桥接为 ReadableStream 保留逐字流式。
+ * - PWA / 生产静态部署：AI 入口已由 isAiAvailable() 禁用，不会走到这里。
  *
+ * 无论走哪条路，本文件统一从 ReadableStream 读 SSE，逻辑一致。
  * 多模态图片以 data URL 直接进请求体（无附件上传通道）。
  */
 
 import type { AiProvider, AiModel } from "./AiProviderStore";
 import type { AiImage, AiMessage } from "./AiConversationStore";
-import { isNativeApp } from "../lib/environment";
+import { openStream, collectText } from "./httpTransport";
 
 /** 规范化 baseUrl：去掉结尾斜杠。 */
 function normalizeBaseUrl(baseUrl: string): string {
@@ -30,27 +33,22 @@ function authHeaders(provider: AiProvider): Record<string, string> {
   return headers;
 }
 
-/**
- * 把真实 URL 映射为请求地址：
- * - 原生 App：直接用原始 URL（原生 HTTP 不受 CORS 约束，未来接安卓原生模块）。
- * - 浏览器（dev）：映射到同源 /ai-proxy 转发，绕开 CORS 且保留流式。
- *
- * 注意：生产 PWA 环境不会走到这里——AI 入口已由 isAiAvailable() 整体禁用。
- */
-function proxyUrl(url: string): string {
-  if (isNativeApp()) return url;
-  return `/ai-proxy/${url}`;
-}
-
 /** GET {baseUrl}/models，返回模型 id 列表（OpenAI 标准 data[].id）。 */
 export async function fetchModels(provider: AiProvider): Promise<string[]> {
   const url = `${normalizeBaseUrl(provider.baseUrl)}/models`;
-  const resp = await fetch(proxyUrl(url), { headers: authHeaders(provider) });
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => "");
-    throw new Error(`获取模型失败 (${resp.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+  let text: string;
+  try {
+    const stream = await openStream(url, { method: "GET", headers: authHeaders(provider) });
+    text = await collectText(stream);
+  } catch (err) {
+    throw new Error(`获取模型失败: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const payload = (await resp.json()) as { data?: Array<{ id?: string }> };
+  let payload: { data?: Array<{ id?: string }> };
+  try {
+    payload = JSON.parse(text) as { data?: Array<{ id?: string }> };
+  } catch {
+    throw new Error(`获取模型失败: 响应不是有效 JSON${text ? `: ${text.slice(0, 200)}` : ""}`);
+  }
   const ids = (payload.data ?? [])
     .map((item) => String(item.id ?? "").trim())
     .filter(Boolean);
@@ -105,12 +103,10 @@ function buildResponsesInput(messages: AiMessage[], multimodal: boolean): unknow
  * 读取 SSE 流，逐个 `data:` 事件回调 onEvent。遇到 `[DONE]` 结束。
  */
 async function readSse(
-  response: Response,
+  body: ReadableStream<Uint8Array>,
   signal: AbortSignal | undefined,
   onEvent: (json: unknown) => void,
 ): Promise<void> {
-  const body = response.body;
-  if (!body) throw new Error("响应没有可读流。");
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -197,19 +193,14 @@ export async function streamChat(
       extract = chatDelta;
     }
 
-    const response = await fetch(proxyUrl(url), {
+    const responseBody = await openStream(url, {
       method: "POST",
       headers: authHeaders(provider),
       body: JSON.stringify(body),
       signal,
     });
 
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`请求失败 (${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`);
-    }
-
-    await readSse(response, signal, (event) => {
+    await readSse(responseBody, signal, (event) => {
       const delta = extract(event);
       if (delta) callbacks.onDelta(delta);
     });
