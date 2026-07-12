@@ -86,7 +86,6 @@ class AcpRuntimeConnection:
     close_result: dict[str, Any] | None = None
     latest_activity_at: float = field(default_factory=time.time)
     sessions: dict[str, str] = field(default_factory=dict)  # conversation_id -> native_session_id
-    prompt_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     capabilities_cache: dict[str, Any] | None = None
     _ready: bool = False
     _client_handler: AcpClientHandler | None = None
