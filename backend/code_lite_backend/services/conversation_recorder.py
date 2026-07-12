@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -15,6 +17,12 @@ from code_lite_backend.storage.conversations import (
     now_ms,
 )
 from code_lite_backend.storage.diff_artifacts import DiffArtifactStore
+
+logger = logging.getLogger(__name__)
+
+# turn 进行中，高频增量文本（text/reasoning delta）的落盘节流间隔（秒）。
+# 结构性与终止类事件不受此限，总是立即写盘。
+_DELTA_FLUSH_INTERVAL_S = 1.0
 
 
 def create_message_id(prefix: str) -> str:
@@ -325,6 +333,8 @@ class ConversationRecorder:
         self._diff_store = diff_store or DiffArtifactStore(store.record_dir)
         self._active_messages: dict[str, list[dict[str, Any]]] = {}
         self._active_sessions: dict[str, dict[str, Any]] = {}
+        # conversation_id -> 上次增量文本落盘的 monotonic 时间戳，用于 delta 节流。
+        self._last_delta_flush: dict[str, float] = {}
 
     def create_conversation_id(self) -> str:
         return create_conversation_id()
@@ -543,6 +553,15 @@ class ConversationRecorder:
 
         if session_patch is not None:
             return self.finish_turn(conversation_id, session_patch)
+
+        # turn 进行中增量落盘：高频文本 delta 走时间节流，结构性事件立即写盘。
+        # 目的：进程被硬杀（taskkill /F）时也只丢失约 1 秒的增量文本，而非整轮。
+        throttle = event_type in {
+            "agent.text.delta",
+            "agent.reasoning.delta",
+            "agent.context.updated",
+        }
+        self._flush_active(conversation_id, throttle=throttle)
         return None
 
     def project_agent_event_for_ui(
@@ -583,14 +602,69 @@ class ConversationRecorder:
         session = self._update_active_session(conversation_id, patch)
         messages = self._active_messages.pop(conversation_id, None)
         self._active_sessions.pop(conversation_id, None)
+        self._last_delta_flush.pop(conversation_id, None)
         if messages is not None:
             self._store.save_session(conversation_id, session)
             self._store.save_messages(conversation_id, messages)
         return session
 
     def discard_turn(self, conversation_id: str) -> None:
-        self._active_messages.pop(conversation_id, None)
-        self._active_sessions.pop(conversation_id, None)
+        """收尾一个未正常完成的 turn：把内存态标记为“已中断”后写盘，而非静默丢弃。
+
+        turn 因异常提前退出（run_turn_task 的 finally 未见终止事件）时调用。
+        进行中的增量文本已由 _flush_active 落盘，这里补一个明确的中断标记，
+        避免磁盘上留下 status=running 且 assistant streaming=True 的脏态。
+        """
+        messages = self._active_messages.get(conversation_id)
+        if messages is None:
+            self._active_sessions.pop(conversation_id, None)
+            self._last_delta_flush.pop(conversation_id, None)
+            return
+
+        for message in reversed(messages):
+            if message.get("role") == "assistant" and message.get("streaming"):
+                message["streaming"] = False
+                if not message.get("error"):
+                    message["error"] = "生成被中断：程序在本轮完成前退出。"
+                message["updatedAt"] = now_ms()
+                break
+
+        # 归 idle：此处 _active_sessions 仍在，_update_active_session 会保留标题/agent 等字段。
+        session = self._update_active_session(conversation_id, {"status": "idle"})
+        try:
+            self._store.save_session(conversation_id, session)
+            self._store.save_messages(conversation_id, messages)
+        except Exception:
+            logger.exception("discard_turn: failed to persist interrupted turn %s", conversation_id)
+        finally:
+            self._active_messages.pop(conversation_id, None)
+            self._active_sessions.pop(conversation_id, None)
+            self._last_delta_flush.pop(conversation_id, None)
+
+    def _flush_active(self, conversation_id: str, *, throttle: bool) -> None:
+        """把当前活动态（session + messages）落盘。
+
+        throttle=True 时（高频文本 delta）按 _DELTA_FLUSH_INTERVAL_S 节流，
+        避免每个 token 都触发一次全量 messages.json 写盘；
+        throttle=False 时（结构性/终止类事件）立即写盘。
+        """
+        messages = self._active_messages.get(conversation_id)
+        session = self._active_sessions.get(conversation_id)
+        if messages is None or session is None:
+            return
+
+        now = time.monotonic()
+        if throttle:
+            last = self._last_delta_flush.get(conversation_id)
+            if last is not None and (now - last) < _DELTA_FLUSH_INTERVAL_S:
+                return
+
+        try:
+            self._store.save_session(conversation_id, session)
+            self._store.save_messages(conversation_id, messages)
+            self._last_delta_flush[conversation_id] = now
+        except Exception:
+            logger.exception("_flush_active: failed to persist active turn %s", conversation_id)
 
     def snapshot(self, conversation_id: str) -> dict[str, Any] | None:
         """会话快照（0709 设计 5.2）：内存活动态优先，回退落盘。

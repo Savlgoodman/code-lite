@@ -36,6 +36,14 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     inputs = InputBroker()
     attachment_store = AttachmentStore(runtime_config.attachments_dir)
     conversation_store = ConversationStore(runtime_config.record_dir)
+    # 崩溃对账：把上次进程硬杀留下的“进行中”会话收敛为已中断，避免脏 running 态。
+    # 启动时尚无任何活动 turn，凡 running/approval 皆为陈旧中断。
+    try:
+        repaired = conversation_store.reconcile_interrupted_sessions()
+        if repaired:
+            logger.info("Reconciled %d interrupted conversation(s) on startup", repaired)
+    except Exception:
+        logger.exception("Failed to reconcile interrupted sessions on startup")
     diff_artifact_store = DiffArtifactStore(runtime_config.record_dir)
     event_store = ConversationEventStore(runtime_config.record_dir)
     event_bus = SessionEventBus()

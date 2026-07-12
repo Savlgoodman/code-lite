@@ -60,6 +60,54 @@ class ConversationStore:
                 sessions.append(session)
         return sorted(sessions, key=lambda item: int(item.get("updatedAt") or 0), reverse=True)
 
+    def reconcile_interrupted_sessions(self) -> int:
+        """启动时对账：把上次进程异常退出留下的“进行中”会话收敛为可用状态。
+
+        进程被硬杀（taskkill /F）时，磁盘上会留下 session.status 为 running/approval、
+        且 trailing assistant 消息仍 streaming=True 的脏态。启动时内存无任何活动 turn，
+        因此这些一律视为陈旧中断：停止 streaming、补中断标记、status 归 idle，保留原
+        updatedAt（不把中断会话顶到列表最前）。返回被修复的会话数。
+        """
+        repaired = 0
+        for directory in self._conversation_dirs():
+            conversation_id = directory.name
+            try:
+                session = self._read_session(conversation_id)
+                if session is None:
+                    continue
+                if str(session.get("status") or "") not in {"running", "approval"}:
+                    continue
+
+                messages = self.load_messages(conversation_id)
+                changed_message = False
+                for message in reversed(messages):
+                    if message.get("role") == "assistant" and message.get("streaming"):
+                        message["streaming"] = False
+                        if not message.get("error"):
+                            message["error"] = "生成被中断：程序在本轮完成前退出。"
+                        changed_message = True
+                        break
+
+                original_updated_at = session.get("updatedAt")
+                session["status"] = "idle"
+                session["updatedAt"] = original_updated_at
+                atomic_write_json(self._session_path(conversation_id), {
+                    **session,
+                    "id": conversation_id,
+                    "updatedAt": original_updated_at or now_ms(),
+                    "schemaVersion": SCHEMA_VERSION,
+                })
+                if changed_message:
+                    atomic_write_json(
+                        self._messages_path(conversation_id),
+                        {"schemaVersion": SCHEMA_VERSION, "messages": messages},
+                    )
+                repaired += 1
+            except Exception:
+                # 单个会话对账失败不应阻断启动，跳过继续。
+                continue
+        return repaired
+
     def create_session(
         self,
         *,
