@@ -3,7 +3,7 @@ import { QrCode } from "lucide-react";
 import { RelayTransport } from "../services/RelayTransport";
 import { computeRoomId } from "../services/ConnectionManager";
 import type { DeviceRecord } from "../services/DeviceStore";
-import { Sheet, Button } from "../components/ui";
+import { Sheet, Button, Input } from "../components/ui";
 import { QrScanSheet } from "./QrScanSheet";
 
 export interface AddDeviceSheetProps {
@@ -97,32 +97,29 @@ export function AddDeviceSheet({ initial, onClose, onSave }: AddDeviceSheetProps
       )}
       <div className="field">
         <label>设备名称</label>
-        <input
+        <Input
           type="text"
-          className="form-input"
           placeholder="如: 客厅台式机"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onValueChange={setName}
         />
       </div>
       <div className="field">
         <label>Relay 地址</label>
-        <input
+        <Input
           type="url"
-          className="form-input"
           placeholder="wss://relay.example.com"
           value={relayUrl}
-          onChange={(e) => setRelayUrl(e.target.value)}
+          onValueChange={setRelayUrl}
         />
       </div>
       <div className="field">
         <label>Pair Key</label>
-        <input
+        <Input
           type="text"
-          className="form-input"
           placeholder="输入 32 位配对密钥"
           value={pairKey}
-          onChange={(e) => setPairKey(e.target.value)}
+          onValueChange={setPairKey}
           autoComplete="off"
         />
       </div>
