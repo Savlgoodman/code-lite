@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { ArrowLeft, ArrowDown, Image, Loader2, Send, Cpu, Square, X } from "lucide-react";
 import { MessageRenderer } from "../components/MessageRenderer";
 import { AiModelSheet } from "../sheets/AiModelSheet";
-import { EmptyState, Portal } from "../components/ui";
+import { EmptyState, Portal, TextArea } from "../components/ui";
 import { formatMessageTime, formatFullDateTime } from "../lib/formatters";
 import {
   aiConversationStore,
@@ -306,13 +306,6 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
     setIsRunning(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void handleSend();
-    }
-  };
-
   const handleSelectModel = (modelRefId: string) => {
     void aiConversationStore.updateConversation(conversationId, { modelRefId });
     setConversation((prev) => (prev ? { ...prev, modelRefId } : prev));
@@ -383,13 +376,13 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
             </div>
           )}
           {draftImageError && <div className="draft-image-error">{draftImageError}</div>}
-          <textarea
+          <TextArea
             ref={textareaRef}
             className="chat-textarea"
             placeholder="输入消息..."
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onValueChange={setInput}
+            onEnter={() => void handleSend()}
             rows={1}
           />
           <input

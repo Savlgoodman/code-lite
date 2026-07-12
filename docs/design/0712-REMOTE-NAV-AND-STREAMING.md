@@ -144,10 +144,25 @@ peer-dep `@capacitor/core ^8.3.0`，匹配本项目 8.4.1）。它用原生 HTTP
 - 原生流式行为**须真机验证**：本仓库的 dev/PWA 构建不覆盖原生分支，CI 与本地 `npm run build`
   只保证类型与打包通过。
 
-## 4. 影响面与验证
+## 4. 防御式文本输入（安卓 WebView IME）
+
+安卓 WebView 开着输入法预测 / 滑行输入 / 联想 / 自动补全 / 粘贴时，输入的字符会落进 DOM，
+却不一定派发 React 绑定的 change 事件，或事件里的 value 滞后一个字——表现为「刚打的字
+检测不到，要删一个字才被识别」，以及「粘贴 URL/Key 后保存按钮一直灰」。PWA / 桌面浏览器无此问题。
+
+对策集中在 `components/ui/textFieldValue.ts` 的 `useDefensiveTextValue`（不与 IME 对抗）：
+
+- 组合输入期间（`compositionstart`→`compositionend`）不打断，结束时读真实 DOM 值同步。
+- 非组合期的 `change` / `input` 都取值，并在每次 `input` 后用 `requestAnimationFrame` 兜底读一次
+  「本帧稳定后的 DOM 值」，补上事件里滞后/缺失的尾字；`blur` 时再兜底一次。
+
+它被 `Input`（单行）与 `TextArea`（多行）两个原子共用。**收文本值一律用这两个原子，
+不要用裸 `<input>` / `<textarea>`**。`TextArea` 的 `onEnter` 只在非组合期回车触发，避免输入法
+选词的回车被误当作发送。已迁移：两个消息输入框、供应商表单、手动加模型、设备表单、
+目录浏览器新建文件夹、新建会话工作区路径。
 
 - 新增：`navStore` / `useNav` / `useDismissable` / `useSystemBack` / `NavHost` /
-  `ScreenTransition` / `Input` / `httpTransport`。
+  `ScreenTransition` / `Input` / `TextArea` / `textFieldValue` / `httpTransport`。
 - 改动：`App.tsx`（去除散落导航 flag，改用栈 + NavHost + useSystemBack）、`ChatPage` /
   `AiChatPage`（detail 入栈、瞬态层注册）、`AiSettingsPage`（子页拆为栈条目、去面包屑、用 Input）、
   `aiClient`（改用 seam）、`navigation.css`（`.screen-layer`）、`package.json`（新增插件）、Android 工程。

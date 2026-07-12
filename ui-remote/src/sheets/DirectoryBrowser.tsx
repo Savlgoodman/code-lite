@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUp, Folder, FolderPlus, HardDrive, Loader2, Check, X } from "lucide-react";
 import type { ConversationClient, DirectoryListing } from "@code-lite/chat-core";
-import { Sheet, Button } from "../components/ui";
+import { Sheet, Button, Input } from "../components/ui";
 
 interface DirectoryBrowserProps {
   client: ConversationClient | null;
@@ -97,10 +97,9 @@ export function DirectoryBrowser({ client, initialPath, onSelect, onClose }: Dir
         {/* 新建文件夹输入行 */}
         {showNewFolder && (
           <div className="dir-new-folder-row">
-            <input
-              className="form-input"
+            <Input
               value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
+              onValueChange={setNewFolderName}
               onKeyDown={(e) => {
                 if (e.key === "Enter") { e.preventDefault(); handleCreateFolder(); }
                 if (e.key === "Escape") { setShowNewFolder(false); setNewFolderName(""); }

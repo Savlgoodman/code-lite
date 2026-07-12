@@ -3,7 +3,7 @@ import { Bot, FolderOpen, ShieldCheck, Zap, ShieldAlert, Shield } from "lucide-r
 import type { ConversationClient } from "@code-lite/chat-core";
 import { AgentIcon } from "../components/AgentIcon";
 import { DirectoryBrowser } from "./DirectoryBrowser";
-import { Sheet, Button } from "../components/ui";
+import { Sheet, Button, Input } from "../components/ui";
 
 interface AgentOption {
   id: string;
@@ -124,10 +124,9 @@ export function NewConversationSheet({
         <div className="field">
           <label>工作区路径</label>
           <div className="workspace-row">
-            <input
-              className="form-input"
+            <Input
               value={workspace}
-              onChange={(e) => setWorkspace(e.target.value)}
+              onValueChange={setWorkspace}
               placeholder="留空为普通会话（~/.code-lite/workspace）"
               spellCheck={false}
             />

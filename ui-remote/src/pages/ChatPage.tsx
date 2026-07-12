@@ -10,7 +10,7 @@ import { FileRefProvider } from "../components/MessageRenderer";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { ConfigSheet } from "../sheets/ConfigSheet";
 import { ConfigBar } from "../components/ConfigBar";
-import { EmptyState, Button, Sheet, Portal } from "../components/ui";
+import { EmptyState, Button, Sheet, Portal, TextArea } from "../components/ui";
 import { useNav } from "../hooks/useNav";
 import { useDismissable } from "../hooks/useDismissable";
 import {
@@ -428,13 +428,6 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   // 上下文占用（来自 agent.context.updated / run.completed 累积的 usage）
   const usage = view?.contextUsage ?? null;
   const contextUsed = usage?.contextUsedTokens ?? usage?.totalTokens ?? 0;
@@ -563,13 +556,13 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             </div>
           )}
           {draftImageError && <div className="draft-image-error">{draftImageError}</div>}
-          <textarea
+          <TextArea
             ref={textareaRef}
             className="chat-textarea"
             placeholder="输入消息..."
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onValueChange={setInput}
+            onEnter={handleSend}
             rows={1}
           />
           <input
