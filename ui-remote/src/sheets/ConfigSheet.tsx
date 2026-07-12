@@ -60,6 +60,24 @@ export function ConfigSheet({ config, onClose, onSave }: ConfigSheetProps) {
           />
         </div>
       )}
+      {/* 速率（fast mode）— 仅支持的会话显示 */}
+      {local.fastSupported && (
+        <div className="field">
+          <label>速率</label>
+          <button
+            type="button"
+            className="config-fast-row"
+            onClick={() => setLocal({ ...local, fastMode: local.fastMode === "on" ? "off" : "on" })}
+          >
+            <span className="config-fast-desc">
+              {local.fastMode === "on" ? "1.5x 高速" : "1x 普通速率"}
+            </span>
+            <span className={`toggle${local.fastMode === "on" ? " on" : ""}`}>
+              <span className="toggle-knob" />
+            </span>
+          </button>
+        </div>
+      )}
     </Sheet>
   );
 }

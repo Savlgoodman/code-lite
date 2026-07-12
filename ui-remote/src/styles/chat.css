@@ -421,10 +421,16 @@
   to { transform: rotate(360deg); }
 }
 
+.context-ring-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: auto;
+}
+
 .context-ring {
   display: flex;
   align-items: center;
-  margin-right: auto;
   background: none;
   border: none;
   padding: 4px;
@@ -433,6 +439,24 @@
 }
 
 .context-ring:active { background: var(--hover); }
+
+/* 速率开启指示：上下文圆圈右侧的闪电（对齐桌面端样式） */
+.fast-mode-indicator {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: grid;
+  place-items: center;
+  color: var(--text);
+}
+
+.fast-mode-indicator svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
 
 .send-btn {
   width: 34px;

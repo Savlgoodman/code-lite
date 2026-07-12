@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ArrowLeft, ArrowDown, Image, Loader2, Send, Settings, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowDown, Image, Loader2, Send, Settings, Square, X, Zap } from "lucide-react";
 import type { ChatMessage, Session, UserContentBlock } from "@code-lite/protocol";
 import { useConversationState } from "../hooks/useConversations";
 import { connectionManager } from "../services/ConnectionManager";
@@ -327,6 +327,8 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
       modes: [],
       configOptions: [],
       configOptionsRaw: [],
+      fastMode: "off" as const,
+      fastSupported: false,
     };
 
     // 先上传图片附件（base64 走 WS），再把 attachmentId 组成 contentBlocks 随 turn 发出。
@@ -378,6 +380,11 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
     clearDraftImages();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
+    // 速率随 selectedConfig 下发（后端 _fast_mode_from_config 读取），仅支持的会话携带。
+    const selectedConfig = sendConfig.fastSupported
+      ? { fast_mode: sendConfig.fastMode }
+      : undefined;
+
     try {
       await client.sendTurn({
         conversationId: sessionId,
@@ -386,6 +393,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
         accessMode: sendConfig.accessMode,
         modelId: sendConfig.familyId || undefined,
         reasoningEffort: sendConfig.effort,
+        selectedConfig,
         contentBlocks,
       });
     } catch (err) {
@@ -583,26 +591,33 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             >
               {imagesProcessing ? <Loader2 className="draft-image-spin" size={18} /> : <Image size={18} />}
             </button>
-            <button
-              className="context-ring"
-              onClick={() => setShowContextModal(true)}
-              aria-label={hasContextUsage ? `上下文占用 ${contextPercent}%` : "上下文占用"}
-              title="上下文占用"
-            >
-              <svg viewBox="0 0 24 24" width="22" height="22">
-                <circle cx="12" cy="12" r="9" fill="none" stroke="var(--line)" strokeWidth="3.5" />
-                <circle
-                  cx="12" cy="12" r="9" fill="none"
-                  stroke={contextRatio > 0.8 ? "var(--orange)" : "var(--text)"}
-                  strokeWidth="3.5"
-                  strokeDasharray={2 * Math.PI * 9}
-                  strokeDashoffset={2 * Math.PI * 9 * (1 - contextRatio)}
-                  strokeLinecap="round"
-                  transform="rotate(-90 12 12)"
-                  style={{ transition: "stroke-dashoffset 0.3s ease, stroke 0.3s ease" }}
-                />
-              </svg>
-            </button>
+            <div className="context-ring-group">
+              <button
+                className="context-ring"
+                onClick={() => setShowContextModal(true)}
+                aria-label={hasContextUsage ? `上下文占用 ${contextPercent}%` : "上下文占用"}
+                title="上下文占用"
+              >
+                <svg viewBox="0 0 24 24" width="22" height="22">
+                  <circle cx="12" cy="12" r="9" fill="none" stroke="var(--line)" strokeWidth="3.5" />
+                  <circle
+                    cx="12" cy="12" r="9" fill="none"
+                    stroke={contextRatio > 0.8 ? "var(--orange)" : "var(--text)"}
+                    strokeWidth="3.5"
+                    strokeDasharray={2 * Math.PI * 9}
+                    strokeDashoffset={2 * Math.PI * 9 * (1 - contextRatio)}
+                    strokeLinecap="round"
+                    transform="rotate(-90 12 12)"
+                    style={{ transition: "stroke-dashoffset 0.3s ease, stroke 0.3s ease" }}
+                  />
+                </svg>
+              </button>
+              {config?.fastMode === "on" && (
+                <span className="fast-mode-indicator" role="img" aria-label="高速模式已开启" title="高速模式已开启">
+                  <Zap size={14} />
+                </span>
+              )}
+            </div>
             {isRunning ? (
               <button className="send-btn cancel" onClick={handleCancel}>
                 <Square size={18} />
@@ -629,10 +644,16 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
           onSave={async (newConfig) => {
             if (client) {
               try {
+                // 保留会话已有的 selectedConfig，仅覆盖速率，避免整体替换抹掉桌面端设过的项。
+                const selectedConfig: Record<string, unknown> = { ...newConfig.selectedConfig };
+                if (newConfig.fastSupported) {
+                  selectedConfig.fast_mode = newConfig.fastMode;
+                }
                 await client.updateConfig(sessionId, {
                   modelFamily: newConfig.familyId,
                   reasoningEffort: newConfig.effort,
                   accessMode: newConfig.accessMode as any,
+                  selectedConfig,
                 } as any);
               } catch (err) {
                 console.error("[ChatPage] updateConfig failed:", err);

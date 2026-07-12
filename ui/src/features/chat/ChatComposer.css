@@ -318,7 +318,7 @@
 }
 
 .access-mode-chip {
-  max-width: 180px;
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 5px;

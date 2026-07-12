@@ -19,8 +19,31 @@ interface SelectProps {
  */
 export function Select({ value, options, onChange, placeholder = "请选择" }: SelectProps) {
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const selected = options.find((o) => o.value === value);
+
+  // 展开前按可用空间决定向上还是向下弹：面板绝对定位悬浮，
+  // 靠近抽屉底部（如访问模式）空间不足时向上弹，避免被 Sheet 底部/footer 裁剪。
+  const toggle = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      if (next && triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        // 以最近的滚动容器（抽屉 body）为边界，无则退回视口
+        const scroller = rootRef.current?.closest(".modal-body") as HTMLElement | null;
+        const bounds = scroller?.getBoundingClientRect();
+        const bottomEdge = bounds ? bounds.bottom : window.innerHeight;
+        const topEdge = bounds ? bounds.top : 0;
+        const spaceBelow = bottomEdge - rect.bottom;
+        const spaceAbove = rect.top - topEdge;
+        const need = Math.min(240, options.length * 44 + 8);
+        setDropUp(spaceBelow < need && spaceAbove > spaceBelow);
+      }
+      return next;
+    });
+  };
 
   // 点击面板外部时收起
   useEffect(() => {
@@ -35,11 +58,12 @@ export function Select({ value, options, onChange, placeholder = "请选择" }: 
   }, [open]);
 
   return (
-    <div className={`select${open ? " open" : ""}`} ref={rootRef}>
+    <div className={`select${open ? " open" : ""}${dropUp ? " drop-up" : ""}`} ref={rootRef}>
       <button
+        ref={triggerRef}
         type="button"
         className="select-trigger"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
       >

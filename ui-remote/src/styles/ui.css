@@ -243,7 +243,7 @@
 
 .select-panel {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 0;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -251,11 +251,29 @@
   box-shadow: var(--shadow-pop);
   max-height: 240px;
   overflow-y: auto;
+  /* 绝对悬浮，脱离抽屉滚动流，避免最后一个字段的面板被 Sheet 底部/footer 裁剪 */
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: var(--z-modal);
   animation: selectPanelIn var(--dur-fast) var(--ease-standard);
+}
+
+/* 向上弹：贴在触发器上方 */
+.select.drop-up .select-panel {
+  top: auto;
+  bottom: calc(100% + 6px);
+  animation: selectPanelInUp var(--dur-fast) var(--ease-standard);
 }
 
 @keyframes selectPanelIn {
   from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes selectPanelInUp {
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 

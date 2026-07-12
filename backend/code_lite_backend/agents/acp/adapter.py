@@ -304,9 +304,13 @@ class AcpAgentAdapter:
             )
             logger.info("Connection ready for %s (conversation=%s)", self.name, request.conversation_id[:12])
 
-            # 获取 conversation lock（串行化同一会话的 prompt）
+            # 只按会话串行化（同一 conversation 的 prompt 不能并发），
+            # 绝不能再加 connection.prompt_lock：multi_session 模式下同一 runtime 的
+            # 所有会话共享一个 connection，connection 级锁会把不同会话也串起来，
+            # 导致「第一个会话吐完字第二个才开始」。跨会话隔离由 native session
+            # 路由（register_route / AcpSessionRoute，按 sessionId 分发）保证。
             lock = self._runtime_manager.get_turn_lock(request.conversation_id)
-            async with lock, connection.prompt_lock:
+            async with lock:
                 connection_sdk = connection.sdk_connection
                 original_handler = connection._client_handler
 
@@ -318,8 +322,11 @@ class AcpAgentAdapter:
                     workspace=request.workspace,
                 )
 
-                # 直接更新 handler 状态（不需要多路复用——每个 connection 只有一个 handler，
-                # 只服务于一个 conversation）
+                # multi_session 模式下同一 connection 的 handler 会被多个会话共享，
+                # 必须按 native session 注册路由（register_route）做多路复用：每个
+                # session 有独立的 output_queue 和 mapper（去重状态），incoming
+                # session/update 按 sessionId 分发回对应会话，才能并发而不串话。
+                # 下面对 handler 顶层字段的赋值只作为无路由时的兜底，活跃会话一律走路由。
                 if original_handler is not None:
                     baselines = self._runtime_manager.load_text_baselines(request.conversation_id)
                     original_handler.conversation_id = request.conversation_id
