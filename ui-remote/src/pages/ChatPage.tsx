@@ -13,6 +13,7 @@ import { ConfigBar } from "../components/ConfigBar";
 import { EmptyState, Button, Sheet, Portal, TextArea } from "../components/ui";
 import { useNav } from "../hooks/useNav";
 import { useDismissable } from "../hooks/useDismissable";
+import { useNativeRepaint } from "../hooks/useNativeRepaint";
 import {
   IMAGE_ACCEPT,
   MAX_DRAFT_IMAGES,
@@ -81,6 +82,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const draftImagesRef = useRef<DraftImage[]>([]);
   const smoothScrollFrameRef = useRef<number | null>(null);
@@ -89,6 +91,9 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   draftImagesRef.current = draftImages;
 
   const isRunning = client?.isRunning(sessionId) ?? false;
+
+  const sendDisabled = (!input.trim() && draftImages.length === 0) || imagesProcessing;
+  useNativeRepaint(sendButtonRef, `${sendDisabled}|${isRunning}`);
 
   /** 判断是否在底部（8px 容差） */
   const isAtBottom = useCallback((el: HTMLElement) => {
@@ -317,7 +322,8 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
 
   const handleSend = async () => {
     if (!client || imagesProcessing) return;
-    const text = input.trim();
+    // 原生输入法可能先更新 DOM、稍后才触发 React state；发送永远以当前 DOM 真值为准。
+    const text = (textareaRef.current?.value ?? input).trim();
     const images = draftImagesRef.current;
     if (!text && images.length === 0) return;
 
@@ -383,7 +389,10 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
     // 上传成功后再清空输入（失败时保留草稿供重试）
     setInput("");
     clearDraftImages();
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (textareaRef.current) {
+      textareaRef.current.value = "";
+      textareaRef.current.style.height = "auto";
+    }
 
     // 速率随 selectedConfig 下发（后端 _fast_mode_from_config 读取），仅支持的会话携带。
     const selectedConfig = sendConfig.fastSupported
@@ -617,14 +626,16 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
               )}
             </div>
             {isRunning ? (
-              <button className="send-btn cancel" onClick={handleCancel}>
+              <button ref={sendButtonRef} className="send-btn cancel" onClick={handleCancel}>
                 <Square size={18} />
               </button>
             ) : (
               <button
-                className="send-btn"
+                ref={sendButtonRef}
+                className={`send-btn ${sendDisabled ? "is-disabled" : "is-enabled"}`}
                 onClick={handleSend}
-                disabled={(!input.trim() && draftImages.length === 0) || imagesProcessing}
+                disabled={sendDisabled}
+                aria-disabled={sendDisabled}
               >
                 <Send size={18} />
               </button>

@@ -152,9 +152,19 @@ peer-dep `@capacitor/core ^8.3.0`，匹配本项目 8.4.1）。它用原生 HTTP
 
 对策集中在 `components/ui/textFieldValue.ts` 的 `useDefensiveTextValue`（不与 IME 对抗）：
 
-- 组合输入期间（`compositionstart`→`compositionend`）不打断，结束时读真实 DOM 值同步。
-- 非组合期的 `change` / `input` 都取值，并在每次 `input` 后用 `requestAnimationFrame` 兜底读一次
-  「本帧稳定后的 DOM 值」，补上事件里滞后/缺失的尾字；`blur` 时再兜底一次。
+- 浏览器 / PWA 保持完全受控（`value`）；原生 App 使用半受控 `defaultValue`，避免 React 渲染
+  把旧 state 强写回 DOM、打断组合输入。
+- 原生输入框聚焦期间由 DOM 完全持有值，每 32ms 读取一次真实 `el.value` 同步 state，不依赖
+  `input` / `change` / `compositionend` 是否到达 React；`compositionupdate` 和输入事件后的
+  `requestAnimationFrame` 仍作为即时同步路径。
+- 聚焦期间禁止 layout effect 回写 DOM，即使输入法没有派发 `compositionstart`，也不会因 state
+  稍慢一拍而吞掉尾字；失焦时强制复位 composition 状态，并在下一帧对齐外部 value。
+- 消息发送直接读取 textarea 当前 DOM 值，清空时同步清 DOM 与 state，避免最后几个字尚未进入
+  state 时发送或清空不完整。
+
+真机上若出现「输入后按钮仍灰，但点击可发送；点空白或输入标点再删除才激活」，说明触摸按钮时
+先由 `blur` 把 DOM 值补进 state、随后同一次触摸才触发 `click`，本质仍是输入状态未实时同步，
+不能按纯 CSS 重绘问题处理。
 
 它被 `Input`（单行）与 `TextArea`（多行）两个原子共用。**收文本值一律用这两个原子，
 不要用裸 `<input>` / `<textarea>`**。`TextArea` 的 `onEnter` 只在非组合期回车触发，避免输入法

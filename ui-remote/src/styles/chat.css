@@ -473,8 +473,12 @@
   transition: background var(--dur-fast);
 }
 
-.send-btn:disabled { background: var(--line); cursor: not-allowed; }
-.send-btn:active:not(:disabled) { background: var(--accent-pressed); }
+/* 安卓 WebView 可能保留旧的 :disabled 绘制结果。启用态也使用显式 class，并放在
+   禁用规则之后覆盖陈旧的伪类样式，使视觉状态只跟随 React 的 sendDisabled。 */
+.send-btn:disabled,
+.send-btn.is-disabled { background: var(--line); cursor: not-allowed; }
+.send-btn.is-enabled { background: var(--accent); cursor: pointer; }
+.send-btn.is-enabled:active { background: var(--accent-pressed); }
 .send-btn.cancel { background: var(--orange); }
 .send-btn.cancel:active { background: var(--orange-pressed); }
 
