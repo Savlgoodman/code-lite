@@ -1,4 +1,5 @@
 import { useRef, type RefObject } from "react";
+import { isNativeApp } from "../../lib/environment";
 
 /**
  * useDefensiveTextValue — 受控文本输入的防御式取值逻辑（input 与 textarea 共用）。
@@ -9,9 +10,13 @@ import { useRef, type RefObject } from "react";
  *
  * 对策（不与 IME 对抗）：
  * - 组合输入期间（compositionstart→compositionend）不打断，结束时读真实 DOM 值同步。
- * - 非组合期的 change/input 都取值；并在每次 input 后用 rAF 兜底读一次「本帧稳定后的
- *   DOM 值」，补上事件里滞后/缺失的尾字。
+ * - 非组合期的 change/input 都取值。
  * - blur 时再兜底一次。
+ *
+ * rAF 兜底（每次 input 后读「本帧稳定后的 DOM 值」补齐滞后尾字）**只在原生 App 启用**：
+ * 桌面浏览器 / PWA 的受控 input 从不丢字，若也每帧排 rAF 回写，会与 React 受控重渲染的
+ * 时序错位（rAF 读到过期 valueRef 又写回），表现为「dev 端连续打字被吞 / 光标跳动」。
+ * 这是本模块引入后 dev 端打字异常的根因，故按环境 gate。
  *
  * 返回一组事件处理器，展开到 <input>/<textarea> 即可。ref 必须指向该元素。
  */
@@ -23,9 +28,11 @@ export function useDefensiveTextValue<T extends HTMLInputElement | HTMLTextAreaE
   const composingRef = useRef(false);
   const valueRef = useRef(value);
   valueRef.current = value;
+  const native = isNativeApp();
 
-  // 读「下一帧稳定后」的真实 DOM 值，补齐事件里滞后/缺失的字符。
+  // 读「下一帧稳定后」的真实 DOM 值，补齐事件里滞后/缺失的字符（仅原生 App）。
   const reconcileNextFrame = () => {
+    if (!native) return;
     requestAnimationFrame(() => {
       const el = ref.current;
       if (!el || composingRef.current) return;
