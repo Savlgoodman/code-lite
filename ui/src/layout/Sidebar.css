@@ -43,6 +43,25 @@
   color: var(--text-primary);
 }
 
+.nav-command > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 14px;
+}
+
+.nav-tool-item {
+  min-height: 30px;
+}
+
 .search-box {
   height: 34px;
   display: flex;

@@ -6,6 +6,7 @@ import { AgentRuntimeSettings } from "./AgentRuntimeSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ArchivedSessionsSettings } from "./ArchivedSessionsSettings";
 import { LogsSettings } from "./LogsSettings";
+import { ImageProvidersSettings } from "./ImageProvidersSettings";
 import { ModelProvidersSettings } from "./ModelProvidersSettings";
 import { RemoteControlSettings } from "./RemoteControlSettings";
 import { SettingsLayout } from "./SettingsLayout";
@@ -14,11 +15,12 @@ import "./SettingsPage.css";
 
 export function SettingsPage({
   archivedSessions,
+  initialSection,
   onBack,
   onDeleteArchivedSession,
   onRestoreArchivedSession
 }: SettingsPageProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? "appearance");
 
   return (
     <SettingsLayout activeSection={activeSection} onBack={onBack} onSectionChange={setActiveSection}>
@@ -26,6 +28,7 @@ export function SettingsPage({
       {activeSection === "agents" ? <AgentRuntimeSettings /> : null}
       {activeSection === "acp" ? <AcpConnectionSettings /> : null}
       {activeSection === "providers" ? <ModelProvidersSettings /> : null}
+      {activeSection === "imageProviders" ? <ImageProvidersSettings /> : null}
       {activeSection === "logs" ? <LogsSettings /> : null}
       {activeSection === "archive" ? (
         <ArchivedSessionsSettings
