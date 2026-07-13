@@ -1,0 +1,106 @@
+/**
+ * imageHttp — 图片生成 API 的 HTTP seam（按运行环境分流）
+ *
+ * 与 aiClient/httpTransport 同理，直连供应商会撞 CORS，三种环境各走一条路：
+ * - dev（浏览器）：经同源 /ai-proxy 中间件转发 fetch（JSON 与图片下载都走它）。
+ * - 原生（Android/iOS）：@capacitor/core 内置 CapacitorHttp 原生 HTTP，绕开 WebView CORS，
+ *   JSON 请求/响应，并能拿到 HTTP status（流式插件拿不到）。
+ * - PWA / 生产静态部署：入口已由 isAiAvailable() 禁用，不会走到这里。
+ *
+ * 生图接口返回一次性 JSON（非 SSE 流），故用 CapacitorHttp 而非流式插件。
+ * 详见 docs/design/0713-IMAGE-GENERATION.md 第 10 节。
+ */
+
+import { CapacitorHttp } from "@capacitor/core";
+import type { ImageJsonHttp } from "@code-lite/image-gen";
+import { isNativeApp } from "../lib/environment";
+
+/** dev/web 分支：把真实 URL 映射到同源 /ai-proxy 转发地址。 */
+function proxyUrl(url: string): string {
+  return `/ai-proxy/${url}`;
+}
+
+function authHeaders(apiKey: string): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey.trim()) headers["Authorization"] = `Bearer ${apiKey.trim()}`;
+  return headers;
+}
+
+/** 发一次 JSON POST，返回解析后的 JSON 对象；非 2xx 抛错。 */
+async function postJson(url: string, apiKey: string, body: unknown): Promise<unknown> {
+  if (isNativeApp()) {
+    const resp = await CapacitorHttp.request({
+      url,
+      method: "POST",
+      headers: authHeaders(apiKey),
+      data: body,
+    });
+    if (resp.status < 200 || resp.status >= 300) {
+      const detail = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+      throw new Error(mapStatusError(resp.status, detail));
+    }
+    // CapacitorHttp 会按 Content-Type 自动解析 JSON；字符串则手动 parse。
+    return typeof resp.data === "string" ? safeParse(resp.data) : resp.data;
+  }
+  const resp = await fetch(proxyUrl(url), {
+    method: "POST",
+    headers: authHeaders(apiKey),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error(mapStatusError(resp.status, detail));
+  }
+  return resp.json();
+}
+
+function safeParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`供应商返回内容无法解析${text ? `：${text.slice(0, 200)}` : ""}`);
+  }
+}
+
+function mapStatusError(status: number, detail: string): string {
+  const snippet = detail ? `：${detail.slice(0, 200)}` : "";
+  if (status === 401) return "API Key 无效";
+  if (status === 402) return "供应商余额不足";
+  if (status === 403) return "内容安全策略拦截，请调整提示词后重试";
+  if (status === 429) return "请求过于频繁，请稍后重试";
+  return `请求失败 (${status})${snippet}`;
+}
+
+/**
+ * 下载图片直链为 Blob（供应商返回 response_format=url 时用）。
+ * dev 经 /ai-proxy，原生用 CapacitorHttp responseType=blob。
+ */
+export async function downloadImage(url: string, apiKey: string): Promise<Blob> {
+  if (isNativeApp()) {
+    const resp = await CapacitorHttp.request({
+      url,
+      method: "GET",
+      headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
+      responseType: "blob",
+    });
+    if (resp.status < 200 || resp.status >= 300) {
+      throw new Error(`图片下载失败 (${resp.status})`);
+    }
+    // 原生 blob 响应体是 base64 字符串。
+    const base64 = typeof resp.data === "string" ? resp.data : "";
+    const mime = String(resp.headers?.["Content-Type"] ?? resp.headers?.["content-type"] ?? "image/png").split(";")[0];
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime || "image/png" });
+  }
+  const resp = await fetch(proxyUrl(url), {
+    method: "GET",
+    headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
+  });
+  if (!resp.ok) throw new Error(`图片下载失败 (${resp.status})`);
+  return resp.blob();
+}
+
+/** 提供给共享包直连客户端的 JSON HTTP 实现。 */
+export const imageJsonHttp: ImageJsonHttp = { postJson };
