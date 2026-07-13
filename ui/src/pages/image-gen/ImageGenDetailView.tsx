@@ -203,16 +203,16 @@ export function ImageGenDetailView({ state, onBack }: ImageGenDetailViewProps) {
                   />
                 </div>
                 <div className="imggen-reference-strip">
-                  {(record?.referenceImages ?? []).length === 0 ? (
+                  {state.activeReferenceImages.length === 0 ? (
                     <span className="imggen-hint">无参考图，生成走文生图；添加后走图生图。</span>
                   ) : (
-                    record?.referenceImages.map((image) => (
+                    state.activeReferenceImages.map((image) => (
                       <div className="imggen-reference-thumb" key={image.id}>
                         <AsyncImage alt="参考图" src={image.url} />
                         <button
                           className="imggen-thumb-delete"
-                          onClick={() => void state.deleteReference(image.id)}
-                          title="删除参考图"
+                          onClick={() => state.removeReference(image.id)}
+                          title="移除参考图"
                           type="button"
                         >
                           <Trash2 size={12} />
