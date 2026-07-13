@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, Shield, ShieldCheck, Eye, User, X } from "lucide-react";
+import { RefreshCw, Shield, ShieldCheck, Eye, User, X, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { getLocalTransport } from "../../services/agentClient";
 import "./RemoteControlSettings.css";
+
+// 中继连接状态（与后端 remote_bridge._status 对齐）。
+type RelayStatus = "disabled" | "connecting" | "connected" | "failed";
 
 interface RemoteConfig {
   enabled: boolean;
@@ -10,6 +13,8 @@ interface RemoteConfig {
   relayUrl: string;
   roomId: string;
   defaultReadonly?: boolean;
+  status?: RelayStatus;
+  statusDetail?: string;
 }
 
 interface RemotePeer {
@@ -24,6 +29,8 @@ export function RemoteControlSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [peers, setPeers] = useState<RemotePeer[]>([]);
+  const [status, setStatus] = useState<RelayStatus>("disabled");
+  const [statusDetail, setStatusDetail] = useState("");
 
   const refreshPeers = async () => {
     try {
@@ -42,6 +49,8 @@ export function RemoteControlSettings() {
       const result = await transport.request<RemoteConfig>("remote.config.get", {});
       setConfig(result);
       setRelayUrl(result.relayUrl || "ws://localhost:18766/ws");
+      setStatus(result.status ?? "disabled");
+      setStatusDetail(result.statusDetail ?? "");
       setLoading(false);
       await refreshPeers();
     })();
@@ -50,9 +59,13 @@ export function RemoteControlSettings() {
   useEffect(() => {
     const transport = getLocalTransport();
     const unsub = transport.onEvent((event) => {
-      const type = (event as unknown as { type?: string }).type;
+      const evt = event as unknown as { type?: string; status?: RelayStatus; detail?: string };
+      const type = evt.type;
       if (type === "remote.peer.joined" || type === "remote.peer.pending" || type === "remote.peer.left") {
         void refreshPeers();
+      } else if (type === "remote.status") {
+        setStatus(evt.status ?? "disabled");
+        setStatusDetail(evt.detail ?? "");
       }
     });
     return unsub;
@@ -111,6 +124,20 @@ export function RemoteControlSettings() {
     setConfig(result);
   };
 
+  // 手动重连：放弃态（failed）下后端已停止重试，需前端主动触发一次 stop+start。
+  // remote.config.update 带 enabled:true 会在后端重启桥接（见 ws.py），
+  // 状态随后经 remote.status 事件回流刷新此处 UI。
+  const handleReconnect = async () => {
+    setStatus("connecting");
+    setStatusDetail("");
+    const transport = getLocalTransport();
+    await transport.request("remote.config.update", {
+      enabled: true,
+      relayUrl: relayUrl || config?.relayUrl || "",
+      pairKey: config?.pairKey || "",
+    });
+  };
+
   // 配对深链：relay 与 name 做 URL 编码，保留真实中继地址，供 ui-remote 扫码解析。
   const effectiveRelayUrl = relayUrl || config?.relayUrl || "";
   const pairUrl = config?.pairKey && effectiveRelayUrl
@@ -160,6 +187,42 @@ export function RemoteControlSettings() {
 
       {config?.enabled && (
         <>
+          {/* ─── 连接状态 ─── */}
+          <div className={`rc-status rc-status-${status}`}>
+            <div className="rc-status-icon">
+              {status === "connecting" && <Loader2 size={18} className="rc-status-spin" />}
+              {status === "connected" && <CheckCircle2 size={18} />}
+              {status === "failed" && <AlertTriangle size={18} />}
+              {status === "disabled" && <AlertTriangle size={18} />}
+            </div>
+            <div className="rc-status-text">
+              <span className="rc-status-title">
+                {status === "connecting" && "正在连接中继服务器..."}
+                {status === "connected" && "已连接到中继服务器"}
+                {status === "failed" && "无法连接到中继服务器"}
+                {status === "disabled" && "未连接"}
+              </span>
+              {status === "failed" && (
+                <span className="rc-status-detail">
+                  已停止自动重连，请检查中继地址是否正确、中继服务器是否已启动，然后手动重连。
+                </span>
+              )}
+              {status === "connecting" && statusDetail && (
+                <span className="rc-status-detail">{statusDetail}</span>
+              )}
+            </div>
+            {status === "failed" && (
+              <button
+                className="settings-secondary-button"
+                onClick={() => void handleReconnect()}
+                type="button"
+              >
+                <RefreshCw size={14} />
+                重新连接
+              </button>
+            )}
+          </div>
+
           {/* ─── 中继配置 ─── */}
           <div className="settings-card">
             <h3 style={{ margin: "0 0 4px", color: "var(--text-primary)", fontSize: "15px", fontWeight: 600 }}>

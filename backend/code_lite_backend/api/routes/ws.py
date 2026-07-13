@@ -782,12 +782,15 @@ async def ws_endpoint(ws: WebSocket) -> None:
             elif method == "remote.config.get":
                 bridge = services.remote_bridge
                 cfg = bridge.config if bridge else None
+                snapshot = bridge.status_snapshot() if bridge else {"status": "disabled", "detail": ""}
                 await _send(ws, _envelope("result", requestId=request_id, payload={
                     "enabled": cfg.enabled if cfg else False,
                     "relayUrl": cfg.relay_url if cfg else "",
                     "pairKey": cfg.pair_key if cfg else "",
                     "roomId": cfg.room_id if cfg else "",
                     "defaultReadonly": cfg.default_readonly if cfg else False,
+                    "status": snapshot["status"],
+                    "statusDetail": snapshot["detail"],
                 }))
             elif method == "remote.config.update":
                 bridge = services.remote_bridge
