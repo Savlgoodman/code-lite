@@ -98,6 +98,40 @@ class RemoteBridgeHandshakeTest(unittest.IsolatedAsyncioTestCase):
             joined = [e for e in bus.events if e.get("type") == "remote.peer.joined"]
             self.assertEqual([e["peerId"] for e in joined], ["abc123"])
 
+    async def test_gives_up_and_reports_failed_after_window(self) -> None:
+        """中继长期不可达时，_run 必须在放弃窗口后停止重连并置 failed，
+        而不是无限重试刷屏。用极小窗口 + connect 恒抛异常锁定这一行为。"""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            bridge, bus = self._make_bridge(Path(d))
+            # 放弃窗口设为 0：首次失败即超窗 → 一次尝试后放弃；退避设为 0 避免拖慢测试。
+            bridge._GIVE_UP_WINDOW = 0.0
+            bridge._BACKOFF_INITIAL = 0.0
+
+            import code_lite_backend.services.remote_bridge as rb
+
+            attempts = 0
+
+            def _boom(*a, **k):
+                nonlocal attempts
+                attempts += 1
+                raise OSError("did not receive a valid HTTP response")
+
+            orig = rb.websockets.connect
+            rb.websockets.connect = _boom
+            try:
+                await bridge._run()
+            finally:
+                rb.websockets.connect = orig
+
+            # 放弃后停止重试：只尝试一次，_running 置 False，状态 failed。
+            self.assertEqual(attempts, 1)
+            self.assertFalse(bridge._running)
+            self.assertEqual(bridge.status, "failed")
+            failed = [e for e in bus.events if e.get("type") == "remote.status" and e.get("status") == "failed"]
+            self.assertEqual(len(failed), 1)
+            self.assertEqual(failed[0]["detail"], "无法连接到中继服务器")
+
     async def test_real_rejection_raises(self) -> None:
         """真正的拒绝（room_has_host 等）必须抛异常，交由 _run 退避重连，
         而不是被当成 peer.joined 吞掉。"""

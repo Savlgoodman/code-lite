@@ -206,10 +206,33 @@ class RemoteBridge:
         self._task: asyncio.Task | None = None
         self._running = False
         self._remote_peers: dict[str, _PeerSession] = {}  # peerId -> peer session
+        # 连接状态机（供桌面端"远程控制"页展示）：
+        #   disabled  未启用远程控制
+        #   connecting 正在尝试连接中继（含重连退避期间）
+        #   connected 已连上中继（收到 ready）
+        #   failed    连续失败超过放弃窗口后停止重试（需用户手动重连）
+        self._status: str = "disabled"
+        self._status_detail: str = ""
 
     @property
     def config(self) -> RemoteBridgeConfig:
         return self._config
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    def status_snapshot(self) -> dict[str, Any]:
+        """当前中继连接状态（供 remote.config.get 初始渲染与事件对齐）。"""
+        return {"status": self._status, "detail": self._status_detail}
+
+    def _set_status(self, status: str, detail: str = "") -> None:
+        """更新连接状态并向本地前端广播（仅在变化时广播，避免刷屏）。"""
+        if status == self._status and detail == self._status_detail:
+            return
+        self._status = status
+        self._status_detail = detail
+        self._notify_local({"type": "remote.status", "status": status, "detail": detail})
 
     def peer_list(self) -> list[dict[str, Any]]:
         """当前已接入设备列表（供设置页展示 + 踢出，0710 第 6 节）。"""
@@ -309,10 +332,12 @@ class RemoteBridge:
 
     async def start(self) -> None:
         if not self._config.enabled or not self._config.pair_key:
+            self._set_status("disabled")
             return
         if self._running:
             return
         self._running = True
+        self._set_status("connecting")
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
@@ -328,21 +353,56 @@ class RemoteBridge:
                 pass
         if self._ws:
             await self._ws.close()
+        # stop() 是显式关闭（用户关开关/改配置/重连），回到 disabled，
+        # 让下一次 start() 的 connecting 状态从干净起点开始。
+        self._set_status("disabled")
+
+    # 重连退避参数：首次失败后 2s 起，指数翻倍到 30s 上限；连续失败累计超过
+    # GIVE_UP_WINDOW（2 分钟）后停止重试并置 failed，避免中继长期不可达时刷屏。
+    _BACKOFF_INITIAL = 2.0
+    _BACKOFF_MAX = 30.0
+    _GIVE_UP_WINDOW = 120.0
 
     async def _run(self) -> None:
+        backoff = self._BACKOFF_INITIAL
+        # 连续失败的起点（成功连上会重置）。累计超过 _GIVE_UP_WINDOW 则放弃。
+        first_failure_at: float | None = None
         while self._running:
-            started = time.monotonic()
             try:
                 await self._connect_and_run()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.warning("remote bridge disconnected: %s", e)
-            # 退避对所有退出路径生效（含正常 return），保证连接尝试之间至少间隔 5s，
-            # 任何单点回归都不会把中继/CPU 打爆（reconnect storm 兜底）。
-            if self._running:
-                elapsed = time.monotonic() - started
-                await asyncio.sleep(max(0.0, 5.0 - elapsed))
+                detail = str(e)
+            else:
+                # 正常返回（房间静默/对端断开等）也算一次连接结束，按失败路径退避重连。
+                detail = ""
+            if not self._running:
+                break
+
+            # 本次会话真正连上过（收到过 ready）：重置退避与放弃窗口，
+            # 让"连上后偶发掉线"按首次失败重新计时，而不是继承上一轮的长退避。
+            if self._status == "connected":
+                backoff = self._BACKOFF_INITIAL
+                first_failure_at = None
+
+            now = time.monotonic()
+            if first_failure_at is None:
+                first_failure_at = now
+            # 从首次失败起累计已重试时长；超过窗口则放弃，停止刷屏式重连。
+            if now - first_failure_at >= self._GIVE_UP_WINDOW:
+                logger.error(
+                    "remote bridge giving up after %.0fs of failed relay connections; "
+                    "manual reconnect required", now - first_failure_at,
+                )
+                self._running = False
+                self._set_status("failed", "无法连接到中继服务器")
+                break
+
+            self._set_status("connecting", detail)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, self._BACKOFF_MAX)
 
     async def _connect_and_run(self) -> None:
         logger.info("connecting to relay %s (room %s)", self._config.relay_url, self._config.room_id[:12])
@@ -366,6 +426,7 @@ class RemoteBridge:
                 ftype = frame.get("type")
                 if ftype == "ready":
                     logger.info("connected to relay")
+                    self._set_status("connected")
                     break
                 if ftype == "peer.joined":
                     # 先缓存，待 self._ws 就位后统一登记（保持与主循环一致的 peer 会话）。
