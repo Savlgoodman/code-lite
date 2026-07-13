@@ -8,7 +8,8 @@
 
 1. `AGENTS.md`（仓库总规范、双端同步约定、目录结构）
 2. `ui/AGENTS.md`（桌面前端目录分层、色彩令牌、设置页规范）
-3. `ui-remote/AGENTS.md`（远端开发约定，本轮暂不落地，仅预留接口一致性）
+3. `ui-remote/AGENTS.md`（远端开发约定：目录分层、Sheet、导航栈、AI 环境可用性、色彩令牌）
+7. `docs/design/0712-REMOTE-NAV-AND-STREAMING.md`（远端导航栈与 AI 三环境流式策略，生图沿用同一套环境分流）
 4. `docs/design/0703-RUNTIME-MODEL-PROVIDER.md`（模型供应商配置：供应商->模型结构、密钥遮蔽、后端代理外部请求）
 5. `docs/design/0707-AGENT-MULTIMODAL-COMPOSER.md`（多模态输入与附件存储，参考图片上传复用其思路）
 6. `docs/api/gpt-image` 兼容文档（GPT Image 2 的 `/v1/images/generations` 与 `/v1/images/edits` 接口格式）
@@ -554,3 +555,122 @@ CSS 用 grid：外层 `grid-template-rows: 1fr auto`（上部工作区 + 底部�
 3. 列表页标题字数 N（暂定 24，与会话标题一致）。
 4. `n>1` 时封面取「最后一张」还是「第一张」，本文取最后一张（与「展示最后一张生成图」一致）。
 5. 是否需要在总览/计费里统计图片生成用量，本轮不纳入。
+
+---
+
+## 10. 远程端（ui-remote）设计
+
+远程端与桌面端最大的不同：**生图是纯前端应用，不走 code-lite 后端**，与远端 AI 对话模块
+（`aiClient` / `AiProviderStore` / `AiConversationStore`）同构——直连供应商、按环境分流、
+配置与记录存本地。改动前必读 `ui-remote/AGENTS.md`。
+
+### 10.1 环境分流（沿用 AI 对话的判定）
+
+生图与 AI 对话一样直连大模型 API，可用性取决于运行环境，**统一走 `lib/environment.ts`
+的 `isAiAvailable()`**，不新增判定点：
+
+| 环境 | 生图是否可用 | 请求走向 |
+|------|------------|---------|
+| 原生 App | 可用 | `@capacitor/core` 内置 `CapacitorHttp`（原生 HTTP 绕 WebView CORS，JSON 请求/响应，能拿 status） |
+| dev（Vite） | 可用 | 经同源 `/ai-proxy` 中间件转发 fetch（已支持 JSON body） |
+| PWA / 生产静态 | 不可用 | 入口 gate 掉，显示「仅 App 可用」 |
+
+**为什么原生分支用 `CapacitorHttp` 而非 `capacitor-stream-http-v2`**：生图接口返回的是
+**一次性 JSON**（`data[].url` 或 `b64_json`），不是 SSE 流，不需要 chunk 级流式；而
+`CapacitorHttp` 是 Capacitor 内置、支持 JSON POST 并能拿到 HTTP status（流式插件拿不到），
+更适合非流式请求。提示词优化（chat/completions 非流式，取完整响应）也走 `CapacitorHttp`。
+
+### 10.2 参考图统一走 base64 JSON（不引入 multipart 插件）
+
+桌面端参考图走后端 `/v1/images/edits`（multipart）。远程端纯前端，multipart 二进制在原生
+插件下不便发送，且 Capacitor 8 生态缺乏稳定的原生 multipart 上传插件。**远程端参考图改走
+JSON + base64**：像 AI 多模态那样把参考图编码为 base64 放进请求体，避开 multipart，让
+dev/原生两条路都用同一条 JSON 请求。
+
+- 无参考图：`POST {baseUrl}/images/generations`（JSON）。
+- 有参考图：`POST {baseUrl}/images/edits` 的 JSON 变体，`image` 字段传 base64（或 data URL，
+  依供应商）；若供应商只认 multipart 而报错，回落为可读错误提示，并允许纯文生图继续。
+
+### 10.3 共享包扩展：直连传输实现
+
+`@code-lite/image-gen` 已定义 `ImageGenTransport` 接口与 `createImageGenClient`（桌面端注入的
+是"走 backend"的实现）。远程端需要一个**"直连供应商"的实现**，因此在包内新增一个
+**直连客户端** `createDirectImageGenClient(deps)`，与走后端的 `createImageGenClient` 并存：
+
+- 入参 `deps` 注入：`httpJson(url, init)`（由远端按环境用 CapacitorHttp / ai-proxy fetch 实现）、
+  以及供应商解析函数（远端从本地 store 取 baseUrl/apiKey）。
+- 暴露 `generate(providerConn, req)`、`optimizePrompt(textModelConn, req)` 等纯请求组装 +
+  响应解析方法，返回 `{ images: {b64?/url?, revisedPrompt?}[] }` 这种"裸结果"，落盘/存储交给
+  远端（IndexedDB）。
+- 请求体构造复用 `request.ts` 的校验函数（`buildGenerateBody` 等），保证与桌面端参数校验一致。
+
+这样"生图核心"仍集中在共享包，远端只注入传输与供应商解析，桌面端维持走后端不变。
+
+### 10.4 图片存储：IndexedDB Blob
+
+生图产物比对话缩略图大，base64 全塞 `localStorage`（5-10MB 上限）会很快溢出。远端图片二进制
+存 **IndexedDB**（可存几百 MB），记录 JSON（走 Preferences/localStorage）里只存图片 id 与元数据，
+展示时按 id 从 IndexedDB 取 `Blob` 转 `objectURL`。
+
+新增 `services/imageBlobStore.ts`：
+- `putImage(id, blob)` / `getImage(id): Promise<Blob | null>` / `deleteImage(id)` / `deleteMany(ids)`。
+- 一个 object store `images`，key 为图片 id。
+- 供应商返回 `url` 时，前端 fetch 下载为 Blob 再存；返回 `b64_json` 时解码为 Blob 再存。
+  统一存 Blob，展示层不关心来源。
+
+### 10.5 本地存储：供应商与记录
+
+仿照 `AiProviderStore` / `AiConversationStore`（Preferences + localStorage 双写 + subscribe）：
+
+- **`services/ImageProviderStore.ts`**：图片供应商（仅 url + apiKey + 可选 name / defaultModel），
+  与 AI 文本供应商分开存（键 `image-providers`）。`subscribe/loadProviders/saveProvider/removeProvider`。
+- **`services/ImageGenStore.ts`**：生图任务与批次记录。
+  - 索引键 `image-records` 存任务元数据列表（id/title/createdAt/updatedAt/coverImageId/runCount）。
+  - 每个任务的 runs 单独存 `image-record-runs-{id}`（每个 run 含参数快照、图片 id 列表、参考图 id 列表、error）。
+  - 图片二进制在 `imageBlobStore`；删除任务时级联删除其 runs 键与 IndexedDB 里的图片。
+  - `getSnapshot` 返回任务元数据列表，供 `useSyncExternalStore`。
+
+提示词优化复用远端**已配置的 AI 文本模型**（`AiProviderStore` 的 model + provider），不新增文本
+供应商配置——与桌面端"复用产品级文本模型"对应。
+
+### 10.6 UI 结构与入口
+
+**入口（按用户交互）**：在 AI Tab 右下角 FAB 上方增加一个小的「切换」按钮（风格类似远程页
+最近/排序切换按钮，icon 用图片图标），点击切到「生图模式」：此时 AI Tab 的列表区展示**生图
+历史任务卡片**，FAB 的加号变为「新建生图任务」；再点切换按钮（icon 变回聊天）切回 AI 对话列表。
+
+即：AI Tab 内部有 `aiMode: "chat" | "image"` 本地态，两种模式复用同一个 Tab 容器与 FAB 位置，
+只切换列表内容与新建动作。这样不新增底部 Tab，符合"加号上方切换按钮"的描述。
+
+**页面（走导航栈，新增 `ScreenEntry` 变体）**：
+
+1. **生图历史列表**：不单独作为整页——它就是 AI Tab 在 image 模式下的列表（方形/横条图卡，
+   封面取任务最后一张图，标题取提示词前 N 字）。点卡片 `nav.push({ kind: "imageGen", recordId })`。
+   FAB 新建：先建空任务再 push。
+2. **`imageGen` 生成页**（新 `ScreenEntry`）：移动端竖向布局（与桌面端左右分栏不同）：
+   - 顶部 header：返回 + 标题。
+   - 参考图区（横向缩略图条，可加/删）。
+   - 生成图展示区（当前选中批次的图，点击放大预览，复用 AI 页的 Portal lightbox）。
+   - 底部输入/参数区：提示词 `TextArea` + 「优化」按钮（选文本模型）、供应商/模型/尺寸/画质/数量
+     用 `Select`、生成主按钮。
+   - 历史批次条：横向滚动缩略图，点击恢复该批次参数/提示词/参考图/生成图（与桌面端一致）。
+3. **图片供应商配置**（新 `ScreenEntry`，如 `imageProviders` + `imageProviderForm`）：挂在
+   设置页 AI 段落下新增一项「图片生成供应商」，仅 url + apiKey（+ 名称/默认模型）；表单基于
+   `Input`，列表基于现有 `ai-provider-card` 样式复用。同样受 `isAiAvailable()` gate。
+
+**移动端布局取舍**：桌面端是"左参数/右上参考/右下生成/底部历史"的宽屏四区；移动端竖屏改为
+自上而下"参考图 → 生成图 → 输入参数 → 历史条"的纵向堆叠，生成图区占主要高度，历史条固定
+高度横向滚动，参数区可随内容展开。所有颜色走 `tokens.css` 令牌，弹层基于 `Sheet`，全屏页经
+导航栈 + `ScreenTransition`。
+
+### 10.7 远程端落地步骤
+
+1. 共享包：新增 `createDirectImageGenClient`（直连实现）与裸结果类型，复用 `request.ts` 校验。
+2. `services/imageBlobStore.ts`（IndexedDB）+ `ImageProviderStore` + `ImageGenStore`（本地持久化）。
+3. `services/imageHttp.ts`：按环境分流的 JSON 请求 seam（dev → `/ai-proxy` fetch；原生 →
+   `CapacitorHttp`），供直连客户端注入。
+4. hooks：`useImageProviders`、`useImageRecords`（订阅 store 快照）。
+5. AI Tab 加 `aiMode` 切换按钮与 image 模式列表；新增生成页与供应商配置页的 `ScreenEntry` +
+   `NavHost` case；设置页 AI 段落加入口（受 `isAiAvailable()` gate）。
+6. 样式加进 `styles/` 对应文件（新建 `image-gen` 段落或并入 `chat.css`/`lists.css`），颜色走令牌。
+7. `npm run build`（tsc strict + vite）通过；原生分支与参考图 base64 须真机验证。
