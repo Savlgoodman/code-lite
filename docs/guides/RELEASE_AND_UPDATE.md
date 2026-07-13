@@ -4,7 +4,7 @@
 
 完整编译和发布步骤见 `docs/guides/BUILD_AND_RELEASE.md`。
 
-## 版本号
+## 版本模型
 
 项目使用 SemVer，例如 `0.1.2`：
 
@@ -12,7 +12,15 @@
 2. `0.x.0`：较大功能阶段，例如新增自动更新或执行网关。
 3. `x.0.0`：稳定发布后再使用。
 
-根目录 `VERSION` 是版本号的唯一手工维护入口。各工具链仍需要静态版本字段，所以 `package.json`、Tauri、Cargo、Python backend 和锁文件中的版本由脚本派生同步。
+根目录 `VERSION` 是发行版本的唯一手工维护入口。各工具链仍需要静态版本字段，所以根目录、桌面 UI、Remote UI、Tauri、Cargo、Python backend 和锁文件中的版本由脚本派生同步。
+
+每次正式构建还会自动生成 `build-YYYY-MM-DD-HH-mm` 格式的构建标识。用户看到的完整版本格式为：
+
+```text
+0.2.1 build-2026-07-13-23-49
+```
+
+发行版本表示兼容性和发布节点，构建标识用于区分同一发行版本的多次 PWA、APK 或桌面构建。构建标识按 `Asia/Shanghai` 时区生成，不写回 `VERSION`。多个构建命令需要严格复用同一个标识时，应在这些命令前设置同一个 `CODE_LITE_BUILD_ID`。
 
 设置新版本：
 
@@ -33,6 +41,26 @@ npm run version:sync
 ```
 
 `release.ps1` 和 `scripts/package-windows.ps1` 会在打包前自动同步版本。
+
+## 各端构建版本
+
+1. Windows 桌面端和 backend 的包版本保持 SemVer，完整构建版本显示在桌面端关于页。
+2. Android 的 `versionName` 保持 SemVer，`versionCode` 使用构建时间派生的单调递增整数，完整构建版本显示在 Remote 关于页。
+3. PWA 在 Vite 编译期静态写入完整版本，并额外生成 `dist/build-info.json` 供部署检查。
+
+PWA / Web 构建：
+
+```bash
+bash scripts/build-remote.sh
+```
+
+Android APK 构建：
+
+```powershell
+.\build-apk.ps1 -NoProxy
+```
+
+完整字段映射、环境变量和验证方式见 `docs/guides/BUILD_AND_RELEASE.md`。
 
 ## 打包
 
@@ -59,7 +87,7 @@ src-tauri/target/release/bundle/msi/
 
 当前阶段推荐手动更新：
 
-1. 更新版本号，例如 `npm run version:set -- 0.1.2`，或修改 `VERSION` 后运行 `npm run version:sync`。
+1. 更新发行版本，例如 `npm run version:set -- 0.1.2`，或修改 `VERSION` 后运行 `npm run version:sync`。
 2. 运行验证命令。
 3. 执行 `npm run package:win`。
 4. 发布新的 `.exe` 或 `.msi`。
