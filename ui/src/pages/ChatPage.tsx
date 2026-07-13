@@ -24,7 +24,11 @@ import { formatJson } from "../lib/formatters";
 import { Sidebar } from "../layout/Sidebar";
 import { OverviewPage } from "./OverviewPage";
 import { SettingsPage } from "./SettingsPage";
+import { ImageGenListPage } from "./image-gen/ImageGenListPage";
+import { ImageGenDetailPage } from "./image-gen/ImageGenDetailPage";
+import type { SettingsSection } from "./settings/types";
 import { createConversation, getConversationClient, initializeSession, uploadTurnAttachments } from "../services/agentClient";
+import { getImageGenClient } from "../services/imageGenStore";
 import { useConversationState } from "../services/useConversations";
 import {
   deleteConversation,
@@ -64,7 +68,7 @@ const DRAFT_SESSION_ID = "__draft_session__";
 const STREAM_DELTA_FLUSH_MS = 60;
 // 稳定的空图片数组引用，避免每次渲染都新建 [] 触发下游 memo/effect 重跑。
 const EMPTY_DRAFT_IMAGES: DraftImage[] = [];
-type ActiveView = "chat" | "overview" | "settings";
+type ActiveView = "chat" | "overview" | "settings" | "image-gen-list" | "image-gen-detail";
 type PendingApprovalState = ApprovalRequest & { conversationId: string };
 type PendingInputState = InputRequest & { conversationId: string };
 
@@ -435,6 +439,8 @@ export function ChatPage() {
 
   const [activeSessionId, setActiveSessionId] = useState(initialState.activeSessionId);
   const [activeView, setActiveView] = useState<ActiveView>("chat");
+  const [activeImageRecordId, setActiveImageRecordId] = useState<string | null>(null);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>(undefined);
   const [archivedSessionIds, setArchivedSessionIds] = useState<Set<string>>(() => new Set());
   const [searchText, setSearchText] = useState("");
   // composer 草稿态按会话隔离（与 configBySession/capabilitiesBySession 同构）。
@@ -1321,6 +1327,16 @@ export function ChatPage() {
     }
   }
 
+  async function createImageRecord() {
+    try {
+      const record = await getImageGenClient().createRecord();
+      setActiveImageRecordId(record.id);
+      setActiveView("image-gen-detail");
+    } catch (error) {
+      console.error("Failed to create image record:", error);
+    }
+  }
+
   return (
     <>
       {showAgentSelection ? (
@@ -1342,6 +1358,7 @@ export function ChatPage() {
       {activeView === "settings" ? (
         <SettingsPage
           archivedSessions={archivedSessions}
+          initialSection={settingsInitialSection}
           onBack={() => setActiveView("chat")}
           onDeleteArchivedSession={deleteArchivedSession}
           onRestoreArchivedSession={restoreArchivedSession}
@@ -1355,7 +1372,14 @@ export function ChatPage() {
             onArchiveGroup={archiveSessionGroup}
             onCreateSession={createSession}
             onOpenOverview={() => setActiveView("overview")}
-            onOpenSettings={() => setActiveView("settings")}
+            onOpenImageGen={() => {
+              setActiveImageRecordId(null);
+              setActiveView("image-gen-list");
+            }}
+            onOpenSettings={() => {
+              setSettingsInitialSection(undefined);
+              setActiveView("settings");
+            }}
             onSearchTextChange={setSearchText}
             onSelectSession={selectSession}
             searchText={searchText}
@@ -1364,6 +1388,23 @@ export function ChatPage() {
 
           {activeView === "overview" ? (
             <OverviewPage />
+          ) : activeView === "image-gen-list" ? (
+            <ImageGenListPage
+              onCreateRecord={() => void createImageRecord()}
+              onOpenRecord={(recordId) => {
+                setActiveImageRecordId(recordId);
+                setActiveView("image-gen-detail");
+              }}
+              onOpenSettings={() => {
+                setSettingsInitialSection("imageProviders");
+                setActiveView("settings");
+              }}
+            />
+          ) : activeView === "image-gen-detail" && activeImageRecordId ? (
+            <ImageGenDetailPage
+              onBack={() => setActiveView("image-gen-list")}
+              recordId={activeImageRecordId}
+            />
           ) : (
             <ChatWorkspace
               accessMode={currentConfig?.accessMode ?? ""}

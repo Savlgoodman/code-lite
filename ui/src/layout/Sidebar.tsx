@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react";
 
 import {
+  ChevronDown,
+  ChevronRight,
+  Image,
   LayoutDashboard,
+  LayoutGrid,
   MessageSquarePlus,
   Search,
   Settings,
@@ -15,11 +19,12 @@ import "./Sidebar.css";
 
 interface SidebarProps {
   activeSessionId: string;
-  activeView: "chat" | "overview";
+  activeView: "chat" | "overview" | "image-gen-list" | "image-gen-detail";
   onCreateSession: (workspace?: string) => void;
   onArchiveSession: (sessionId: string) => void;
   onArchiveGroup: (sessionIds: string[]) => void;
   onOpenOverview: () => void;
+  onOpenImageGen: () => void;
   onOpenSettings: () => void;
   onSearchTextChange: (value: string) => void;
   onSelectSession: (sessionId: string) => void;
@@ -85,6 +90,7 @@ export function Sidebar({
   onArchiveGroup,
   onCreateSession,
   onOpenOverview,
+  onOpenImageGen,
   onOpenSettings,
   onSearchTextChange,
   onSelectSession,
@@ -93,6 +99,8 @@ export function Sidebar({
 }: SidebarProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [expandedSessionGroups, setExpandedSessionGroups] = useState<Set<string>>(new Set());
+  const [toolsExpanded, setToolsExpanded] = useState(false);
+  const imageGenActive = activeView === "image-gen-list" || activeView === "image-gen-detail";
 
   const groups = useMemo(() => groupSessions(sessions), [sessions]);
 
@@ -155,6 +163,28 @@ export function Sidebar({
           <Wrench size={16} />
           <span>技能</span>
         </button>
+        <button
+          aria-expanded={toolsExpanded}
+          className="nav-command"
+          onClick={() => setToolsExpanded((value) => !value)}
+          type="button"
+        >
+          <LayoutGrid size={16} />
+          <span>更多工具</span>
+          {toolsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+        {toolsExpanded ? (
+          <div className="nav-tool-group">
+            <button
+              className={`nav-command nav-tool-item ${imageGenActive ? "active" : ""}`}
+              onClick={onOpenImageGen}
+              type="button"
+            >
+              <Image size={16} />
+              <span>图片生成</span>
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="session-list" aria-label="会话列表">

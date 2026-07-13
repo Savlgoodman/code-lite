@@ -1,4 +1,4 @@
-import { ArchiveRestore, ArrowLeft, Bot, Database, FileText, Info, Package, Palette, Radio } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Bot, Database, FileText, Image, Info, Package, Palette, Radio } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -9,6 +9,7 @@ const settingsMenu = [
   { id: "agents", icon: Package, label: "Agent Runtime" },
   { id: "acp", icon: Database, label: "ACP 连接管理" },
   { id: "providers", icon: Bot, label: "模型提供商配置" },
+  { id: "imageProviders", icon: Image, label: "图片生成供应商" },
   { id: "logs", icon: FileText, label: "日志" },
   { id: "archive", icon: ArchiveRestore, label: "归档会话" },
   { id: "remote", icon: Radio, label: "远程控制" },
