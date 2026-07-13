@@ -176,7 +176,11 @@ export function App() {
       onOpenSession={(id) => nav.push({ kind: "chat", sessionId: id })}
       onReconnect={handleReconnect}
     />,
-    <AiTab key="ai" onOpenConversation={(id) => nav.push({ kind: "aiChat", conversationId: id })} />,
+    <AiTab
+      key="ai"
+      onOpenConversation={(id) => nav.push({ kind: "aiChat", conversationId: id })}
+      onOpenImageRecord={(id) => nav.push({ kind: "imageGen", recordId: id })}
+    />,
     <DevicesTab
       key="devices"
       devices={devices}
@@ -190,6 +194,7 @@ export function App() {
       key="settings"
       onOpenAiSettings={() => nav.push({ kind: "aiSettings" })}
       onOpenAiArchived={() => nav.push({ kind: "aiArchived" })}
+      onOpenImageProviders={() => nav.push({ kind: "imageProviders" })}
     />,
   ];
 

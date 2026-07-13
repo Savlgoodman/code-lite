@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Moon, Sun, Check, Server, Archive, ChevronRight, Smartphone, Info } from "lucide-react";
+import { Moon, Sun, Check, Server, Archive, ChevronRight, Smartphone, Info, Image as ImageIcon } from "lucide-react";
 import { useTheme, THEME_LABELS, type ThemeName } from "../hooks/useTheme";
 import { AboutSheet } from "../sheets/AboutSheet";
 import { isAiAvailable } from "../lib/environment";
@@ -12,9 +12,10 @@ const THEME_SWATCHES: Record<ThemeName, { bg: string; accent: string; card: stri
 interface SettingsTabProps {
   onOpenAiSettings?: () => void;
   onOpenAiArchived?: () => void;
+  onOpenImageProviders?: () => void;
 }
 
-export function SettingsTab({ onOpenAiSettings, onOpenAiArchived }: SettingsTabProps) {
+export function SettingsTab({ onOpenAiSettings, onOpenAiArchived, onOpenImageProviders }: SettingsTabProps) {
   const { theme, mode, setTheme, toggleMode } = useTheme();
   const isDark = mode === "dark";
   const [showAbout, setShowAbout] = useState(false);
@@ -71,6 +72,10 @@ export function SettingsTab({ onOpenAiSettings, onOpenAiArchived }: SettingsTabP
             <ul>
               <li className="settings-item settings-item-nav" onClick={onOpenAiSettings}>
                 <span className="settings-item-label"><Server size={17} /> 模型供应商配置</span>
+                <ChevronRight size={18} />
+              </li>
+              <li className="settings-item settings-item-nav" onClick={onOpenImageProviders}>
+                <span className="settings-item-label"><ImageIcon size={17} /> 图片生成供应商</span>
                 <ChevronRight size={18} />
               </li>
               <li className="settings-item settings-item-nav" onClick={onOpenAiArchived}>

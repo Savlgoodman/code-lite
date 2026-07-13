@@ -10,6 +10,8 @@ import {
   AiProviderFormPage,
   AiPickModelsPage,
 } from "../pages/AiSettingsPage";
+import { ImageGenPage } from "../pages/ImageGenPage";
+import { ImageProvidersListPage, ImageProviderFormPage } from "../pages/ImageProvidersPage";
 import { DetailContent } from "./DetailOverlay";
 
 /**
@@ -67,6 +69,12 @@ function ScreenBody({ item, onBack }: { item: StackItem; onBack: () => void }) {
       return <AiPickModelsPage provider={entry.provider} onBack={onBack} />;
     case "aiArchived":
       return <AiArchivedPage onBack={onBack} />;
+    case "imageGen":
+      return <ImageGenPage recordId={entry.recordId} onBack={onBack} />;
+    case "imageProviders":
+      return <ImageProvidersListPage onBack={onBack} />;
+    case "imageProviderForm":
+      return <ImageProviderFormPage provider={entry.provider} onBack={onBack} />;
     case "detail":
       return <DetailContent route={entry.route} onBack={onBack} />;
   }
