@@ -207,8 +207,8 @@ import { Sheet, Button, Input, TextArea, Fab, EmptyState, Select, EffortSlider, 
 | 组件 | 用途 | 关键点 |
 |---|---|---|
 | `Button` | 通用按钮 | `variant="primary"\|"secondary"`、`block`；透传原生 button 属性 |
-| `Input` | 单行文本输入 | 防御式读值（组合感知 + change/input + rAF 兜底，见 `textFieldValue.ts`），解决安卓 WebView 输入法预测/滑行/粘贴不触发或滞后 onChange；用 `value` + `onValueChange`，别再用裸 `<input>` 收表单值 |
-| `TextArea` | 多行文本输入 | 与 `Input` 同源防御式取值；`onEnter` 在非 IME 组合期回车触发（供回车发送，组合选词的回车不误发）。消息输入框等一律用它，别用裸 `<textarea>` |
+| `Input` | 单行文本输入 | 防御式读值（见 `textFieldValue.ts`）：**按环境分两套渲染**——浏览器（dev/PWA/web）完全受控（`value`），原生 App 半受控（`defaultValue`，DOM 回写交给 hook 的 layout effect）以免 IME 组合被受控回写打断，解决安卓「打字检测不到、发送前吞字」。用 `value` + `onValueChange`，别再用裸 `<input>` 收表单值 |
+| `TextArea` | 多行文本输入 | 与 `Input` 同源防御式取值（同样按环境分受控/半受控）；`onEnter` 在非 IME 组合期回车触发（供回车发送，组合选词的回车不误发）。消息输入框等一律用它，别用裸 `<textarea>` |
 | `Fab` | 悬浮操作按钮 | `variant="primary"\|"secondary"`、`active`；**经 Portal 渲染到 body**（脱离 HomePager 的 transform）；仅在所属 Tab 激活时渲染 |
 | `Sheet` | 底部抽屉弹层 | 见下，所有弹窗的基座 |
 | `Select` | 自定义下拉 | 内联展开面板（原生 `<select>` 面板无法跨端定制）；`options: {value,label}[]` |
