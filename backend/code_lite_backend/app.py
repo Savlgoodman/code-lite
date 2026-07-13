@@ -16,6 +16,7 @@ from code_lite_backend.services.agent_runtime_config import AgentRuntimeConfigSt
 from code_lite_backend.services.billing_prices import BillingPriceStore
 from code_lite_backend.services.billing_usage import BillingUsageRecorder
 from code_lite_backend.services.conversation_recorder import ConversationRecorder
+from code_lite_backend.services.feature_config import FeatureConfigStore
 from code_lite_backend.services.image_config import ImageProviderConfigStore
 from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
@@ -55,6 +56,7 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
     model_config_store = ModelConfigStore(runtime_config)
     image_provider_config_store = ImageProviderConfigStore(runtime_config)
     image_record_store = ImageRecordStore(runtime_config.image_gen_dir)
+    feature_config_store = FeatureConfigStore(runtime_config)
     agent_runtime_config_store = AgentRuntimeConfigStore(runtime_config)
     runtime_manager = AcpRuntimeManager(
         conversation_store=conversation_store,
@@ -74,6 +76,7 @@ def create_app(runtime_config: RuntimeConfig, workspace: Path) -> FastAPI:
         model_config_store=model_config_store,
         image_provider_config_store=image_provider_config_store,
         image_record_store=image_record_store,
+        feature_config_store=feature_config_store,
         agent_runtime_config_store=agent_runtime_config_store,
         agent_adapter=create_agent_adapter(
             runtime_config=runtime_config,

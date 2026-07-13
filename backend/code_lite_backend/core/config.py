@@ -12,6 +12,7 @@ ENV_NAME = "CODE_LITE_ENV"
 NANOBOT_CONFIG_NAME = "nanobot_config.json"
 APP_CONFIG_NAME = "app_config.json"
 IMAGE_CONFIG_NAME = "image_config.json"
+FEATURE_CONFIG_NAME = "feature_config.json"
 AGENT_RUNTIME_CONFIG_NAME = "agent_runtimes.json"
 ACP_CONNECTION_MODE_ENV_NAME = "CODE_LITE_ACP_CONNECTION_MODE"
 ACP_CONNECTION_MODE_PER_CONVERSATION = "per_conversation"
@@ -81,6 +82,7 @@ class RuntimeConfig:
     image_gen_dir: Path
     app_config_path: Path
     image_config_path: Path
+    feature_config_path: Path
     agent_runtime_config_path: Path
     nanobot_config_path: Path
     agent_adapter: str
@@ -145,6 +147,7 @@ def resolve_runtime_config(
     )
     app_config_path = config_dir / APP_CONFIG_NAME
     image_config_path = config_dir / IMAGE_CONFIG_NAME
+    feature_config_path = config_dir / FEATURE_CONFIG_NAME
     agent_runtime_config_path = config_dir / AGENT_RUNTIME_CONFIG_NAME
     write_json_if_missing(nanobot_config_path, MINIMAL_NANOBOT_CONFIG)
     normalize_json_encoding(nanobot_config_path)
@@ -173,6 +176,7 @@ def resolve_runtime_config(
         image_gen_dir=image_gen_dir,
         app_config_path=app_config_path,
         image_config_path=image_config_path,
+        feature_config_path=feature_config_path,
         agent_runtime_config_path=agent_runtime_config_path,
         nanobot_config_path=nanobot_config_path,
         agent_adapter=agent_adapter,

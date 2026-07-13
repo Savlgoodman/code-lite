@@ -38,6 +38,7 @@ import {
   updateConversationArchiveState
 } from "../services/conversationStore";
 import { loadAgentRuntimeModels, loadAgentRuntimeSettings } from "../services/settingsStore";
+import { loadPromptOptimizeSettings, optimizeCodePrompt } from "../services/featureStore";
 import {
   createDraftImage,
   MAX_DRAFT_IMAGES,
@@ -450,6 +451,11 @@ export function ChatPage() {
   const [draftImagesBySession, setDraftImagesBySession] = useState<Record<string, DraftImage[]>>({});
   const [draftImageErrorBySession, setDraftImageErrorBySession] = useState<Record<string, string | null>>({});
   const [imagesProcessingBySession, setImagesProcessingBySession] = useState<Record<string, boolean>>({});
+  // 提示词优化（code agent）：开关来自功能设置；优化中/撤销快照按会话隔离。
+  const [codePromptOptimizeEnabled, setCodePromptOptimizeEnabled] = useState(false);
+  const [optimizingPromptBySession, setOptimizingPromptBySession] = useState<Record<string, boolean>>({});
+  // 撤销快照：记录优化前后的文本，只要当前草稿仍等于优化结果就允许一键/Ctrl+Z 撤销。
+  const [optimizeUndoBySession, setOptimizeUndoBySession] = useState<Record<string, { before: string; after: string }>>({});
   const [activeAgent, setActiveAgent] = useState<AgentSummary | null>(null);
   const [showAgentSelection, setShowAgentSelection] = useState(false);
   const [newSessionWorkspace, setNewSessionWorkspace] = useState("");
@@ -516,6 +522,10 @@ export function ChatPage() {
   const draftImages = draftImagesBySession[activeSessionId] ?? EMPTY_DRAFT_IMAGES;
   const draftImageError = draftImageErrorBySession[activeSessionId] ?? null;
   const imagesProcessing = imagesProcessingBySession[activeSessionId] ?? false;
+  const optimizingPrompt = optimizingPromptBySession[activeSessionId] ?? false;
+  // 只有当前草稿仍等于上次优化结果（用户未再编辑）时，才允许撤销回优化前文本。
+  const optimizeUndo = optimizeUndoBySession[activeSessionId] ?? null;
+  const canUndoOptimize = Boolean(optimizeUndo) && draft === optimizeUndo?.after;
 
   // 当前会话的草稿 setter：把全局 setDraft 等调用改写为只更新当前会话这一桶。
   // 保留原有的「值 or 函数式更新」两种签名，避免大面积改调用点。
@@ -696,6 +706,21 @@ export function ChatPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ─── 提示词优化开关：从功能设置加载，进入设置页返回后刷新一次 ───
+  useEffect(() => {
+    let cancelled = false;
+    void loadPromptOptimizeSettings()
+      .then((settings) => {
+        if (!cancelled) {
+          setCodePromptOptimizeEnabled(settings.codeEnabled);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView]);
 
   // ─── 会话频道订阅（0710 统一状态层）───
   // 切换到真实会话时通过 client 订阅其频道：后端先回 snapshot（client 建视图态），再推增量事件。
@@ -1327,6 +1352,46 @@ export function ChatPage() {
     }
   }
 
+  // 一键优化提示词 / 撤销：草稿仍等于上次优化结果时点击（或 Ctrl+Z）回退到优化前文本；
+  // 否则调后端优化，成功后写回草稿并记录撤销快照。
+  async function optimizePrompt() {
+    const sessionId = activeSessionIdRef.current;
+    const undo = optimizeUndoBySession[sessionId] ?? null;
+    const currentDraft = draftBySession[sessionId] ?? "";
+
+    if (undo && currentDraft === undo.after) {
+      setDraft(undo.before);
+      setOptimizeUndoBySession((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
+      return;
+    }
+
+    const text = currentDraft.trim();
+    if (!text || optimizingPromptBySession[sessionId]) {
+      return;
+    }
+    setOptimizingPromptBySession((prev) => ({ ...prev, [sessionId]: true }));
+    try {
+      const optimized = await optimizeCodePrompt({
+        prompt: currentDraft,
+        workspace: activeSession.workspace,
+      });
+      // 优化过程中用户可能已切换会话或改动草稿；写回目标会话并记录撤销快照。
+      setDraftBySession((prev) => ({ ...prev, [sessionId]: optimized }));
+      setOptimizeUndoBySession((prev) => ({ ...prev, [sessionId]: { before: currentDraft, after: optimized } }));
+    } catch (error) {
+      setDraftImageErrorBySession((prev) => ({
+        ...prev,
+        [sessionId]: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setOptimizingPromptBySession((prev) => ({ ...prev, [sessionId]: false }));
+    }
+  }
+
   async function createImageRecord() {
     try {
       const record = await getImageGenClient().createRecord();
@@ -1431,6 +1496,10 @@ export function ChatPage() {
               onDraftImagesAdd={(files) => void addDraftImages(files)}
               onDraftImageRemove={removeDraftImage}
               onModelFamilyChange={(value) => updateSessionConfig({ modelFamily: value })}
+              onOptimizePrompt={() => void optimizePrompt()}
+              optimizePromptEnabled={codePromptOptimizeEnabled}
+              optimizePromptCanUndo={canUndoOptimize}
+              optimizingPrompt={optimizingPrompt}
               onReasoningEffortChange={(value) => updateSessionConfig({ reasoningEffort: value })}
               onResolveApproval={(decision) => void resolveApproval(decision)}
               onResolveInput={(action, content) => void resolveInput(action, content)}

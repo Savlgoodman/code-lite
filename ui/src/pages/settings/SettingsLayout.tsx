@@ -1,4 +1,4 @@
-import { ArchiveRestore, ArrowLeft, Bot, Database, FileText, Image, Info, Package, Palette, Radio } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Bot, Database, FileText, Image, Info, Package, Palette, Radio, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -6,6 +6,7 @@ import type { SettingsSection } from "./types";
 
 const settingsMenu = [
   { id: "appearance", icon: Palette, label: "外观" },
+  { id: "features", icon: Sparkles, label: "功能" },
   { id: "agents", icon: Package, label: "Agent Runtime" },
   { id: "acp", icon: Database, label: "ACP 连接管理" },
   { id: "providers", icon: Bot, label: "模型提供商配置" },

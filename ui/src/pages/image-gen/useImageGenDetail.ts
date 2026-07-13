@@ -11,6 +11,7 @@ import {
 } from "@code-lite/image-gen";
 
 import { getImageGenClient } from "../../services/imageGenStore";
+import { loadPromptOptimizeSettings } from "../../services/featureStore";
 import { loadModelSettings } from "../../services/settingsStore";
 import type { ConfiguredModel } from "../../types";
 
@@ -41,6 +42,7 @@ export interface ImageGenDetailState {
   activeReferenceImages: ImageAsset[];
   selectedRunId: string | null;
   optimizeModelId: string;
+  optimizeEnabled: boolean;
   loading: boolean;
   generating: boolean;
   optimizing: boolean;
@@ -84,6 +86,7 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
   const [activeReferenceIds, setActiveReferenceIds] = useState<string[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [optimizeModelId, setOptimizeModelId] = useState("");
+  const [optimizeEnabled, setOptimizeEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
@@ -99,10 +102,11 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
 
     async function boot() {
       try {
-        const [loadedRecord, loadedProviders, modelSettings] = await Promise.all([
+        const [loadedRecord, loadedProviders, modelSettings, featureSettings] = await Promise.all([
           client.getRecord(recordId),
           client.listProviders(),
-          loadModelSettings().catch(() => null)
+          loadModelSettings().catch(() => null),
+          loadPromptOptimizeSettings().catch(() => null)
         ]);
         if (cancelled) {
           return;
@@ -112,7 +116,10 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
         setProviders(enabledProviders);
         const enabledModels = (modelSettings?.models ?? []).filter((model) => model.enabled);
         setTextModels(enabledModels);
-        setOptimizeModelId((current) => current || modelSettings?.effectiveDefaultModelId || enabledModels[0]?.id || "");
+        setOptimizeEnabled(featureSettings?.imageEnabled ?? true);
+        setOptimizeModelId(
+          (current) => current || featureSettings?.modelId || modelSettings?.effectiveDefaultModelId || enabledModels[0]?.id || ""
+        );
 
         // 初始参数：优先用最近一次批次的请求快照，否则用第一个供应商默认值。
         const lastRun = loadedRecord.runs[loadedRecord.runs.length - 1];
@@ -283,6 +290,7 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
     activeReferenceImages: referencesByIds(record, activeReferenceIds),
     selectedRunId: resolveSelectedRun(record, selectedRunId)?.id ?? null,
     optimizeModelId,
+    optimizeEnabled,
     loading,
     generating,
     optimizing,

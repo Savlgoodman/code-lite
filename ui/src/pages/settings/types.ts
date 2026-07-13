@@ -2,6 +2,7 @@ import type { Session } from "../../types";
 
 export type SettingsSection =
   | "appearance"
+  | "features"
   | "agents"
   | "acp"
   | "providers"
