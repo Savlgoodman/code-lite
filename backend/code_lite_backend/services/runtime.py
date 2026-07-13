@@ -13,6 +13,7 @@ from code_lite_backend.services.billing_prices import BillingPriceStore
 from code_lite_backend.services.billing_usage import BillingUsageRecorder
 from code_lite_backend.services.conversation_recorder import ConversationRecorder
 from code_lite_backend.services.event_bus import SessionEventBus
+from code_lite_backend.services.image_config import ImageProviderConfigStore
 from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
 from code_lite_backend.services.turn_registry import ActiveTurnRegistry
@@ -20,6 +21,7 @@ from code_lite_backend.storage.attachments import AttachmentStore
 from code_lite_backend.storage.conversations import ConversationStore
 from code_lite_backend.storage.diff_artifacts import DiffArtifactStore
 from code_lite_backend.storage.event_store import ConversationEventStore
+from code_lite_backend.storage.image_records import ImageRecordStore
 
 if TYPE_CHECKING:
     from code_lite_backend.services.remote_bridge import RemoteBridge  # noqa: F401
@@ -38,6 +40,8 @@ class AppServices:
     billing_price_store: BillingPriceStore
     billing_usage_recorder: BillingUsageRecorder
     model_config_store: ModelConfigStore
+    image_provider_config_store: ImageProviderConfigStore
+    image_record_store: ImageRecordStore
     agent_runtime_config_store: AgentRuntimeConfigStore
     agent_adapter: AgentAdapter
     runtime_manager: AcpRuntimeManager | None = None
