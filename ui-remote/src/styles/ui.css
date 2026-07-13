@@ -106,6 +106,7 @@
 /* 离场：遮罩淡出 + 抽屉下滑 */
 .modal-overlay.closing {
   animation: overlayFadeOut var(--dur-base) var(--ease-standard) forwards;
+  pointer-events: none;
 }
 
 .modal-overlay.closing .modal-sheet {
