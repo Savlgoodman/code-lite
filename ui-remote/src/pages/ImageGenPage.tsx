@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ImagePlus, Loader2, Sparkles, Wand2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ArrowLeft, Check, ImagePlus, Loader2, Sparkles, Wand2, X } from "lucide-react";
 import { RECOMMENDED_SIZES } from "@code-lite/image-gen";
 import { Portal, Select, TextArea } from "../components/ui";
 import { BlobImage } from "../components/BlobImage";
@@ -7,7 +7,7 @@ import { useDismissable } from "../hooks/useDismissable";
 import { useImageProviders } from "../hooks/useImageProviders";
 import { useAiProviders } from "../hooks/useAiProviders";
 import { imageGenStore, type ImageRun, type ImageRunParams } from "../services/ImageGenStore";
-import { addReferenceImage, optimizePrompt, runGeneration } from "../services/imageGenService";
+import { addReferenceImage, optimizePrompt, startGeneration, imageGenTasks } from "../services/imageGenService";
 import { imageBlobStore } from "../services/imageBlobStore";
 import { IMAGE_ACCEPT } from "../lib/draftImages";
 
@@ -40,15 +40,38 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
   const [quality, setQuality] = useState<Quality>("auto");
   const [n, setN] = useState(1);
   const [optimizeModelId, setOptimizeModelId] = useState("");
-  const [generating, setGenerating] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [fitToView, setFitToView] = useState(false);
+  const [justAddedRef, setJustAddedRef] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
+  // 进行中状态来自 service 单例（跨页面存活）：退出页面再进来仍能看到"生成中"。
+  const activeRecords = useSyncExternalStore(imageGenTasks.subscribe, imageGenTasks.getActiveSnapshot);
+  const generating = activeRecords.includes(recordId);
+  const wasGeneratingRef = useRef(generating);
+
   useDismissable(preview !== null, () => setPreview(null));
+
+  // 生成结束（generating 由 true 变 false）时刷新批次列表，并读取可能的错误。
+  useEffect(() => {
+    if (wasGeneratingRef.current && !generating) {
+      const genErr = imageGenTasks.getError(recordId);
+      if (genErr) {
+        setError(genErr);
+        imageGenTasks.clearError(recordId);
+      }
+      void (async () => {
+        const loaded = await imageGenStore.loadRuns(recordId);
+        setRuns(loaded);
+        const last = loaded[loaded.length - 1];
+        if (last) setSelectedRunId(last.id);
+      })();
+    }
+    wasGeneratingRef.current = generating;
+  }, [generating, recordId]);
 
   // 输入框随文字增高，最高约 5 行（超出则自身滚动，不挤压图片区）。
   useEffect(() => {
@@ -121,6 +144,17 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
     setReferenceIds((prev) => prev.filter((id) => id !== imageId));
   }
 
+  // 把生成图快速加入参考图池：取其 Blob 登记为独立参考图（新 id，与生成图解耦），
+  // 并加入当前批次的参考图列表。短暂标记"已添加"给出反馈。
+  async function addGeneratedAsReference(imageId: string) {
+    const blob = await imageBlobStore.getImage(imageId);
+    if (!blob) return;
+    const ref = await addReferenceImage(recordId, blob);
+    setReferenceIds((prev) => (prev.includes(ref.id) ? prev : [...prev, ref.id]));
+    setJustAddedRef(imageId);
+    setTimeout(() => setJustAddedRef((cur) => (cur === imageId ? null : cur)), 1500);
+  }
+
   async function previewImage(imageId: string) {
     const blob = await imageBlobStore.getImage(imageId);
     if (blob) setPreview(URL.createObjectURL(blob));
@@ -139,29 +173,21 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
     }
   }
 
-  async function handleGenerate() {
+  function handleGenerate() {
     if (!canGenerate) return;
-    setGenerating(true);
     setError(null);
-    try {
-      const params: ImageRunParams = {
-        providerId,
-        model: model.trim(),
-        prompt: prompt.trim(),
-        n,
-        size,
-        quality,
-        referenceImageIds: referenceIds,
-      };
-      const run = await runGeneration(recordId, params);
-      const loaded = await imageGenStore.loadRuns(recordId);
-      setRuns(loaded);
-      setSelectedRunId(run.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setGenerating(false);
-    }
+    const params: ImageRunParams = {
+      providerId,
+      model: model.trim(),
+      prompt: prompt.trim(),
+      n,
+      size,
+      quality,
+      referenceImageIds: referenceIds,
+    };
+    // fire-and-forget：进行中状态由 imageGenTasks 单例追踪，退出页面仍继续；
+    // 完成后经上面的 useEffect 刷新批次列表。
+    startGeneration(recordId, params);
   }
 
   function selectRun(run: ImageRun) {
@@ -205,7 +231,17 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
           ) : selectedRun && selectedRun.imageIds.length > 0 ? (
             <div className={`imggen-canvas-grid${fitToView ? " fit-to-view" : ""}`}>
               {selectedRun.imageIds.map((id) => (
-                <BlobImage key={id} imageId={id} alt="生成图" className="imggen-canvas-img" onClick={() => void previewImage(id)} />
+                <div className="imggen-canvas-item" key={id}>
+                  <BlobImage imageId={id} alt="生成图" className="imggen-canvas-img" onClick={() => void previewImage(id)} />
+                  <button
+                    className="imggen-add-ref-btn"
+                    onClick={(e) => { e.stopPropagation(); void addGeneratedAsReference(id); }}
+                    aria-label="加入参考图"
+                    title="加入参考图"
+                  >
+                    {justAddedRef === id ? <Check size={15} /> : <ImagePlus size={15} />}
+                  </button>
+                </div>
               ))}
             </div>
           ) : selectedRun?.error ? (
@@ -268,7 +304,7 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
             <ImagePlus size={16} />
             <span>参考图</span>
           </button>
-          <button className="imggen-btn-primary" disabled={!canGenerate} onClick={() => void handleGenerate()}>
+          <button className="imggen-btn-primary" disabled={!canGenerate} onClick={handleGenerate}>
             {generating ? <Loader2 className="imggen-spin" size={16} /> : <Sparkles size={16} />}
             <span>{generating ? "生成中" : "生成"}</span>
           </button>

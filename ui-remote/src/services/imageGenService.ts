@@ -23,6 +23,65 @@ function makeRunId(): string {
   return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// ── 进行中任务追踪（内存单例，跨页面存活） ──
+// generating 状态若只存组件 useState，退出页面后组件卸载即丢失，重进看不到"生成中"。
+// 这里用单例 Set 记录哪些 recordId 正在生成，配合 subscribe 供页面订阅；
+// 只要 App 进程存活（退出页面不杀进程），状态就在，重进页面能恢复"生成中"。
+
+type GenListener = () => void;
+const activeRecords = new Set<string>();
+const genErrors = new Map<string, string>();
+const genListeners = new Set<GenListener>();
+let activeSnapshot: string[] = [];
+
+function emitGen(): void {
+  activeSnapshot = [...activeRecords];
+  for (const l of genListeners) l();
+}
+
+export const imageGenTasks = {
+  subscribe(listener: GenListener): () => void {
+    genListeners.add(listener);
+    return () => genListeners.delete(listener);
+  },
+  /** 快照：当前所有进行中的 recordId（引用稳定，供 useSyncExternalStore）。 */
+  getActiveSnapshot(): string[] {
+    return activeSnapshot;
+  },
+  isActive(recordId: string): boolean {
+    return activeRecords.has(recordId);
+  },
+  /** 读取某任务上次生成的错误（供页面完成后展示）。 */
+  getError(recordId: string): string | null {
+    return genErrors.get(recordId) ?? null;
+  },
+  clearError(recordId: string): void {
+    if (genErrors.delete(recordId)) emitGen();
+  },
+};
+
+/**
+ * 启动一次生成（fire-and-forget）。进行中状态由 imageGenTasks 追踪，跨页面存活：
+ * 用户退出页面再进入仍能看到"生成中"，完成后经 subscribe 通知页面刷新批次。
+ * 同一 recordId 已在生成时忽略重复调用。
+ */
+export function startGeneration(recordId: string, params: ImageRunParams): void {
+  if (activeRecords.has(recordId)) return;
+  activeRecords.add(recordId);
+  genErrors.delete(recordId);
+  emitGen();
+  void (async () => {
+    try {
+      await runGeneration(recordId, params);
+    } catch (err) {
+      genErrors.set(recordId, err instanceof Error ? err.message : String(err));
+    } finally {
+      activeRecords.delete(recordId);
+      emitGen();
+    }
+  })();
+}
+
 /**
  * 执行一次生成：请求供应商 → 每张图落 IndexedDB → 组装并追加批次。
  * 返回追加后的批次；供应商/网络出错时抛出可读错误（调用方展示）。
