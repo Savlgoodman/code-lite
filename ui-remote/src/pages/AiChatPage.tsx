@@ -51,10 +51,12 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
   const draftImagesRef = useRef<DraftImage[]>([]);
   const messagesRef = useRef<AiMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const pinnedRef = useRef(true);
+  const [footerHeight, setFooterHeight] = useState(88);
 
   draftImagesRef.current = draftImages;
   messagesRef.current = messages;
@@ -89,6 +91,35 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
       abortRef.current?.abort();
     };
   }, []);
+
+  // 后台保活：App 进入后台时，保存已有的部分回复并标记为被中断（不显示为错误）。
+  // 回到前台后若发现中断，保留已生成内容而非丢弃——用户可手动继续发送。
+  useEffect(() => {
+    const onVisChange = () => {
+      if (document.visibilityState === "hidden" && abortRef.current) {
+        // 正在流式对话，中止请求并保存当前已有内容
+        abortRef.current.abort();
+        abortRef.current = null;
+        setIsRunning(false);
+        // 保存中断时的消息（已有的部分内容不丢失）
+        const msgs = messagesRef.current;
+        const last = msgs[msgs.length - 1];
+        if (last?.role === "assistant" && !last.content) {
+          // 如果还没收到任何内容，标记一个提示
+          const next = msgs.map((m) =>
+            m.id === last.id ? { ...m, error: "对话被中断（应用进入后台），请重新发送。", updatedAt: Date.now() } : m,
+          );
+          messagesRef.current = next;
+          setMessages(next);
+          persist(next);
+        } else {
+          persist(msgs);
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisChange);
+    return () => document.removeEventListener("visibilitychange", onVisChange);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isAtBottom = useCallback((el: HTMLElement) => {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= 8;
@@ -127,6 +158,17 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
       textareaRef.current.style.height = Math.max(48, Math.min(textareaRef.current.scrollHeight, 120)) + "px";
     }
   }, [input]);
+
+  useEffect(() => {
+    const el = footerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      setFooterHeight(el.offsetHeight);
+    });
+    ro.observe(el);
+    setFooterHeight(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!isRunning) {
@@ -348,7 +390,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
       {showScrollToBottom && (
         <button
           className="scroll-bottom-button"
-          style={{ bottom: 88 }}
+          style={{ bottom: footerHeight + 8 }}
           aria-label="回到底部"
           onClick={scrollToBottom}
         >
@@ -356,7 +398,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
         </button>
       )}
 
-      <footer className="chat-input-area">
+      <footer className="chat-input-area" ref={footerRef}>
         <div className="input-wrapper">
           {draftImages.length > 0 && (
             <div className="draft-image-strip" aria-label="待发送图片">

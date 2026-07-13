@@ -1,48 +1,69 @@
 /**
- * useSystemBack — 把安卓硬件返回键与浏览器/PWA 的 popstate 统一接到导航栈的 back()。
+ * useSystemBack -- Android back button / browser popstate -> navStore.back()
  *
- * 单点接线，全应用只调用一次（在 App 里）。返回优先级由 navStore.back() 决定：
- * 先关最上层瞬态层（Sheet/预览），再弹出栈顶页面；已在 Tab 根且无可关闭层时才放行退出。
+ * Called once in App. Priority: dismiss top Sheet/preview -> pop nav stack.
+ * At root with nothing to close: require double-tap within 2s to exit,
+ * preventing accidental exit when a sheet is open.
  *
- * 两个平台的机制不同，这里各自对接、互不干扰：
- * - 原生（Capacitor Android）：监听 @capacitor/app 的 backButton。canGoBack 为真则 back()，
- *   否则调用 App.exitApp() 退出。iOS 无硬件返回键，此监听自然不触发。
- * - 浏览器 / PWA：用一个「哨兵」history 记录承接手势/浏览器返回。每次 popstate 说明用户
- *   触发了返回：若栈里还有可返回层，consume 掉并把哨兵重新 push 回去（保持始终有一格可退，
- *   避免直接离开页面）；否则不再拦截，允许真正后退。
+ * Native (Capacitor Android): listens to @capacitor/app backButton.
+ * Browser / PWA: sentinel history entry absorbs the first back gesture.
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { navStore } from "../services/navStore";
 
-/** 标记当前 history 记录为本应用的返回哨兵。 */
 const SENTINEL_STATE = { __codeliteNavSentinel: true } as const;
+const EXIT_CONFIRM_WINDOW = 2000;
 
 function pushSentinel() {
   history.pushState(SENTINEL_STATE, "");
 }
 
 export function useSystemBack(): void {
+  const exitPressedRef = useRef(false);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     let disposed = false;
 
-    // ── 浏览器 / PWA：popstate 承接返回 ──
-    // 首次放一格哨兵，保证用户第一次返回有东西可消费。
+    const showExitToast = () => {
+      let toast = document.getElementById("__exit-toast");
+      if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "__exit-toast";
+        toast.className = "exit-confirm-toast";
+        toast.textContent = "再按一次退出应用";
+        document.body.appendChild(toast);
+      }
+      toast.classList.add("visible");
+      setTimeout(() => toast!.classList.remove("visible"), EXIT_CONFIRM_WINDOW);
+    };
+
+    const tryExitOrConfirm = (exitApp: () => void) => {
+      if (exitPressedRef.current) {
+        if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+        exitPressedRef.current = false;
+        exitApp();
+      } else {
+        exitPressedRef.current = true;
+        showExitToast();
+        exitTimerRef.current = setTimeout(() => {
+          exitPressedRef.current = false;
+        }, EXIT_CONFIRM_WINDOW);
+      }
+    };
+
     pushSentinel();
 
     const onPopState = () => {
       if (disposed) return;
       if (navStore.canGoBack()) {
         navStore.back();
-        // 消费掉这次返回后补一格哨兵，维持“总有一格可退”。
         pushSentinel();
       }
-      // 栈空：不补哨兵，下一次返回将真正离开页面。
     };
     window.addEventListener("popstate", onPopState);
 
-    // ── 原生 Android：@capacitor/app backButton ──
-    // 动态 import，避免在纯 Web 环境为原生插件付出加载成本；无插件时静默跳过。
     let removeNativeListener: (() => void) | null = null;
     void (async () => {
       try {
@@ -51,7 +72,7 @@ export function useSystemBack(): void {
           if (navStore.canGoBack()) {
             navStore.back();
           } else {
-            void App.exitApp();
+            tryExitOrConfirm(() => void App.exitApp());
           }
         });
         if (disposed) {
@@ -60,7 +81,7 @@ export function useSystemBack(): void {
           removeNativeListener = () => void handle.remove();
         }
       } catch {
-        // 非原生环境或插件不可用：忽略。
+        // Not a native environment or plugin unavailable.
       }
     })();
 
@@ -68,6 +89,7 @@ export function useSystemBack(): void {
       disposed = true;
       window.removeEventListener("popstate", onPopState);
       if (removeNativeListener) removeNativeListener();
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
     };
   }, []);
 }
