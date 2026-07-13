@@ -1,5 +1,25 @@
 apply plugin: 'com.android.application'
 
+def codeLiteVersionFile = new File(rootProject.projectDir, '../../VERSION')
+if (!codeLiteVersionFile.isFile()) {
+    throw new GradleException("VERSION file not found: ${codeLiteVersionFile}")
+}
+
+def codeLiteVersion = System.getenv('CODE_LITE_VERSION') ?: codeLiteVersionFile.getText('UTF-8').trim()
+def codeLiteBuildTime = java.time.ZonedDateTime.now(java.time.ZoneId.of('Asia/Shanghai'))
+def codeLiteBuildId = System.getenv('CODE_LITE_BUILD_ID')
+        ?: codeLiteBuildTime.format(java.time.format.DateTimeFormatter.ofPattern("'build-'yyyy-MM-dd-HH-mm"))
+def codeLiteDisplayVersion = System.getenv('CODE_LITE_DISPLAY_VERSION') ?: "${codeLiteVersion} ${codeLiteBuildId}"
+def codeLiteVersionCodeValue = System.getenv('CODE_LITE_ANDROID_VERSION_CODE')
+if (!codeLiteVersionCodeValue) {
+    def versionCodeEpoch = java.time.LocalDateTime.of(2020, 1, 1, 0, 0)
+    codeLiteVersionCodeValue = java.time.temporal.ChronoUnit.MINUTES.between(
+            versionCodeEpoch,
+            codeLiteBuildTime.toLocalDateTime()
+    ) + 1
+}
+def codeLiteVersionCode = Integer.parseInt(codeLiteVersionCodeValue.toString())
+
 android {
     namespace = "com.codelite.remote"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -8,8 +28,9 @@ android {
         applicationId "com.codelite.remote"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode codeLiteVersionCode
+        versionName codeLiteVersion
+        resValue "string", "code_lite_display_version", codeLiteDisplayVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

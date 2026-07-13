@@ -10,6 +10,17 @@ $repoRoot = $PSScriptRoot
 $uiRemoteDir = Join-Path $repoRoot "ui-remote"
 $androidDir = Join-Path $uiRemoteDir "android"
 $distDir = Join-Path $repoRoot "dist"
+$buildVersionScript = Join-Path $repoRoot "scripts\build-version.mjs"
+
+$buildInfoOutput = & node $buildVersionScript
+if ($LASTEXITCODE -ne 0) {
+  throw "Build version generation failed with exit code $LASTEXITCODE"
+}
+$buildInfo = ($buildInfoOutput -join [Environment]::NewLine) | ConvertFrom-Json
+$env:CODE_LITE_VERSION = [string]$buildInfo.version
+$env:CODE_LITE_BUILD_ID = [string]$buildInfo.buildId
+$env:CODE_LITE_DISPLAY_VERSION = [string]$buildInfo.displayVersion
+$env:CODE_LITE_ANDROID_VERSION_CODE = [string]$buildInfo.androidVersionCode
 
 # Proxy setup
 if ($NoProxy) {
@@ -29,6 +40,9 @@ $apkName = if ($Release) { "app-release-unsigned.apk" } else { "app-debug.apk" }
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Code-Lite Remote Android APK Builder" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Version: $($buildInfo.displayVersion)" -ForegroundColor White
+Write-Host "  Android versionCode: $($buildInfo.androidVersionCode)" -ForegroundColor White
 Write-Host ""
 
 # 1. Build frontend
