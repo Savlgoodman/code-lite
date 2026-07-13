@@ -77,7 +77,7 @@ node .\scripts\build-version.mjs
 | `CODE_LITE_VERSION` | `0.2.1` | 发行版本 |
 | `CODE_LITE_BUILD_ID` | `build-2026-07-13-23-49` | 构建标识 |
 | `CODE_LITE_DISPLAY_VERSION` | `0.2.1 build-2026-07-13-23-49` | 应用内展示版本 |
-| `CODE_LITE_ANDROID_VERSION_CODE` | `3432950` | Android 单调递增整数版本 |
+| `CODE_LITE_ANDROID_VERSION_CODE` | `3435830` | Android 单调递增整数版本 |
 
 这些变量是构建过程的传递值，不应写入仓库配置或长期保存在部署环境中。
 

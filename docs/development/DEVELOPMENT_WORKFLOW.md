@@ -91,7 +91,7 @@ git merge --ff-only feat/settings-0630-model-provider
 git switch dev
 npm run version:set -- 0.1.3
 git status --short
-git add VERSION package.json ui/package.json ui/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
+git add VERSION package.json ui/package.json ui/package-lock.json ui-remote/package.json ui-remote/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
 git commit -m "chore: 升级版本到 0.1.3"
 git rebase master
 git switch master
@@ -117,7 +117,7 @@ git merge --ff-only dev
 git switch dev
 npm run version:set -- 0.1.3
 git status --short
-git add VERSION package.json ui/package.json ui/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
+git add VERSION package.json ui/package.json ui/package-lock.json ui-remote/package.json ui-remote/package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock backend/pyproject.toml backend/uv.lock backend/code_lite_backend/version.py
 git commit -m "chore: 升级版本到 0.1.3"
 git rebase master
 git switch master
