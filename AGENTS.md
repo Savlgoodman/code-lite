@@ -115,6 +115,7 @@ Path("docs/guides/PRD.md").write_text(content, encoding="utf-8")
 | `docs/design/0711-REMOTE-CHAT-RENDER-APPROVAL-FILEREF.md` | 远端聊天渲染增强、审批流修复与文件引用渲染设计，记录 @code-lite/chat-render 共享库、工具组/文件编辑组/详情页、approval.resolved 广播与挂起审批快照恢复、fs.readFile 受控读取与文件引用高亮 |
 | `docs/design/0712-REMOTE-NAV-AND-STREAMING.md` | 远端导航栈架构与 AI 流式环境策略，记录 navStore 栈式路由、统一 ScreenTransition 转场、安卓返回键/PWA popstate 接线、Sheet 瞬态层与 AI 三环境（dev 转发 / PWA 禁用 / 安卓原生插件）流式取舍 |
 | `docs/design/0703-RUNTIME-MODEL-PROVIDER.md` | 模型供应商配置设计，记录统一模型配置与 runtime 原生配置的关系 |
+| `docs/design/0713-IMAGE-GENERATION.md` | 图片生成工作台设计，记录 `@code-lite/image-gen` 共享生图核心包、后端图片供应商配置与生图/提示词优化接口、图片生成记录存储，以及桌面端侧边栏更多工具入口、图片生成列表页与生成页、图片供应商设置 |
 | `docs/guides/BUILD_AND_RELEASE.md` | 编译、打包和发布产物整理流程 |
 | `demo/acp-demo/README.md` | ACP mock、Python SDK probe 和 Codex ACP smoke 使用说明 |
 
