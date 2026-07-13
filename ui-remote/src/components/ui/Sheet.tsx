@@ -3,7 +3,7 @@ import { Portal } from "./Portal";
 
 /**
  * 供 footer / children 调用的带离场动画的关闭函数。
- * 可选传入 after：离场动画结束后执行该回调（如保存），否则执行默认 onClose。
+ * 可选传入 after：离场动画结束并卸载 Sheet 后执行该回调（如保存）。
  */
 export type SheetClose = (after?: () => void) => void;
 
@@ -32,9 +32,12 @@ interface SheetProps {
  */
 export function Sheet({ title, onClose, children, footer, className = "", beforeBody, bodyClassName = "" }: SheetProps) {
   const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
   const afterRef = useRef<(() => void) | null>(null);
 
   const close = useCallback<SheetClose>((after) => {
+    if (closingRef.current) return;
+    closingRef.current = true;
     afterRef.current = after ?? null;
     setClosing(true);
   }, []);
@@ -43,9 +46,10 @@ export function Sheet({ title, onClose, children, footer, className = "", before
     // 只响应抽屉自身的滑出动画，忽略子元素冒泡（如加载 spinner、流光）
     if (e.target !== e.currentTarget) return;
     if (!closing) return;
-    // 有 after 回调则执行它，否则走默认卸载
-    if (afterRef.current) afterRef.current();
-    else onClose();
+    const after = afterRef.current;
+    afterRef.current = null;
+    onClose();
+    after?.();
   };
 
   const renderedChildren = typeof children === "function" ? children(close) : children;
