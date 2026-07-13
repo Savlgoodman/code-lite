@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -41,6 +43,30 @@ class SettingsRoutesTest(unittest.TestCase):
             self.assertIn("配置", labels)
             self.assertIn("附件", labels)
             self.assertIn("runtime-state", labels)
+
+    def test_about_info_uses_injected_build_versions(self) -> None:
+        display_version = "0.2.1 build-2026-07-13-23-49"
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "CODE_LITE_APP_VERSION": display_version,
+                "CODE_LITE_BACKEND_VERSION": display_version,
+            },
+        ):
+            root = Path(temp_dir)
+            services = SimpleNamespace(
+                runtime_config=resolve_runtime_config(
+                    workspace=root,
+                    data_dir_override=root / "data",
+                    agent_adapter_override="router",
+                ),
+                workspace=root,
+            )
+
+            about = _collect_about_info(services)
+
+            self.assertEqual(about["appVersion"], display_version)
+            self.assertEqual(about["backendVersion"], display_version)
 
 
 class FakeRuntimeManager:
