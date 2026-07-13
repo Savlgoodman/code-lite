@@ -58,6 +58,14 @@ const BACKEND_PORT_RANGE_START: u16 = 50000;
 const BACKEND_PORT_RANGE_END: u16 = 60000;
 const BACKEND_SIDECAR: &str = "code-lite-backend";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const APP_BUILD_ID: &str = match option_env!("CODE_LITE_BUILD_ID") {
+    Some(value) => value,
+    None => "build-dev",
+};
+const APP_DISPLAY_VERSION: &str = match option_env!("CODE_LITE_DISPLAY_VERSION") {
+    Some(value) => value,
+    None => APP_VERSION,
+};
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const REPOSITORY_URL: &str = "https://github.com/Savlgoodman/code-lite";
 const AUTHOR_URL: &str = "https://github.com/Savlgoodman";
@@ -328,8 +336,10 @@ fn start_sidecar_backend(app: &tauri::AppHandle, port: u16) -> Result<BackendChi
         .arg("--role")
         .arg("prod")
         .env("PYTHONUTF8", "1")
-        .env("CODE_LITE_APP_VERSION", APP_VERSION)
-        .env("CODE_LITE_BACKEND_VERSION", APP_VERSION)
+        .env("CODE_LITE_APP_VERSION", APP_DISPLAY_VERSION)
+        .env("CODE_LITE_APP_BUILD_ID", APP_BUILD_ID)
+        .env("CODE_LITE_BACKEND_VERSION", APP_DISPLAY_VERSION)
+        .env("CODE_LITE_BACKEND_BUILD_ID", APP_BUILD_ID)
         .spawn()
         .map_err(|error| format!("failed to spawn backend sidecar: {error}"))?;
 
@@ -393,8 +403,10 @@ fn start_dev_backend(port: u16) -> Result<BackendChild, String> {
         .arg("dev")
         .current_dir(&backend_dir)
         .env("PYTHONUTF8", "1")
-        .env("CODE_LITE_APP_VERSION", APP_VERSION)
-        .env("CODE_LITE_BACKEND_VERSION", APP_VERSION)
+        .env("CODE_LITE_APP_VERSION", APP_DISPLAY_VERSION)
+        .env("CODE_LITE_APP_BUILD_ID", APP_BUILD_ID)
+        .env("CODE_LITE_BACKEND_VERSION", APP_DISPLAY_VERSION)
+        .env("CODE_LITE_BACKEND_BUILD_ID", APP_BUILD_ID)
         .stdin(Stdio::null())
         .stdout(
             open_append_log(&log_path)

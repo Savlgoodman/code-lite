@@ -36,6 +36,18 @@ if (-not [string]::IsNullOrWhiteSpace($Version)) {
 }
 & (Join-Path $repoRoot "scripts\set-version.ps1") @versionArgs
 
+$buildInfoOutput = & node (Join-Path $repoRoot "scripts\build-version.mjs")
+if ($LASTEXITCODE -ne 0) {
+  throw "Build version generation failed with exit code $LASTEXITCODE"
+}
+$buildInfo = ($buildInfoOutput -join [Environment]::NewLine) | ConvertFrom-Json
+$env:CODE_LITE_VERSION = [string]$buildInfo.version
+$env:CODE_LITE_BUILD_ID = [string]$buildInfo.buildId
+$env:CODE_LITE_DISPLAY_VERSION = [string]$buildInfo.displayVersion
+$env:CODE_LITE_ANDROID_VERSION_CODE = [string]$buildInfo.androidVersionCode
+
+Write-Host "Building Code Lite $($buildInfo.displayVersion)"
+
 if (-not $SkipDependencySync) {
   npm install --prefix (Join-Path $repoRoot "ui")
   uv sync --project (Join-Path $repoRoot "backend")
