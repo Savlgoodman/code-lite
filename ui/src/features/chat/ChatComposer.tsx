@@ -289,7 +289,12 @@ export function ChatComposer({
     const maxComposerHeight = Math.max(156, Math.floor(workspaceHeight / 2));
     composer.style.maxHeight = `${maxComposerHeight}px`;
     textarea.style.height = "auto";
-    const fixedHeight = composer.scrollHeight - textarea.scrollHeight;
+    // fixedHeight 是 composer 里除文本域外的固定高度（操作行、图片条、内边距）。
+    // 必须用 textarea.offsetHeight（当前渲染高度，此刻为 rows=2 的最小高度）来扣除，
+    // 不能用 textarea.scrollHeight——那是完整内容高度，文字很多时会得到负值，
+    // 导致 maxTextareaHeight 被撑大、文本域不再封顶、overflow 落到 hidden，
+    // 结果只能靠方向键移动光标滚动、滚轮失效。
+    const fixedHeight = composer.scrollHeight - textarea.offsetHeight;
     const maxTextareaHeight = Math.max(48, maxComposerHeight - fixedHeight);
     const nextHeight = Math.min(textarea.scrollHeight, maxTextareaHeight);
     textarea.style.height = `${nextHeight}px`;
