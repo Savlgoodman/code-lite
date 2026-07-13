@@ -21,9 +21,10 @@
       "@code-lite/transport": ["../packages/transport/src/index.ts"],
       "@code-lite/chat-core": ["../packages/chat-core/src/index.ts"],
       "@code-lite/sync": ["../packages/sync/src/index.ts"],
-      "@code-lite/chat-render": ["../packages/chat-render/src/index.ts"]
+      "@code-lite/chat-render": ["../packages/chat-render/src/index.ts"],
+      "@code-lite/image-gen": ["../packages/image-gen/src/index.ts"]
     }
   },
-  "include": ["src", "../packages/protocol/src", "../packages/transport/src", "../packages/chat-core/src", "../packages/sync/src", "../packages/chat-render/src"],
+  "include": ["src", "../packages/protocol/src", "../packages/transport/src", "../packages/chat-core/src", "../packages/sync/src", "../packages/chat-render/src", "../packages/image-gen/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
