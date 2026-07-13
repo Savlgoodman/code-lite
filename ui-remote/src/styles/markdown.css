@@ -226,6 +226,24 @@
   background: var(--shiki-dark-bg, var(--sdm-tbg));
 }
 
+/* ── KaTeX 公式块横向滚动 ── */
+
+.streamdown-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 4px 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.streamdown-body .katex-display::-webkit-scrollbar { height: 6px; }
+.streamdown-body .katex-display::-webkit-scrollbar-track { background: transparent; }
+.streamdown-body .katex-display::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--line);
+}
+
 /* 表格 */
 .markdown-table-scroll {
   width: 100%;

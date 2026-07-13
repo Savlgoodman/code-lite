@@ -567,3 +567,28 @@
   font-size: 14px;
   line-height: 1.6;
 }
+
+/* ── 退出确认 Toast ── */
+
+.exit-confirm-toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  z-index: var(--z-toast);
+  padding: 10px 20px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 14px;
+  white-space: nowrap;
+  box-shadow: var(--shadow-toast);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast), transform var(--dur-fast);
+}
+
+.exit-confirm-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
