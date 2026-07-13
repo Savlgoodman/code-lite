@@ -40,6 +40,10 @@ interface ChatWorkspaceProps {
   onDraftImagesAdd: (files: File[]) => void;
   onDraftImageRemove: (id: string) => void;
   onModelFamilyChange: (value: string) => void;
+  onOptimizePrompt?: () => void;
+  optimizePromptEnabled?: boolean;
+  optimizePromptCanUndo?: boolean;
+  optimizingPrompt?: boolean;
   onReasoningEffortChange: (value: string) => void;
   onResolveApproval: (decision: "allow" | "deny") => void;
   onResolveInput: (action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => void;
@@ -88,6 +92,10 @@ export function ChatWorkspace({
   onDraftImagesAdd,
   onDraftImageRemove,
   onModelFamilyChange,
+  onOptimizePrompt,
+  optimizePromptEnabled,
+  optimizePromptCanUndo,
+  optimizingPrompt,
   onReasoningEffortChange,
   onResolveApproval,
   onResolveInput,
@@ -142,6 +150,10 @@ export function ChatWorkspace({
         onDraftImagesAdd={onDraftImagesAdd}
         onDraftImageRemove={onDraftImageRemove}
         onModelFamilyChange={onModelFamilyChange}
+        onOptimizePrompt={onOptimizePrompt}
+        optimizePromptEnabled={optimizePromptEnabled}
+        optimizePromptCanUndo={optimizePromptCanUndo}
+        optimizingPrompt={optimizingPrompt}
         onReasoningEffortChange={onReasoningEffortChange}
         onResolveApproval={onResolveApproval}
         onResolveInput={onResolveInput}

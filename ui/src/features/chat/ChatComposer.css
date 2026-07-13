@@ -165,6 +165,25 @@
   }
 }
 
+.composer-optimize-button {
+  color: var(--accent-primary);
+  transition: color var(--transition-base), background var(--transition-base);
+}
+
+.composer-optimize-button:hover:not(:disabled) {
+  background: var(--accent-secondary);
+}
+
+.composer-optimize-button.can-undo {
+  color: var(--text-tertiary);
+}
+
+.composer-optimize-button:disabled {
+  color: var(--text-tertiary);
+  opacity: 0.55;
+  cursor: default;
+}
+
 .composer-left,
 .composer-right {
   display: flex;

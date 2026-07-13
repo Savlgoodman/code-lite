@@ -33,6 +33,7 @@ export function ImageGenDetailView({ state, onBack }: ImageGenDetailViewProps) {
     textModels,
     params,
     optimizeModelId,
+    optimizeEnabled,
     loading,
     generating,
     optimizing,
@@ -82,29 +83,31 @@ export function ImageGenDetailView({ state, onBack }: ImageGenDetailViewProps) {
                 />
               </label>
 
-              <div className="imggen-optimize-row">
-                <select
-                  className="imggen-select"
-                  onChange={(event) => state.setOptimizeModelId(event.target.value)}
-                  value={optimizeModelId}
-                >
-                  {textModels.length === 0 ? <option value="">无可用文本模型</option> : null}
-                  {textModels.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="imggen-secondary-button"
-                  disabled={optimizing || !params.prompt.trim() || !optimizeModelId}
-                  onClick={() => void state.optimizePrompt()}
-                  type="button"
-                >
-                  {optimizing ? <Loader2 className="imggen-spin" size={14} /> : <Wand2 size={14} />}
-                  <span>优化提示词</span>
-                </button>
-              </div>
+              {optimizeEnabled ? (
+                <div className="imggen-optimize-row">
+                  <select
+                    className="imggen-select"
+                    onChange={(event) => state.setOptimizeModelId(event.target.value)}
+                    value={optimizeModelId}
+                  >
+                    {textModels.length === 0 ? <option value="">无可用文本模型</option> : null}
+                    {textModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="imggen-secondary-button"
+                    disabled={optimizing || !params.prompt.trim() || !optimizeModelId}
+                    onClick={() => void state.optimizePrompt()}
+                    type="button"
+                  >
+                    {optimizing ? <Loader2 className="imggen-spin" size={14} /> : <Wand2 size={14} />}
+                    <span>优化提示词</span>
+                  </button>
+                </div>
+              ) : null}
 
               <label className="imggen-field">
                 <span>图片供应商</span>

@@ -12,7 +12,9 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from code_lite_backend.api.dependencies import get_services
+from code_lite_backend.services.feature_config import DEFAULT_IMAGE_PROMPT
 from code_lite_backend.services.image_config import ImageConfigError
+from code_lite_backend.services.prompt_optimize import optimize_prompt as optimize_with_model
 from code_lite_backend.services.runtime import AppServices
 
 
@@ -293,13 +295,19 @@ async def optimize_prompt(
     payload: dict[str, Any],
     services: AppServices = Depends(get_services),
 ) -> JSONResponse:
-    model_id = str(payload.get("modelId") or "").strip()
     prompt = str(payload.get("prompt") or "").strip()
     style = str(payload.get("style") or "").strip()
     if not prompt:
         return JSONResponse({"error": "请输入待优化的提示词"}, status_code=400)
+
+    feature_settings = await asyncio.to_thread(services.feature_config_store.get_prompt_optimize)
+    if not feature_settings.get("imageEnabled", True):
+        return JSONResponse({"error": "生图提示词优化已在设置中关闭"}, status_code=400)
+
+    # modelId 优先取请求参数，否则回退到功能设置里配置的默认优化模型。
+    model_id = str(payload.get("modelId") or "").strip() or str(feature_settings.get("modelId") or "").strip()
     if not model_id:
-        return JSONResponse({"error": "请选择用于优化的文本模型"}, status_code=400)
+        return JSONResponse({"error": "请在设置的功能页选择用于优化的文本模型"}, status_code=400)
 
     resolved = await asyncio.to_thread(services.model_config_store.resolve_model, model_id)
     if resolved is None:
@@ -309,14 +317,16 @@ async def optimize_prompt(
         resolved.provider_id,
     )
 
+    system_prompt = str(feature_settings.get("imagePrompt") or "").strip() or DEFAULT_IMAGE_PROMPT
+    user_content = prompt if not style else f"{prompt}\n\n偏好风格：{style}"
     try:
         optimized = await asyncio.to_thread(
-            _call_prompt_optimizer,
+            optimize_with_model,
             base_url=connection["baseUrl"],
             api_key=connection["apiKey"],
             model=resolved.model,
-            prompt=prompt,
-            style=style,
+            system_prompt=system_prompt,
+            user_prompt=user_content,
         )
     except RuntimeError as error:
         return JSONResponse({"error": str(error)}, status_code=502)
@@ -465,51 +475,3 @@ def _build_multipart(
     lines.append(b"")
     body = b"\r\n".join(lines)
     return body, f"multipart/form-data; boundary={boundary}"
-
-
-def _call_prompt_optimizer(
-    *,
-    base_url: str,
-    api_key: str,
-    model: str,
-    prompt: str,
-    style: str,
-) -> str:
-    endpoint = _image_endpoint(base_url, "chat/completions")
-    system = (
-        "你是图像生成提示词优化助手。请把用户给出的图片描述扩写成更精细、结构清晰、"
-        "利于文生图模型理解的提示词，补充画面主体、风格、光照、构图、细节等要素，"
-        "保持与用户输入相同的语言，只返回优化后的提示词本身，不要解释、不要加引号。"
-    )
-    user_content = prompt if not style else f"{prompt}\n\n偏好风格：{style}"
-    request_body = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_content},
-        ],
-        "temperature": 0.7,
-    }).encode("utf-8")
-    request = Request(
-        endpoint,
-        data=request_body,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8", errors="replace"))
-    except HTTPError as error:
-        raise RuntimeError(f"提示词优化接口返回 {error.code}") from error
-    except (OSError, URLError, TimeoutError) as error:
-        raise RuntimeError("无法连接文本模型供应商") from error
-    except json.JSONDecodeError as error:
-        raise RuntimeError("文本模型返回内容无法解析") from error
-
-    choices = payload.get("choices") if isinstance(payload, dict) else None
-    if isinstance(choices, list) and choices:
-        message = choices[0].get("message") if isinstance(choices[0], dict) else None
-        content = message.get("content") if isinstance(message, dict) else None
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-    raise RuntimeError("提示词优化结果为空")

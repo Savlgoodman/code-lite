@@ -10,11 +10,13 @@ import {
   Hand,
   Loader2,
   Plus,
+  RotateCcw,
   Send,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
   Square,
+  Wand2,
   X
 } from "lucide-react";
 
@@ -88,6 +90,10 @@ interface ChatComposerProps {
   onDraftImagesAdd: (files: File[]) => void;
   onDraftImageRemove: (id: string) => void;
   onModelFamilyChange: (familyId: string) => void;
+  onOptimizePrompt?: () => void;
+  optimizePromptEnabled?: boolean;
+  optimizePromptCanUndo?: boolean;
+  optimizingPrompt?: boolean;
   onReasoningEffortChange: (value: string) => void;
   onResolveApproval: (decision: "allow" | "deny") => void;
   onResolveInput: (action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => void;
@@ -139,6 +145,10 @@ export function ChatComposer({
   onDraftImagesAdd,
   onDraftImageRemove,
   onModelFamilyChange,
+  onOptimizePrompt,
+  optimizePromptEnabled,
+  optimizePromptCanUndo,
+  optimizingPrompt,
   onReasoningEffortChange,
   onResolveApproval,
   onResolveInput,
@@ -622,6 +632,17 @@ export function ChatComposer({
                 if (!sendDisabled) {
                   onSendMessage();
                 }
+                return;
+              }
+              // 优化提示词后未改动时，Ctrl+Z（Cmd+Z）撤销本次优化。
+              if (
+                optimizePromptCanUndo
+                && (event.ctrlKey || event.metaKey)
+                && !event.shiftKey
+                && (event.key === "z" || event.key === "Z")
+              ) {
+                event.preventDefault();
+                onOptimizePrompt?.();
               }
             }}
             onPaste={(event) => {
@@ -727,6 +748,25 @@ export function ChatComposer({
                     </div>
                   ) : null}
                 </div>
+              ) : null}
+              {/* 提示词优化魔法棒：开启 code agent 提示词优化后显示。 */}
+              {optimizePromptEnabled ? (
+                <button
+                  className={`icon-button composer-optimize-button ${optimizePromptCanUndo ? "can-undo" : ""}`}
+                  aria-label={optimizePromptCanUndo ? "撤销提示词优化" : "优化提示词"}
+                  disabled={Boolean(activeTurnId) || optimizingPrompt || (!optimizePromptCanUndo && draft.trim().length === 0)}
+                  onClick={() => onOptimizePrompt?.()}
+                  title={optimizePromptCanUndo ? "撤销优化（Ctrl+Z）" : "一键优化提示词"}
+                  type="button"
+                >
+                  {optimizingPrompt ? (
+                    <Loader2 className="composer-spin" size={17} />
+                  ) : optimizePromptCanUndo ? (
+                    <RotateCcw size={17} />
+                  ) : (
+                    <Wand2 size={17} />
+                  )}
+                </button>
               ) : null}
             </div>
 

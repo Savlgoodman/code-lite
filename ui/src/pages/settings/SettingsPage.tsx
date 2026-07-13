@@ -5,6 +5,7 @@ import { AcpConnectionSettings } from "./AcpConnectionSettings";
 import { AgentRuntimeSettings } from "./AgentRuntimeSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ArchivedSessionsSettings } from "./ArchivedSessionsSettings";
+import { FeaturesSettings } from "./FeaturesSettings";
 import { LogsSettings } from "./LogsSettings";
 import { ImageProvidersSettings } from "./ImageProvidersSettings";
 import { ModelProvidersSettings } from "./ModelProvidersSettings";
@@ -25,6 +26,7 @@ export function SettingsPage({
   return (
     <SettingsLayout activeSection={activeSection} onBack={onBack} onSectionChange={setActiveSection}>
       {activeSection === "appearance" ? <AppearanceSettings /> : null}
+      {activeSection === "features" ? <FeaturesSettings /> : null}
       {activeSection === "agents" ? <AgentRuntimeSettings /> : null}
       {activeSection === "acp" ? <AcpConnectionSettings /> : null}
       {activeSection === "providers" ? <ModelProvidersSettings /> : null}

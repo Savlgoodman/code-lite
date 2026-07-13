@@ -466,6 +466,20 @@ export interface SavedModelProviderResult {
   settings?: ModelSettingsState;
 }
 
+/** 功能设置：提示词优化开关、模型与 prompt 模板。 */
+export interface PromptOptimizeSettings {
+  /** 生图提示词优化开关（默认开启）。 */
+  imageEnabled: boolean;
+  /** code agent 提示词优化开关（默认关闭，开启后输入框显示魔法棒）。 */
+  codeEnabled: boolean;
+  /** 优化使用的产品级文本模型 id（ModelSettingsState.models[].id）。 */
+  modelId: string;
+  /** 生图提示词优化的 system 模板。 */
+  imagePrompt: string;
+  /** code 提示词优化的 system 模板，可含 {AGENTS.md} / {CLAUDE.md} 占位符。 */
+  codePrompt: string;
+}
+
 export interface AppAboutGitInfo {
   branch: string;
   commit: string;

@@ -13,6 +13,7 @@ from code_lite_backend.services.billing_prices import BillingPriceStore
 from code_lite_backend.services.billing_usage import BillingUsageRecorder
 from code_lite_backend.services.conversation_recorder import ConversationRecorder
 from code_lite_backend.services.event_bus import SessionEventBus
+from code_lite_backend.services.feature_config import FeatureConfigStore
 from code_lite_backend.services.image_config import ImageProviderConfigStore
 from code_lite_backend.services.inputs import InputBroker
 from code_lite_backend.services.model_config import ModelConfigStore
@@ -42,6 +43,7 @@ class AppServices:
     model_config_store: ModelConfigStore
     image_provider_config_store: ImageProviderConfigStore
     image_record_store: ImageRecordStore
+    feature_config_store: FeatureConfigStore
     agent_runtime_config_store: AgentRuntimeConfigStore
     agent_adapter: AgentAdapter
     runtime_manager: AcpRuntimeManager | None = None
