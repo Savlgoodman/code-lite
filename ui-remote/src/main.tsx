@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { APP_BUILD_INFO } from "./lib/buildInfo";
 import "streamdown/styles.css";
 import "./styles/index.css";
 
@@ -59,7 +60,7 @@ createRoot(document.getElementById("root")!).render(
   }
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((err) => {
+    navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(APP_BUILD_INFO.buildId)}`).catch((err) => {
       console.warn("[pwa] service worker 注册失败:", err);
     });
   });

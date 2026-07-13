@@ -1,5 +1,6 @@
 import { Github, User, Check, X, Cpu, Smartphone } from "lucide-react";
 import { Sheet } from "../components/ui";
+import { APP_BUILD_INFO } from "../lib/buildInfo";
 import { getEnvironmentInfo } from "../lib/environment";
 
 interface AboutSheetProps {
@@ -29,6 +30,10 @@ export function AboutSheet({ onClose }: AboutSheetProps) {
         <div className="about-section">
           <h4 className="about-section-title">运行环境</h4>
           <div className="about-rows">
+            <div className="about-row">
+              <span className="about-row-label">版本</span>
+              <span className="about-row-value about-version">{APP_BUILD_INFO.displayVersion}</span>
+            </div>
             <div className="about-row">
               <span className="about-row-label"><Smartphone size={15} /> 环境</span>
               <span className="about-row-value">{env.label}</span>

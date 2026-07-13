@@ -180,6 +180,12 @@
   font-weight: 500;
 }
 
+.about-version {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .about-inline {
   display: inline-flex;
   align-items: center;
