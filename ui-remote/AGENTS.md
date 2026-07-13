@@ -302,6 +302,14 @@ AI 对话是**独立于 code-lite 业务**的附加模块，直连大模型 API�
 与 `/v1/responses`）。它的可用性**取决于运行环境**，判定集中在 `lib/environment.ts`
 的 `isAiAvailable()`，**新增任何 AI 入口都必须先过这道闸**。
 
+**图片生成**（AI Tab 内切换、`ImageGenPage`、图片供应商配置）与 AI 对话同构，直连供应商
+`/v1/images/generations`、`/v1/images/edits`（参考图走 base64 JSON，不用 multipart）与
+`/v1/chat/completions`（提示词优化），**同样受 `isAiAvailable()` gate**。请求经
+`services/imageHttp.ts` 分流：dev 走 `/ai-proxy` fetch，原生走 `@capacitor/core` 内置
+`CapacitorHttp`（非流式 JSON，能拿 status）。图片二进制存 IndexedDB（`imageBlobStore`），
+供应商/记录元数据存 Preferences（`ImageProviderStore` / `ImageGenStore`）。生图核心逻辑在
+共享包 `@code-lite/image-gen` 的直连客户端。详见 `docs/design/0713-IMAGE-GENERATION.md` 第 10 节。
+
 ### 为什么要按环境区分
 
 浏览器的 CORS 是拦在“网页 JS 读取跨域响应”这一层的安全机制，**任何网页内代码都无法绕过**。
