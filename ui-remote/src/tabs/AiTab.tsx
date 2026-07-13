@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Plus, Archive, Trash2, MessageSquare, Smartphone, Image as ImageIcon, Sparkles } from "lucide-react";
-import { Fab, EmptyState } from "../components/ui";
+import { Fab, EmptyState, Portal } from "../components/ui";
 import { BlobImage } from "../components/BlobImage";
 import { useAiConversations } from "../hooks/useAiConversations";
 import { useAiProviders } from "../hooks/useAiProviders";
@@ -44,15 +44,19 @@ export function AiTab({ onOpenConversation, onOpenImageRecord, active = true }: 
   }
 
   // 右下角加号上方的模式切换按钮（生图 <-> 聊天）。
+  // 经 Portal 渲染到 body：脱离 HomePager 的 translateX transform 容器，否则会被
+  // 轨道盒裁剪/错位而看不见（与 Fab 同理，见 ui-remote/AGENTS.md）。
   const modeToggle = active ? (
-    <button
-      className="ai-mode-toggle"
-      onClick={() => setMode((m) => (m === "chat" ? "image" : "chat"))}
-      aria-label={mode === "chat" ? "切换到图片生成" : "切换到 AI 对话"}
-      title={mode === "chat" ? "切换到图片生成" : "切换到 AI 对话"}
-    >
-      {mode === "chat" ? <ImageIcon size={20} /> : <MessageSquare size={20} />}
-    </button>
+    <Portal>
+      <button
+        className="ai-mode-toggle"
+        onClick={() => setMode((m) => (m === "chat" ? "image" : "chat"))}
+        aria-label={mode === "chat" ? "切换到图片生成" : "切换到 AI 对话"}
+        title={mode === "chat" ? "切换到图片生成" : "切换到 AI 对话"}
+      >
+        {mode === "chat" ? <ImageIcon size={20} /> : <MessageSquare size={20} />}
+      </button>
+    </Portal>
   ) : null;
 
   if (mode === "image") {
