@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { ArrowLeft, ArrowDown, Image, Loader2, Send, Cpu, Square, X } from "lucide-react";
 import { MessageRenderer } from "../components/MessageRenderer";
 import { AiModelSheet } from "../sheets/AiModelSheet";
+import { ImageSourceSheet } from "../sheets/ImageSourceSheet";
 import { EmptyState, Portal, TextArea } from "../components/ui";
 import { formatMessageTime, formatFullDateTime } from "../lib/formatters";
 import {
@@ -21,6 +22,7 @@ import {
   revokeDraftImage,
   type DraftImage,
 } from "../lib/draftImages";
+import { chooseGalleryImages, takeCameraPhoto } from "../lib/imagePicker";
 
 interface AiChatPageProps {
   conversationId: string;
@@ -41,6 +43,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [showModelSheet, setShowModelSheet] = useState(false);
+  const [showImageSourceSheet, setShowImageSourceSheet] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   const [resolved, setResolved] = useState<{ model: AiModel; provider: AiProvider } | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -48,6 +51,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
   // 系统返回键优先关闭这些瞬态层
   useDismissable(previewImage !== null, () => setPreviewImage(null));
   useDismissable(showModelSheet, () => setShowModelSheet(false));
+  useDismissable(showImageSourceSheet, () => setShowImageSourceSheet(false));
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -233,6 +237,50 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 
   const filesFromList = (list: FileList | null) =>
     Array.from(list ?? []).filter((file) => file.type.startsWith("image/"));
+
+  const handleOpenImageSources = () => {
+    if (!resolved) {
+      setDraftImageError("请先选择可用模型。");
+      return;
+    }
+    if (!multimodal) {
+      setDraftImageError("当前模型未启用图片能力，请在 AI 设置中开启“支持多模态（图片）”。");
+      return;
+    }
+    setDraftImageError(null);
+    setShowImageSourceSheet(true);
+  };
+
+  const handlePickImages = async (source: "gallery" | "camera") => {
+    if (isRunning || imagesProcessing) return;
+    if (!resolved) {
+      setDraftImageError("请先选择可用模型。");
+      return;
+    }
+    if (!multimodal) {
+      setDraftImageError("当前模型未启用图片能力，请在 AI 设置中开启“支持多模态（图片）”。");
+      return;
+    }
+
+    const slots = Math.max(0, MAX_DRAFT_IMAGES - draftImagesRef.current.length);
+    if (slots <= 0) {
+      setDraftImageError(`最多添加 ${MAX_DRAFT_IMAGES} 张图片。`);
+      return;
+    }
+
+    setDraftImageError(null);
+    setImagesProcessing(true);
+    try {
+      const files = source === "camera"
+        ? await takeCameraPhoto(fileInputRef.current)
+        : await chooseGalleryImages(fileInputRef.current, slots);
+      if (files) await addDraftImages(files);
+    } catch (error) {
+      setDraftImageError(error instanceof Error ? error.message : "无法打开系统图片选择器。");
+    } finally {
+      setImagesProcessing(false);
+    }
+  };
 
   // ── 发送 / 取消 ──
 
@@ -458,8 +506,8 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
               className="input-config-btn"
               aria-label={multimodal ? "添加图片" : "当前模型不支持图片"}
               title={multimodal ? "添加图片" : "当前模型不支持图片"}
-              disabled={isRunning || imagesProcessing || !multimodal}
-              onClick={() => fileInputRef.current?.click()}
+              disabled={isRunning || imagesProcessing}
+              onClick={handleOpenImageSources}
             >
               {imagesProcessing ? <Loader2 className="draft-image-spin" size={18} /> : <Image size={18} />}
             </button>
@@ -488,6 +536,14 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
           value={conversation?.modelRefId ?? ""}
           onClose={() => setShowModelSheet(false)}
           onSelect={handleSelectModel}
+        />
+      )}
+
+      {showImageSourceSheet && (
+        <ImageSourceSheet
+          onClose={() => setShowImageSourceSheet(false)}
+          onChooseGallery={() => void handlePickImages("gallery")}
+          onTakePhoto={() => void handlePickImages("camera")}
         />
       )}
 
