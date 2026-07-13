@@ -24,7 +24,6 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(function 
   forwardedRef,
 ) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
-  const composingRef = useRef(false);
 
   const setRef = (el: HTMLTextAreaElement | null) => {
     innerRef.current = el;
@@ -32,7 +31,7 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(function 
     else if (forwardedRef) forwardedRef.current = el;
   };
 
-  const { native, handlers } = useDefensiveTextValue(innerRef, value, onValueChange);
+  const { native, composingRef, handlers } = useDefensiveTextValue(innerRef, value, onValueChange);
 
   // 原生 App 半受控（defaultValue），浏览器完全受控（value）。见 useDefensiveTextValue。
   return (
@@ -42,12 +41,10 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(function 
       {...(native ? { defaultValue: value } : { value })}
       {...handlers}
       onCompositionStart={(e) => {
-        composingRef.current = true;
         handlers.onCompositionStart();
         void e;
       }}
       onCompositionEnd={(e) => {
-        composingRef.current = false;
         handlers.onCompositionEnd(e);
       }}
       onKeyDown={(e) => {

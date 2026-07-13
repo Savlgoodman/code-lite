@@ -1,5 +1,7 @@
-import { useRef, useLayoutEffect, type RefObject } from "react";
+import { useEffect, useRef, useLayoutEffect, type RefObject } from "react";
 import { isNativeApp } from "../../lib/environment";
+
+const NATIVE_VALUE_POLL_MS = 32;
 
 /**
  * useDefensiveTextValue — 受控/半受控文本输入的取值逻辑（input 与 textarea 共用）。
@@ -20,12 +22,14 @@ import { isNativeApp } from "../../lib/environment";
  *
  * - **原生 App（Capacitor Android/iOS）**：改为**半受控**（渲染 `defaultValue`，不写 `value`）。
  *   IME 完全拥有 DOM，React 渲染绝不回写 `el.value`，从根源消除组合被打断的问题。
- *   仅在两种情况由本 hook 显式回写 DOM：`value` prop 被外部改动（如发送后清空）且**当前不在
- *   组合期**时，用 useLayoutEffect 对齐一次。用户输入经 onInput/onChange 单向同步进 state，
- *   稳态下 `value` 与 `el.value` 相等，effect 不会触发写入，不打断输入。
+ *   只有输入框失焦后，`value` prop 的外部改动（如发送后清空）才由 useLayoutEffect 回写 DOM。
+ *   用户输入优先经事件同步；聚焦期间还会低成本轮询 DOM value，覆盖不派发
+ *   input/change/compositionend 的安卓输入法。由于原生路径不渲染 `value`，组合期间同步 state
+ *   也不会回写 DOM 或打断候选词。
  *
- * 返回 { native, handlers }：native 供组件决定渲染 `value` 还是 `defaultValue`；handlers
- * 展开到 <input>/<textarea>。ref 必须指向该元素。
+ * 返回 { native, composingRef, handlers }：native 供组件决定渲染 `value` 还是 `defaultValue`；
+ * composingRef 供 TextArea 判断回车是否处于选词期；handlers 展开到 <input>/<textarea>。
+ * ref 必须指向该元素。
  */
 export function useDefensiveTextValue<T extends HTMLInputElement | HTMLTextAreaElement>(
   ref: RefObject<T | null>,
@@ -33,35 +37,92 @@ export function useDefensiveTextValue<T extends HTMLInputElement | HTMLTextAreaE
   onValueChange: (value: string) => void,
 ) {
   const composingRef = useRef(false);
+  const focusedRef = useRef(false);
   const valueRef = useRef(value);
+  const onValueChangeRef = useRef(onValueChange);
   valueRef.current = value;
+  onValueChangeRef.current = onValueChange;
   const native = isNativeApp();
 
-  // 原生半受控：仅当 value prop 与 DOM 分歧（外部改动，如发送清空）且非组合期时，对齐 DOM。
-  // 稳态输入下 value === el.value，不触发写入，故不会打断 IME。浏览器路径完全不进这里。
+  // 某些安卓输入法只改 DOM value，不稳定派发 React 能收到的输入/组合事件。原生 App 的
+  // textarea/input 是半受控的，因此聚焦期间可直接轮询 DOM 真值，不会触发 React 回写。
+  useEffect(() => {
+    if (!native) return;
+    const el = ref.current;
+    if (!el) return;
+
+    let timer: number | null = null;
+    let blurFrame: number | null = null;
+    const reconcile = () => {
+      if (el.value !== valueRef.current) onValueChangeRef.current(el.value);
+    };
+    const start = () => {
+      focusedRef.current = true;
+      if (blurFrame !== null) {
+        cancelAnimationFrame(blurFrame);
+        blurFrame = null;
+      }
+      reconcile();
+      if (timer === null) timer = window.setInterval(reconcile, NATIVE_VALUE_POLL_MS);
+    };
+    const stop = () => {
+      focusedRef.current = false;
+      composingRef.current = false;
+      reconcile();
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+      // onValueChange 可能会过滤字符且返回相同 state，React 此时不会重渲染；失焦后一帧
+      // 主动对齐一次，既清掉被过滤的 DOM 字符，也不会干扰已经结束的 IME 组合。
+      blurFrame = requestAnimationFrame(() => {
+        blurFrame = null;
+        if (document.activeElement !== el && el.value !== valueRef.current) {
+          el.value = valueRef.current;
+        }
+      });
+    };
+
+    el.addEventListener("focus", start);
+    el.addEventListener("blur", stop);
+    if (document.activeElement === el) start();
+
+    return () => {
+      el.removeEventListener("focus", start);
+      el.removeEventListener("blur", stop);
+      if (timer !== null) window.clearInterval(timer);
+      if (blurFrame !== null) cancelAnimationFrame(blurFrame);
+      focusedRef.current = false;
+    };
+  }, [native, ref]);
+
+  // 原生半受控：输入框聚焦期间 DOM 拥有绝对控制权，即使输入法没有派发 compositionstart，
+  // React 也不会把稍旧的 state 写回并吞掉尾字。失焦后的外部改动（如发送清空）才对齐 DOM。
   useLayoutEffect(() => {
     if (!native) return;
     const el = ref.current;
-    if (!el || composingRef.current) return;
+    if (!el || focusedRef.current || composingRef.current) return;
     if (el.value !== value) el.value = value;
   }, [native, value, ref]);
 
   const sync = (next: string) => {
-    if (next !== valueRef.current) onValueChange(next);
+    if (next !== valueRef.current) onValueChangeRef.current(next);
   };
 
-  // 读「下一帧稳定后」的真实 DOM 值，补齐安卓预测/滑行滞后的字符（仅原生 App，且非组合期）。
+  // 读「下一帧稳定后」的真实 DOM 值，补齐安卓预测/滑行滞后的字符。原生路径半受控，
+  // 组合期间同步 state 也不会把旧 value 写回 DOM，因此无需跳过。
   const reconcileNextFrame = () => {
     if (!native) return;
     requestAnimationFrame(() => {
       const el = ref.current;
-      if (!el || composingRef.current) return;
-      if (el.value !== valueRef.current) onValueChange(el.value);
+      if (!el) return;
+      if (el.value !== valueRef.current) onValueChangeRef.current(el.value);
     });
   };
 
   return {
     native,
+    composingRef,
     handlers: {
       // 浏览器路径依赖它把 DOM 值持续写回 state（含组合期），否则受控 input 会 revert
       // 正在输入的 IME 拼音；原生路径它只做单向同步，不触发 DOM 回写。
@@ -81,7 +142,12 @@ export function useDefensiveTextValue<T extends HTMLInputElement | HTMLTextAreaE
         // 组合结束以最终 DOM 值为准同步一次。
         sync((e.target as T).value);
       },
+      onCompositionUpdate: (e: React.CompositionEvent<T>) => {
+        if (native) sync((e.target as T).value);
+      },
       onBlur: (e: React.FocusEvent<T>) => {
+        // 部分安卓输入法不派发 compositionend，失焦必须解除组合态。
+        composingRef.current = false;
         sync(e.target.value);
       },
     },

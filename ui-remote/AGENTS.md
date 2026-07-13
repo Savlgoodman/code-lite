@@ -207,8 +207,8 @@ import { Sheet, Button, Input, TextArea, Fab, EmptyState, Select, EffortSlider, 
 | 组件 | 用途 | 关键点 |
 |---|---|---|
 | `Button` | 通用按钮 | `variant="primary"\|"secondary"`、`block`；透传原生 button 属性 |
-| `Input` | 单行文本输入 | 防御式读值（见 `textFieldValue.ts`）：**按环境分两套渲染**——浏览器（dev/PWA/web）完全受控（`value`），原生 App 半受控（`defaultValue`，DOM 回写交给 hook 的 layout effect）以免 IME 组合被受控回写打断，解决安卓「打字检测不到、发送前吞字」。用 `value` + `onValueChange`，别再用裸 `<input>` 收表单值 |
-| `TextArea` | 多行文本输入 | 与 `Input` 同源防御式取值（同样按环境分受控/半受控）；`onEnter` 在非 IME 组合期回车触发（供回车发送，组合选词的回车不误发）。消息输入框等一律用它，别用裸 `<textarea>` |
+| `Input` | 单行文本输入 | 防御式读值（见 `textFieldValue.ts`）：**按环境分两套渲染**——浏览器（dev/PWA/web）完全受控（`value`）；原生 App 半受控（`defaultValue`），聚焦期间 DOM 拥有值且每 32ms 轮询同步 state，失焦后才允许外部 value 回写，覆盖不派发 input/change/compositionend 的安卓输入法。用 `value` + `onValueChange`，别再用裸 `<input>` 收表单值 |
+| `TextArea` | 多行文本输入 | 与 `Input` 同源防御式取值（同样按环境分受控/半受控），并与 hook 共用 composition 状态；`onEnter` 在非 IME 组合期回车触发（供回车发送，组合选词的回车不误发）。消息输入框等一律用它，别用裸 `<textarea>` |
 | `Fab` | 悬浮操作按钮 | `variant="primary"\|"secondary"`、`active`；**经 Portal 渲染到 body**（脱离 HomePager 的 transform）；仅在所属 Tab 激活时渲染 |
 | `Sheet` | 底部抽屉弹层 | 见下，所有弹窗的基座 |
 | `Select` | 自定义下拉 | 内联展开面板（原生 `<select>` 面板无法跨端定制）；`options: {value,label}[]` |
@@ -374,8 +374,9 @@ remote 死活不生效"——极易误判成逻辑/解析 bug（曾为此绕一�
   再 Clear site data，然后硬刷新（Ctrl+Shift+R）。
 - **发版/PWA 部署**：改动静态资源缓存策略或需要强制刷新时，升 `sw.js` 的 `CACHE_VERSION`
   （activate 时会清理非当前版本的缓存），否则老用户拉不到新 bundle。
-- **安卓 App**：Capacitor 壳内不走 SW，但 JS 是打包进 APK 的；改动需重新 `npm run build`
-  打包并重装，旧 APK 里是旧代码。
+- **安卓 App**：Capacitor 壳内不注册 SW；`main.tsx` 会主动注销历史版本可能留下的 SW 并清理
+  `code-lite-remote-*` 缓存，受旧 worker 控制时清理后重载一次。JS 仍是打包进 APK 的，改动需
+  重新 `npm run build`、`npx cap sync android` 并重装，旧 APK 里是旧代码。
 
 ## 快速自查清单（改 UI 前后过一遍）
 

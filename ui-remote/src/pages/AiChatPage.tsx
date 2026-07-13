@@ -13,6 +13,7 @@ import {
 import { aiProviderStore, type AiModel, type AiProvider } from "../services/AiProviderStore";
 import { streamChat, blobToDataUrl } from "../services/aiClient";
 import { useDismissable } from "../hooks/useDismissable";
+import { useNativeRepaint } from "../hooks/useNativeRepaint";
 import {
   IMAGE_ACCEPT,
   MAX_DRAFT_IMAGES,
@@ -52,6 +53,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
   const draftImagesRef = useRef<DraftImage[]>([]);
   const messagesRef = useRef<AiMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -248,7 +250,8 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 
   const handleSend = async () => {
     if (isRunning || imagesProcessing) return;
-    const text = input.trim();
+    // 原生输入法可能先更新 DOM、稍后才触发 React state；发送永远以当前 DOM 真值为准。
+    const text = (textareaRef.current?.value ?? input).trim();
     const drafts = draftImagesRef.current;
     if (!text && drafts.length === 0) return;
 
@@ -302,7 +305,10 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 
     setInput("");
     clearDraftImages();
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (textareaRef.current) {
+      textareaRef.current.value = "";
+      textareaRef.current.style.height = "auto";
+    }
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -356,6 +362,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 
   const modelLabel = resolved?.model.label ?? "未选择模型";
   const sendDisabled = (!input.trim() && draftImages.length === 0) || imagesProcessing || !resolved;
+  useNativeRepaint(sendButtonRef, `${sendDisabled}|${isRunning}`);
 
   return (
     <div className="chat-page">
@@ -458,11 +465,17 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
             </button>
             <span className="ai-model-inline" onClick={() => setShowModelSheet(true)}>{modelLabel}</span>
             {isRunning ? (
-              <button className="send-btn cancel" onClick={handleCancel}>
+              <button ref={sendButtonRef} className="send-btn cancel" onClick={handleCancel}>
                 <Square size={18} />
               </button>
             ) : (
-              <button className="send-btn" onClick={() => void handleSend()} disabled={sendDisabled}>
+              <button
+                ref={sendButtonRef}
+                className={`send-btn ${sendDisabled ? "is-disabled" : "is-enabled"}`}
+                onClick={() => void handleSend()}
+                disabled={sendDisabled}
+                aria-disabled={sendDisabled}
+              >
                 <Send size={18} />
               </button>
             )}
