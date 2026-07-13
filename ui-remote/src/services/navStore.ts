@@ -15,6 +15,7 @@
  */
 
 import type { AiProvider } from "./AiProviderStore";
+import type { ImageProviderRecord } from "./ImageProviderStore";
 import type { DetailRoute } from "../components/DetailOverlay";
 
 /**
@@ -28,6 +29,9 @@ export type ScreenEntry =
   | { kind: "aiSettingsProviderForm"; provider: AiProvider | null }
   | { kind: "aiSettingsPickModels"; provider: AiProvider }
   | { kind: "aiArchived" }
+  | { kind: "imageGen"; recordId: string }
+  | { kind: "imageProviders" }
+  | { kind: "imageProviderForm"; provider: ImageProviderRecord | null }
   | { kind: "detail"; route: DetailRoute };
 
 /** 关闭瞬态层（Sheet/预览）的回调。返回后应触发该层的离场动画并卸载。 */
