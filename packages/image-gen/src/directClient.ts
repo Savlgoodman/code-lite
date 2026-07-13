@@ -93,10 +93,11 @@ export function createDirectImageGenClient(http: ImageJsonHttp) {
 
       let url: string;
       if (references.length > 0) {
-        // 有参考图：走 edits 的 JSON 变体，image 传 base64（data URL），避开 multipart。
+        // 有参考图：走 edits 的 JSON 变体，参考图以 data URL 传入 images[].image_url，避开 multipart。
         url = `${base}/images/edits`;
-        const dataUrls = references.map((ref) => `data:${ref.mimeType};base64,${ref.base64}`);
-        body.image = dataUrls.length === 1 ? dataUrls[0] : dataUrls;
+        body.images = references.map((ref) => ({
+          image_url: `data:${ref.mimeType};base64,${ref.base64}`,
+        }));
       } else {
         url = `${base}/images/generations`;
       }

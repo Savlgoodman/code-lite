@@ -44,9 +44,19 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
   const [optimizing, setOptimizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [fitToView, setFitToView] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
 
   useDismissable(preview !== null, () => setPreview(null));
+
+  // 输入框随文字增高，最高约 5 行（超出则自身滚动，不挤压图片区）。
+  useEffect(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 128) + "px";
+  }, [prompt]);
 
   // 载入任务批次；初始参数取最近一次批次快照，否则取首个供应商默认值。
   useEffect(() => {
@@ -166,7 +176,10 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
           <ArrowLeft size={24} />
         </button>
         <h1 className="chat-title">图片生成</h1>
-        <div className="header-spacer" />
+        <label className="imggen-fit-toggle">
+          <input type="checkbox" checked={fitToView} onChange={(e) => setFitToView(e.target.checked)} />
+          <span>全貌</span>
+        </label>
       </header>
 
       <div className="imggen-scroll">
@@ -190,7 +203,7 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
               <span>正在生成…</span>
             </div>
           ) : selectedRun && selectedRun.imageIds.length > 0 ? (
-            <div className="imggen-canvas-grid">
+            <div className={`imggen-canvas-grid${fitToView ? " fit-to-view" : ""}`}>
               {selectedRun.imageIds.map((id) => (
                 <BlobImage key={id} imageId={id} alt="生成图" className="imggen-canvas-img" onClick={() => void previewImage(id)} />
               ))}
@@ -227,11 +240,11 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
       <footer className="imggen-controls">
         {error && <div className="draft-image-error">{error}</div>}
         <TextArea
+          ref={promptRef}
           className="imggen-prompt"
           placeholder="描述你想生成的画面…"
           value={prompt}
           onValueChange={setPrompt}
-          rows={2}
         />
         <div className="imggen-optimize-row">
           <Select

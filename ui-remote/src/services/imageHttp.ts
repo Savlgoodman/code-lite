@@ -71,11 +71,31 @@ function mapStatusError(status: number, detail: string): string {
   return `请求失败 (${status})${snippet}`;
 }
 
+/** 把 data URL 直接解码成 Blob（不走网络/代理）。 */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(dataUrl);
+  if (!match) throw new Error("图片 data URL 格式不正确");
+  const mime = match[1] || "image/png";
+  const isBase64 = Boolean(match[2]);
+  const raw = match[3];
+  if (isBase64) {
+    const binary = atob(raw);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  }
+  return new Blob([decodeURIComponent(raw)], { type: mime });
+}
+
 /**
  * 下载图片直链为 Blob（供应商返回 response_format=url 时用）。
- * dev 经 /ai-proxy，原生用 CapacitorHttp responseType=blob。
+ * data URL 直接解码；http(s) 直链 dev 经 /ai-proxy，原生用 CapacitorHttp responseType=blob。
  */
 export async function downloadImage(url: string, apiKey: string): Promise<Blob> {
+  // 有的供应商在 url 字段里塞的是 data URL，直接解码，不能套代理前缀。
+  if (url.startsWith("data:")) {
+    return dataUrlToBlob(url);
+  }
   if (isNativeApp()) {
     const resp = await CapacitorHttp.request({
       url,

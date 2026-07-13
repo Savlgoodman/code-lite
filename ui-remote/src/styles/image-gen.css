@@ -81,21 +81,43 @@
   background: var(--bg);
 }
 
+/* 标题栏内全貌切换勾选框 */
+.imggen-fit-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 8px;
+  margin-right: 8px;
+}
+
+.imggen-fit-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
 .imggen-scroll {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 12px 16px;
+  overflow: hidden;
 }
 
-/* 参考图横向条 */
+/* 参考图横向条（固定高度，超出横滚）*/
 .imggen-ref-strip {
+  flex: 0 0 auto;
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 4px;
 }
 
@@ -130,14 +152,16 @@
   color: var(--text);
 }
 
-/* 生成图展示区 */
+/* 生成图展示区（占据剩余空间，图片等比缩放）*/
 .imggen-canvas {
-  min-height: 240px;
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);
   display: flex;
   overflow: hidden;
+  position: relative;
 }
 
 .imggen-canvas-hint {
@@ -158,25 +182,51 @@
 
 .imggen-canvas-grid {
   flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
   padding: 8px;
   align-content: start;
+  justify-items: center;
+  overflow-y: auto;
+}
+
+/* 全貌模式：容器限高，图片绝对定位 contain 缩放 → 高图左右留白 */
+.imggen-canvas-grid.fit-to-view {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
 }
 
 .imggen-canvas-img {
-  width: 100%;
+  max-width: 100%;
+  height: auto;
+  width: auto;
   border-radius: var(--radius-md);
   object-fit: contain;
   background: var(--sidebar);
 }
 
-/* 历史批次条 */
+/* 全貌模式：图片严格受容器宽高约束，等比缩放，长边贴边短边留白 */
+.imggen-canvas-grid.fit-to-view .imggen-canvas-img {
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+/* 历史批次条（固定高度，超出横滚）*/
 .imggen-history {
+  flex: 0 0 auto;
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 4px;
 }
 
@@ -223,9 +273,25 @@
   background: var(--surface);
 }
 
+/* 底部输入框（JS 驱动高度，最高约 5 行后自身滚动）*/
 .imggen-prompt {
   width: 100%;
   resize: none;
+  min-height: 40px;
+  max-height: 128px;
+  overflow-y: auto;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 15px;
+  font-family: inherit;
+}
+
+.imggen-prompt::placeholder {
+  color: var(--subtle);
 }
 
 .imggen-optimize-row {
