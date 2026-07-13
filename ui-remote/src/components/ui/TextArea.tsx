@@ -32,13 +32,14 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(function 
     else if (forwardedRef) forwardedRef.current = el;
   };
 
-  const handlers = useDefensiveTextValue(innerRef, value, onValueChange);
+  const { native, handlers } = useDefensiveTextValue(innerRef, value, onValueChange);
 
+  // 原生 App 半受控（defaultValue），浏览器完全受控（value）。见 useDefensiveTextValue。
   return (
     <textarea
       ref={setRef}
       className={className}
-      value={value}
+      {...(native ? { defaultValue: value } : { value })}
       {...handlers}
       onCompositionStart={(e) => {
         composingRef.current = true;

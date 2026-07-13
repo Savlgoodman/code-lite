@@ -29,13 +29,15 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
     else if (forwardedRef) forwardedRef.current = el;
   };
 
-  const handlers = useDefensiveTextValue(innerRef, value, onValueChange);
+  const { native, handlers } = useDefensiveTextValue(innerRef, value, onValueChange);
 
+  // 原生 App 半受控（defaultValue，DOM 回写交给 hook 的 layout effect），避免 IME 组合被
+  // React 每次渲染的受控回写打断；浏览器完全受控（value）。见 useDefensiveTextValue。
   return (
     <input
       ref={setRef}
       className={`form-input ${className}`.trim()}
-      value={value}
+      {...(native ? { defaultValue: value } : { value })}
       {...handlers}
       {...rest}
     />
