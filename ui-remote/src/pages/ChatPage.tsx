@@ -9,6 +9,7 @@ import { MessageBubble } from "../components/MessageBubble";
 import { FileRefProvider } from "../components/MessageRenderer";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { ConfigSheet } from "../sheets/ConfigSheet";
+import { ImageSourceSheet } from "../sheets/ImageSourceSheet";
 import { ConfigBar } from "../components/ConfigBar";
 import { EmptyState, Button, Sheet, Portal, TextArea } from "../components/ui";
 import { useNav } from "../hooks/useNav";
@@ -23,6 +24,7 @@ import {
   revokeDraftImage,
   type DraftImage,
 } from "../lib/draftImages";
+import { chooseGalleryImages, takeCameraPhoto } from "../lib/imagePicker";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -64,6 +66,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   const { config, updateConfig } = useSessionConfig(client, sessionId);
   const [input, setInput] = useState("");
   const [showConfigSheet, setShowConfigSheet] = useState(false);
+  const [showImageSourceSheet, setShowImageSourceSheet] = useState(false);
   const [showContextModal, setShowContextModal] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -78,6 +81,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
   useDismissable(previewImage !== null, () => setPreviewImage(null));
   useDismissable(showContextModal, () => setShowContextModal(false));
   useDismissable(showConfigSheet, () => setShowConfigSheet(false));
+  useDismissable(showImageSourceSheet, () => setShowImageSourceSheet(false));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -319,6 +323,28 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
 
   const filesFromList = (list: FileList | null) =>
     Array.from(list ?? []).filter((file) => file.type.startsWith("image/"));
+
+  const handlePickImages = async (source: "gallery" | "camera") => {
+    if (isRunning || imagesProcessing) return;
+    const slots = Math.max(0, MAX_DRAFT_IMAGES - draftImagesRef.current.length);
+    if (slots <= 0) {
+      setDraftImageError(`最多添加 ${MAX_DRAFT_IMAGES} 张图片。`);
+      return;
+    }
+
+    setDraftImageError(null);
+    setImagesProcessing(true);
+    try {
+      const files = source === "camera"
+        ? await takeCameraPhoto(fileInputRef.current)
+        : await chooseGalleryImages(fileInputRef.current, slots);
+      if (files) await addDraftImages(files);
+    } catch (error) {
+      setDraftImageError(error instanceof Error ? error.message : "无法打开系统图片选择器。");
+    } finally {
+      setImagesProcessing(false);
+    }
+  };
 
   const handleSend = async () => {
     if (!client || imagesProcessing) return;
@@ -594,7 +620,7 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
               aria-label="添加图片"
               title="添加图片"
               disabled={isRunning || imagesProcessing}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => setShowImageSourceSheet(true)}
             >
               {imagesProcessing ? <Loader2 className="draft-image-spin" size={18} /> : <Image size={18} />}
             </button>
@@ -671,6 +697,14 @@ export function ChatPage({ sessionId, onBack }: ChatPageProps) {
             updateConfig(newConfig);
             setShowConfigSheet(false);
           }}
+        />
+      )}
+
+      {showImageSourceSheet && (
+        <ImageSourceSheet
+          onClose={() => setShowImageSourceSheet(false)}
+          onChooseGallery={() => void handlePickImages("gallery")}
+          onTakePhoto={() => void handlePickImages("camera")}
         />
       )}
 

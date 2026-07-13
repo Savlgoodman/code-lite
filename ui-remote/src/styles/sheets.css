@@ -200,3 +200,44 @@
 .config-fast-row:active { background: var(--hover); }
 
 .config-fast-desc { color: var(--text); }
+
+/* ── 图片来源选择 ── */
+
+.image-source-sheet-body {
+  padding: 4px 12px 12px;
+}
+
+.image-source-actions {
+  display: flex;
+  flex-direction: column;
+}
+
+.image-source-action {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.image-source-action + .image-source-action {
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.image-source-action svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.image-source-action:active {
+  background: var(--active);
+}
