@@ -588,8 +588,9 @@ JSON + base64**：像 AI 多模态那样把参考图编码为 base64 放进请�
 dev/原生两条路都用同一条 JSON 请求。
 
 - 无参考图：`POST {baseUrl}/images/generations`（JSON）。
-- 有参考图：`POST {baseUrl}/images/edits` 的 JSON 变体，`image` 字段传 base64（或 data URL，
-  依供应商）；若供应商只认 multipart 而报错，回落为可读错误提示，并允许纯文生图继续。
+- 有参考图：`POST {baseUrl}/images/edits` 的 JSON 变体，`images` 数组每项 `{ image_url: <data URL> }`
+  传参考图 base64（供应商约定的形状，报错 `images[].image_url is required` 即此接口）；若供应商
+  只认 multipart 而报错，回落为可读错误提示，并允许纯文生图继续。
 
 ### 10.3 共享包扩展：直连传输实现
 
