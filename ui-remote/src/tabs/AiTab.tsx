@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Plus, Archive, Trash2, MessageSquare, Smartphone, Image as ImageIcon, Sparkles } from "lucide-react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { Plus, Archive, Trash2, MessageSquare, Smartphone, Image as ImageIcon, Sparkles, Loader2 } from "lucide-react";
 import { Fab, EmptyState, Portal } from "../components/ui";
 import { BlobImage } from "../components/BlobImage";
 import { useAiConversations } from "../hooks/useAiConversations";
@@ -7,6 +7,7 @@ import { useAiProviders } from "../hooks/useAiProviders";
 import { useImageRecords } from "../hooks/useImageRecords";
 import { aiConversationStore, type AiConversation } from "../services/AiConversationStore";
 import { imageGenStore } from "../services/ImageGenStore";
+import { imageGenTasks } from "../services/imageGenService";
 import { formatMessageTime } from "../lib/formatters";
 import { isAiAvailable } from "../lib/environment";
 
@@ -173,6 +174,8 @@ function ImageModeView({
   modeToggle: React.ReactNode;
 }) {
   const list = [...records].sort((a, b) => b.updatedAt - a.updatedAt);
+  // 进行中任务（service 单例，跨页面存活）：给列表卡片加"生成中"角标。
+  const activeRecords = useSyncExternalStore(imageGenTasks.subscribe, imageGenTasks.getActiveSnapshot);
 
   const startNew = async () => {
     const record = await imageGenStore.createRecord();
@@ -187,18 +190,27 @@ function ImageModeView({
         <EmptyState icon={<Sparkles size={38} strokeWidth={1.5} />} title="还没有生成记录">点击右下角新建生图任务</EmptyState>
       ) : (
         <div className="imggen-card-grid">
-          {list.map((record) => (
-            <button key={record.id} className="imggen-card" onClick={() => onOpenImageRecord(record.id)}>
-              <span className="imggen-card-cover">
-                {record.coverImageId ? (
-                  <BlobImage imageId={record.coverImageId} alt={record.title} />
-                ) : (
-                  <ImageIcon size={26} className="imggen-card-empty" />
-                )}
-              </span>
-              <span className="imggen-card-title">{record.title}</span>
-            </button>
-          ))}
+          {list.map((record) => {
+            const generating = activeRecords.includes(record.id);
+            return (
+              <button key={record.id} className="imggen-card" onClick={() => onOpenImageRecord(record.id)}>
+                <span className="imggen-card-cover">
+                  {record.coverImageId ? (
+                    <BlobImage imageId={record.coverImageId} alt={record.title} />
+                  ) : (
+                    <ImageIcon size={26} className="imggen-card-empty" />
+                  )}
+                  {generating && (
+                    <span className="imggen-card-generating">
+                      <Loader2 size={18} className="imggen-spin" />
+                      <span>生成中</span>
+                    </span>
+                  )}
+                </span>
+                <span className="imggen-card-title">{record.title}</span>
+              </button>
+            );
+          })}
         </div>
       )}
       {modeToggle}
