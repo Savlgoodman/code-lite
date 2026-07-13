@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ImageGenValidationError,
+  type ImageAsset,
   type ImageGenRecord,
   type ImageGenRequest,
   type ImageGenRun,
@@ -36,6 +37,8 @@ export interface ImageGenDetailState {
   providers: ImageProvider[];
   textModels: ConfiguredModel[];
   params: ImageGenParams;
+  // 当前生成使用的参考图（随选中批次切换恢复，也可继续编辑做二次生成）。
+  activeReferenceImages: ImageAsset[];
   selectedRunId: string | null;
   optimizeModelId: string;
   loading: boolean;
@@ -50,7 +53,16 @@ export interface ImageGenDetailState {
   generate: () => Promise<void>;
   optimizePrompt: () => Promise<void>;
   uploadReference: (file: File) => Promise<void>;
-  deleteReference: (imageId: string) => Promise<void>;
+  removeReference: (imageId: string) => void;
+}
+
+/** 从任务参考图池中按 id 顺序取出资产（缺失的忽略）。 */
+function referencesByIds(record: ImageGenRecord | null, ids: string[]): ImageAsset[] {
+  if (!record) {
+    return [];
+  }
+  const pool = new Map(record.referenceImages.map((image) => [image.id, image]));
+  return ids.map((id) => pool.get(id)).filter((image): image is ImageAsset => Boolean(image));
 }
 
 /** 当前选中批次（默认最近一次）。 */
@@ -68,6 +80,8 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
   const [providers, setProviders] = useState<ImageProvider[]>([]);
   const [textModels, setTextModels] = useState<ConfiguredModel[]>([]);
   const [params, setParams] = useState<ImageGenParams>(DEFAULT_PARAMS);
+  // 当前参考图工作集（按 id 记录）：随选中批次恢复，上传/删除时更新。
+  const [activeReferenceIds, setActiveReferenceIds] = useState<string[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [optimizeModelId, setOptimizeModelId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -111,6 +125,7 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
             size: lastRun.request.size ?? "auto",
             quality: lastRun.request.quality ?? "auto"
           });
+          setActiveReferenceIds(lastRun.request.referenceImageIds ?? []);
           setSelectedRunId(lastRun.id);
         } else {
           const firstProvider = enabledProviders[0];
@@ -119,6 +134,8 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
             providerId: firstProvider?.id ?? "",
             model: firstProvider?.defaultModel ?? ""
           });
+          // 无批次的新任务：默认带上任务已有的全部参考图。
+          setActiveReferenceIds(loadedRecord.referenceImages.map((image) => image.id));
         }
         paramsInitialized.current = true;
       } catch (bootError) {
@@ -170,6 +187,8 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
             size: run.request.size ?? "auto",
             quality: run.request.quality ?? "auto"
           });
+          // 参考图随批次恢复：该批次用了哪些就显示哪些（可能为空或不同集合）。
+          setActiveReferenceIds(run.request.referenceImageIds ?? []);
         }
         return current;
       });
@@ -184,7 +203,6 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
     setGenerating(true);
     setError(null);
     try {
-      const referenceImageIds = (record?.referenceImages ?? []).map((image) => image.id);
       const request: ImageGenRequest = {
         providerId: params.providerId,
         model: params.model,
@@ -192,11 +210,12 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
         n: params.n,
         size: params.size,
         quality: params.quality,
-        referenceImageIds
+        referenceImageIds: activeReferenceIds
       };
       const run = await client.generate(recordId, request);
       const refreshed = await client.getRecord(recordId);
       setRecord(refreshed);
+      setActiveReferenceIds(run.request.referenceImageIds ?? activeReferenceIds);
       setSelectedRunId(run.id);
       onRecordChanged?.();
       if (run.error) {
@@ -211,7 +230,7 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
     } finally {
       setGenerating(false);
     }
-  }, [client, generating, onRecordChanged, params, record, recordId]);
+  }, [activeReferenceIds, client, generating, onRecordChanged, params, recordId]);
 
   const optimizePrompt = useCallback(async () => {
     if (optimizing || !params.prompt.trim()) {
@@ -238,8 +257,10 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
       setUploadingReference(true);
       setError(null);
       try {
-        await client.uploadReference(recordId, file);
+        const asset = await client.uploadReference(recordId, file);
         setRecord(await client.getRecord(recordId));
+        // 新上传的参考图加入当前工作集，参与下一次生成。
+        setActiveReferenceIds((current) => (current.includes(asset.id) ? current : [...current, asset.id]));
       } catch (uploadError) {
         setError(uploadError instanceof Error ? uploadError.message : String(uploadError));
       } finally {
@@ -249,24 +270,17 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
     [client, recordId]
   );
 
-  const deleteReference = useCallback(
-    async (imageId: string) => {
-      setError(null);
-      try {
-        await client.deleteReference(recordId, imageId);
-        setRecord(await client.getRecord(recordId));
-      } catch (deleteError) {
-        setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
-      }
-    },
-    [client, recordId]
-  );
+  // 仅从当前工作集移除，不删除文件：历史批次仍引用该参考图，删文件会破坏历史展示。
+  const removeReference = useCallback((imageId: string) => {
+    setActiveReferenceIds((current) => current.filter((id) => id !== imageId));
+  }, []);
 
   return {
     record,
     providers,
     textModels,
     params,
+    activeReferenceImages: referencesByIds(record, activeReferenceIds),
     selectedRunId: resolveSelectedRun(record, selectedRunId)?.id ?? null,
     optimizeModelId,
     loading,
@@ -281,7 +295,7 @@ export function useImageGenDetail(recordId: string, onRecordChanged?: () => void
     generate,
     optimizePrompt,
     uploadReference,
-    deleteReference
+    removeReference
   };
 }
 
