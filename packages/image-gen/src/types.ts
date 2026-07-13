@@ -102,3 +102,53 @@ export class ImageGenValidationError extends Error {
     this.name = "ImageGenValidationError";
   }
 }
+
+// ── 直连客户端（远程端：不走后端，直连供应商）──
+
+/** 供应商连接信息（真实 baseUrl/apiKey，由调用方从本地存储解析后传入）。 */
+export interface ImageProviderConnection {
+  baseUrl: string;
+  apiKey: string;
+}
+
+/** 文本模型连接信息（提示词优化复用已配置文本模型）。 */
+export interface TextModelConnection {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+/** 参考图（base64）：直连时随 JSON 请求体发送，避开 multipart。 */
+export interface ReferenceImageInput {
+  /** 纯 base64（不含 data: 前缀）。 */
+  base64: string;
+  mimeType: string;
+}
+
+/** 直连生成的入参（裸参数，不含 providerId；连接信息单独传）。 */
+export interface DirectGenerateInput {
+  model: string;
+  prompt: string;
+  n?: number;
+  size?: string;
+  quality?: ImageQuality;
+  references?: ReferenceImageInput[];
+}
+
+/** 直连返回的单张裸图片结果（url 或 base64 二选一）。 */
+export interface DirectImageResult {
+  /** 供应商返回的图片直链（response_format=url）。 */
+  url?: string;
+  /** 供应商返回的 base64（response_format=b64_json），不含 data: 前缀。 */
+  base64?: string;
+  mimeType?: string;
+  revisedPrompt?: string;
+}
+
+/**
+ * 由调用方注入的 JSON HTTP 实现（按环境分流：dev 走 /ai-proxy fetch，原生走 CapacitorHttp）。
+ * 返回解析后的 JSON 对象；非 2xx 应抛错。
+ */
+export interface ImageJsonHttp {
+  postJson(url: string, apiKey: string, body: unknown): Promise<unknown>;
+}
