@@ -75,6 +75,21 @@ Update-RegexVersion `
   -Replacement "`${1}`"$Version`""
 
 Update-RegexVersion `
+  -Path (Join-Path $repoRoot "ui-remote\package.json") `
+  -Pattern '("version"\s*:\s*)".+?"' `
+  -Replacement "`${1}`"$Version`""
+
+Update-RegexVersion `
+  -Path (Join-Path $repoRoot "ui-remote\package-lock.json") `
+  -Pattern '(?s)^(\{\s*"name"\s*:\s*"code-lite-remote",\s*"version"\s*:\s*)".+?"' `
+  -Replacement "`${1}`"$Version`""
+
+Update-RegexVersion `
+  -Path (Join-Path $repoRoot "ui-remote\package-lock.json") `
+  -Pattern '(?s)(\s*""\s*:\s*\{\s*"name"\s*:\s*"code-lite-remote",\s*"version"\s*:\s*)".+?"' `
+  -Replacement "`${1}`"$Version`""
+
+Update-RegexVersion `
   -Path (Join-Path $repoRoot "src-tauri\tauri.conf.json") `
   -Pattern '("version"\s*:\s*)".+?"' `
   -Replacement "`${1}`"$Version`""
