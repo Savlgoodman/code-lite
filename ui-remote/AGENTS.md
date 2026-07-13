@@ -372,8 +372,8 @@ remote 死活不生效"——极易误判成逻辑/解析 bug（曾为此绕一�
 - 现已修复：`main.tsx` 在 `import.meta.env.DEV` 下**不注册 SW**并主动 unregister + 清
   `caches`。若仍遇旧代码：DevTools → Application → Service Workers → Unregister，
   再 Clear site data，然后硬刷新（Ctrl+Shift+R）。
-- **发版/PWA 部署**：改动静态资源缓存策略或需要强制刷新时，升 `sw.js` 的 `CACHE_VERSION`
-  （activate 时会清理非当前版本的缓存），否则老用户拉不到新 bundle。
+- **发版/PWA 部署**：Vite 构建会把本次 `build-YYYY-MM-DD-HH-mm` 自动写入 `sw.js` 的
+  `CACHE_VERSION`（activate 时会清理非当前版本的缓存），不要手工维护缓存版本号。
 - **安卓 App**：Capacitor 壳内不注册 SW；`main.tsx` 会主动注销历史版本可能留下的 SW 并清理
   `code-lite-remote-*` 缓存，受旧 worker 控制时清理后重载一次。JS 仍是打包进 APK 的，改动需
   重新 `npm run build`、`npx cap sync android` 并重装，旧 APK 里是旧代码。

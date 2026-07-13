@@ -1,6 +1,9 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { createBuildInfo, type BuildInfo } from "../scripts/build-version.mjs";
 
 const protocolSrc = fileURLToPath(new URL("../packages/protocol/src", import.meta.url));
 const transportSrc = fileURLToPath(new URL("../packages/transport/src", import.meta.url));
@@ -8,10 +11,52 @@ const chatCoreSrc = fileURLToPath(new URL("../packages/chat-core/src", import.me
 const syncSrc = fileURLToPath(new URL("../packages/sync/src", import.meta.url));
 const chatRenderSrc = fileURLToPath(new URL("../packages/chat-render/src", import.meta.url));
 const imageGenSrc = fileURLToPath(new URL("../packages/image-gen/src", import.meta.url));
+const serviceWorkerBuildToken = "__CODE_LITE_BUILD_ID__";
 
-export default defineConfig({
-  plugins: [
-    react(),
+function buildMetadataPlugin(buildInfo: BuildInfo): Plugin {
+  let outputDir = "";
+
+  return {
+    name: "code-lite-build-metadata",
+    apply: "build",
+    configResolved(config) {
+      outputDir = isAbsolute(config.build.outDir)
+        ? config.build.outDir
+        : resolve(config.root, config.build.outDir);
+    },
+    async closeBundle() {
+      const serviceWorkerPath = resolve(outputDir, "sw.js");
+      const serviceWorker = await readFile(serviceWorkerPath, "utf8");
+      if (!serviceWorker.includes(serviceWorkerBuildToken)) {
+        throw new Error(`Service Worker build token not found: ${serviceWorkerBuildToken}`);
+      }
+
+      await Promise.all([
+        writeFile(
+          serviceWorkerPath,
+          serviceWorker.replaceAll(serviceWorkerBuildToken, buildInfo.buildId),
+          "utf8",
+        ),
+        writeFile(
+          resolve(outputDir, "build-info.json"),
+          `${JSON.stringify(buildInfo, null, 2)}\n`,
+          "utf8",
+        ),
+      ]);
+    },
+  };
+}
+
+export default defineConfig(() => {
+  const buildInfo = createBuildInfo();
+
+  return {
+    define: {
+      __CODE_LITE_BUILD_INFO__: JSON.stringify(buildInfo),
+    },
+    plugins: [
+      react(),
+      buildMetadataPlugin(buildInfo),
     // Dev-only: 通用 AI API 代理，绕开浏览器 CORS。
     // 前端请求 /ai-proxy/{realUrl} → Vite 转发到 realUrl。
     {
@@ -75,20 +120,21 @@ export default defineConfig({
         });
       },
     },
-  ],
-  resolve: {
-    alias: {
-      "@code-lite/protocol": protocolSrc,
-      "@code-lite/transport": transportSrc,
-      "@code-lite/chat-core": chatCoreSrc,
-      "@code-lite/sync": syncSrc,
-      "@code-lite/chat-render": chatRenderSrc,
-      "@code-lite/image-gen": imageGenSrc,
+    ],
+    resolve: {
+      alias: {
+        "@code-lite/protocol": protocolSrc,
+        "@code-lite/transport": transportSrc,
+        "@code-lite/chat-core": chatCoreSrc,
+        "@code-lite/sync": syncSrc,
+        "@code-lite/chat-render": chatRenderSrc,
+        "@code-lite/image-gen": imageGenSrc,
+      },
     },
-  },
-  server: {
-    port: 5174,
-    strictPort: false,
-  },
-  clearScreen: false,
+    server: {
+      port: 5174,
+      strictPort: false,
+    },
+    clearScreen: false,
+  };
 });
