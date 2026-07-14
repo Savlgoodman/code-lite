@@ -144,6 +144,29 @@ peer-dep `@capacitor/core ^8.3.0`，匹配本项目 8.4.1）。它用原生 HTTP
 - 原生流式行为**须真机验证**：本仓库的 dev/PWA 构建不覆盖原生分支，CI 与本地 `npm run build`
   只保证类型与打包通过。
 
+### 3.3 AI 对话思考强度与 Token 显示
+
+思考强度和 Token 显示是远端独立 AI 对话模块的全局偏好，不影响远程 Agent 会话、图片生成或
+提示词优化。偏好由 `services/AiChatSettingsStore.ts` 通过 Capacitor Preferences 与
+`localStorage` 双写持久化，默认值为：
+
+- 思考强度：`null`（兼容模式）。可选值为 `null / low / medium / high / xhigh`。
+- 显示 Token 消耗：关闭。
+
+`null` 不是发送给供应商的字符串值，而是明确表示省略思考强度字段，以兼容不支持 reasoning
+参数的模型。非空值按供应商协议映射：
+
+| 协议 | 请求字段 |
+|---|---|
+| `chat_completions` | `reasoning_effort: "low|medium|high|xhigh"` |
+| `responses` | `reasoning: { effort: "low|medium|high|xhigh" }` |
+
+打开 Token 显示后，`chat_completions` 请求增加 `stream_options: { include_usage: true }`；
+`responses` 从流式完成事件读取 `response.usage`。客户端把两种协议归一化为每条 assistant 消息上的
+`inputTokens / outputTokens / reasoningTokens / totalTokens`，随消息历史一起持久化。界面按轮展示输入、
+输出 Token；供应商返回思考 Token 时一并展示。关闭开关只隐藏统计并停止主动请求 Chat Completions
+流式 usage，不改写已有消息中的统计数据。
+
 ## 4. 防御式文本输入（安卓 WebView IME）
 
 安卓 WebView 开着输入法预测 / 滑行输入 / 联想 / 自动补全 / 粘贴时，输入的字符会落进 DOM，
