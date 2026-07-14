@@ -13,13 +13,14 @@ import {
   type AiConversation,
   type AiMessage,
   type AiImage,
-  type AiTokenUsage,
 } from "../services/AiConversationStore";
 import { aiProviderStore, type AiModel, type AiProvider } from "../services/AiProviderStore";
-import { streamChat, blobToDataUrl } from "../services/aiClient";
+import { blobToDataUrl } from "../services/aiClient";
+import { aiChatTasks, startAiChatTask } from "../services/aiChatTaskService";
 import { useDismissable } from "../hooks/useDismissable";
 import { useNativeRepaint } from "../hooks/useNativeRepaint";
 import { useAiChatSettings } from "../hooks/useAiChatSettings";
+import { useAiChatTask } from "../hooks/useAiChatTask";
 import {
   IMAGE_ACCEPT,
   MAX_DRAFT_IMAGES,
@@ -40,13 +41,13 @@ function makeId(prefix: string) {
 
 export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
   const { showTokenUsage, setDefaultReasoningEffort } = useAiChatSettings();
+  const taskSnapshot = useAiChatTask(conversationId);
   const [conversation, setConversation] = useState<AiConversation | null>(null);
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState("");
   const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
   const [draftImageError, setDraftImageError] = useState<string | null>(null);
   const [imagesProcessing, setImagesProcessing] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [showModelSheet, setShowModelSheet] = useState(false);
   const [showImageSourceSheet, setShowImageSourceSheet] = useState(false);
@@ -66,7 +67,6 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
   const sendButtonRef = useRef<HTMLButtonElement>(null);
   const draftImagesRef = useRef<DraftImage[]>([]);
   const messagesRef = useRef<AiMessage[]>([]);
-  const abortRef = useRef<AbortController | null>(null);
   const pinnedRef = useRef(true);
   const [footerHeight, setFooterHeight] = useState(88);
 
@@ -75,6 +75,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 
   const multimodal = resolved?.model.multimodal ?? false;
   const reasoningEffort = conversation?.reasoningEffort ?? null;
+  const isRunning = taskSnapshot?.running ?? false;
 
   // 载入会话元数据、消息、解析当前模型
   useEffect(() => {
@@ -84,7 +85,8 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
       if (cancelled) return;
       const conv = aiConversationStore.getConversation(conversationId) ?? null;
       setConversation(conv);
-      const msgs = await aiConversationStore.loadMessages(conversationId);
+      const activeTask = aiChatTasks.getSnapshot(conversationId);
+      const msgs = activeTask?.messages ?? await aiConversationStore.loadMessages(conversationId);
       if (cancelled) return;
       setMessages(msgs);
       if (conv) {
@@ -97,42 +99,17 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
     };
   }, [conversationId]);
 
-  // 卸载时释放草稿图片 + 中止进行中的请求
+  // 页面卸载只释放草稿图片；流式请求由 aiChatTasks 持有，返回列表后继续运行。
   useEffect(() => {
     return () => {
       for (const image of draftImagesRef.current) revokeDraftImage(image);
-      abortRef.current?.abort();
     };
   }, []);
 
-  // 后台保活：App 进入后台时，保存已有的部分回复并标记为被中断（不显示为错误）。
-  // 回到前台后若发现中断，保留已生成内容而非丢弃——用户可手动继续发送。
   useEffect(() => {
-    const onVisChange = () => {
-      if (document.visibilityState === "hidden" && abortRef.current) {
-        // 正在流式对话，中止请求并保存当前已有内容
-        abortRef.current.abort();
-        abortRef.current = null;
-        setIsRunning(false);
-        // 保存中断时的消息（已有的部分内容不丢失）
-        const msgs = messagesRef.current;
-        const last = msgs[msgs.length - 1];
-        if (last?.role === "assistant" && !last.content) {
-          // 如果还没收到任何内容，标记一个提示
-          const next = msgs.map((m) =>
-            m.id === last.id ? { ...m, error: "对话被中断（应用进入后台），请重新发送。", updatedAt: Date.now() } : m,
-          );
-          messagesRef.current = next;
-          setMessages(next);
-          persist(next);
-        } else {
-          persist(msgs);
-        }
-      }
-    };
-    document.addEventListener("visibilitychange", onVisChange);
-    return () => document.removeEventListener("visibilitychange", onVisChange);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!taskSnapshot) return;
+    setMessages(taskSnapshot.messages);
+  }, [taskSnapshot]);
 
   const isAtBottom = useCallback((el: HTMLElement) => {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= 8;
@@ -291,10 +268,6 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 
   // ── 发送 / 取消 ──
 
-  const persist = (next: AiMessage[]) => {
-    void aiConversationStore.saveMessages(conversationId, next);
-  };
-
   const maybeSetTitle = (text: string) => {
     if (!conversation) return;
     if (conversation.title && conversation.title !== "新对话") return;
@@ -353,9 +326,20 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 
     const history = [...messagesRef.current, userMessage];
     const withAssistant = [...history, assistantMessage];
+    const started = startAiChatTask({
+      conversationId,
+      provider: resolved.provider,
+      model: resolved.model,
+      requestMessages: history,
+      initialMessages: withAssistant,
+      assistantMessageId: assistantMessage.id,
+      reasoningEffort,
+      includeUsage: showTokenUsage,
+    });
+    if (!started) return;
+
     setMessages(withAssistant);
     messagesRef.current = withAssistant;
-    persist(withAssistant);
     maybeSetTitle(text);
 
     setInput("");
@@ -364,65 +348,10 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
       textareaRef.current.value = "";
       textareaRef.current.style.height = "auto";
     }
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setIsRunning(true);
-
-    // 以 ref 为流式消息真源，避免 React 批处理时读到过期 content 丢字。
-    const appendDelta = (delta: string) => {
-      const next = messagesRef.current.map((m) =>
-        m.id === assistantMessage.id ? { ...m, content: m.content + delta, updatedAt: Date.now() } : m,
-      );
-      messagesRef.current = next;
-      setMessages(next);
-    };
-
-    const attachUsage = (usage: AiTokenUsage | undefined) => {
-      if (!usage) return messagesRef.current;
-      const next = messagesRef.current.map((m) =>
-        m.id === assistantMessage.id ? { ...m, usage, updatedAt: Date.now() } : m,
-      );
-      messagesRef.current = next;
-      setMessages(next);
-      return next;
-    };
-
-    await streamChat(
-      {
-        provider: resolved.provider,
-        model: resolved.model,
-        messages: history,
-        reasoningEffort,
-        includeUsage: showTokenUsage,
-        signal: controller.signal,
-      },
-      {
-        onDelta: (delta) => appendDelta(delta),
-        onDone: (usage) => {
-          const next = attachUsage(usage);
-          setIsRunning(false);
-          abortRef.current = null;
-          persist(next);
-        },
-        onError: (error) => {
-          const next = messagesRef.current.map((m) =>
-            m.id === assistantMessage.id ? { ...m, error: error.message, updatedAt: Date.now() } : m,
-          );
-          messagesRef.current = next;
-          setMessages(next);
-          setIsRunning(false);
-          abortRef.current = null;
-          persist(next);
-        },
-      },
-    );
   };
 
   const handleCancel = () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setIsRunning(false);
+    aiChatTasks.cancel(conversationId);
   };
 
   const handleSaveConfig = (selection: AiConversationConfigSelection) => {

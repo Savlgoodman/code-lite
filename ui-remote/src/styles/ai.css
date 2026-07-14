@@ -72,6 +72,11 @@
 
 .ai-icon-btn:active { background: var(--hover); color: var(--text); }
 .ai-icon-btn.danger:active { color: var(--orange); }
+.ai-icon-btn:disabled { opacity: 0.35; cursor: default; }
+
+.ai-conv-running {
+  color: var(--green);
+}
 
 /* ── 设置项：导航行 ── */
 
