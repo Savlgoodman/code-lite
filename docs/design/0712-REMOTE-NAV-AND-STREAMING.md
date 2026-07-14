@@ -175,6 +175,18 @@ peer-dep `@capacitor/core ^8.3.0`，匹配本项目 8.4.1）。它用原生 HTTP
 输出 Token；供应商返回思考 Token 时一并展示。关闭开关只隐藏统计并停止主动请求 Chat Completions
 流式 usage，不改写已有消息中的统计数据。
 
+### 3.4 AI 对话后台与跨页面任务
+
+独立 AI 对话的流式请求由 `services/aiChatTaskService.ts` 单例持有，不归 `AiChatPage` 组件生命周期
+所有。任务按 `conversationId` 保存 AbortController、活动状态和最新消息快照：
+
+- 应用进入后台（`document.visibilityState === "hidden"`）不主动中止请求；原生流由
+  `capacitor-stream-http-v2` 继续承载，进程存活时任务继续运行。
+- 从对话页返回 AI 对话列表不终止请求。列表订阅活动会话 id，在对应会话右侧展示旋转按钮；点击
+  会重新进入该会话，并从任务服务的实时消息快照继续渲染。
+- 用户点击对话页停止按钮时才调用对应 AbortController。请求完成、失败或取消后统一保存最终消息并
+  清除活动状态；App 进程被系统或用户杀死时，内存任务自然终止。
+
 ## 4. 防御式文本输入（安卓 WebView IME）
 
 安卓 WebView 开着输入法预测 / 滑行输入 / 联想 / 自动补全 / 粘贴时，输入的字符会落进 DOM，
