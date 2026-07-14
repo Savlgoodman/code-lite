@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, Check, ImagePlus, Loader2, Sparkles, Square, Wand2, X } from "lucide-react";
+import { ArrowLeft, Check, Download, ImagePlus, Loader2, Sparkles, Square, Wand2, X } from "lucide-react";
 import { RECOMMENDED_SIZES } from "@code-lite/image-gen";
 import { Portal, Select, TextArea } from "../components/ui";
 import { BlobImage } from "../components/BlobImage";
@@ -9,6 +9,7 @@ import { useAiProviders } from "../hooks/useAiProviders";
 import { imageGenStore, type ImageRun, type ImageRunParams } from "../services/ImageGenStore";
 import { addReferenceImage, optimizePrompt, startGeneration, imageGenTasks } from "../services/imageGenService";
 import { imageBlobStore } from "../services/imageBlobStore";
+import { saveImageToAlbum } from "../services/imageAlbumService";
 import { IMAGE_ACCEPT } from "../lib/draftImages";
 
 interface ImageGenPageProps {
@@ -17,6 +18,16 @@ interface ImageGenPageProps {
 }
 
 type Quality = ImageRunParams["quality"];
+
+interface ImagePreviewState {
+  imageId: string;
+  url: string;
+}
+
+interface SaveNotice {
+  message: string;
+  error: boolean;
+}
 
 const QUALITY_OPTIONS = [
   { value: "auto", label: "画质自动" },
@@ -42,11 +53,14 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
   const [optimizeModelId, setOptimizeModelId] = useState("");
   const [optimizing, setOptimizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ImagePreviewState | null>(null);
   const [fitToView, setFitToView] = useState(false);
   const [justAddedRef, setJustAddedRef] = useState<string | null>(null);
+  const [savingImageId, setSavingImageId] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<SaveNotice | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const saveNoticeTimerRef = useRef<number | null>(null);
 
   // 进行中状态来自 service 单例（跨页面存活）：退出页面再进来仍能看到"生成中"。
   const activeRecords = useSyncExternalStore(imageGenTasks.subscribe, imageGenTasks.getActiveSnapshot);
@@ -54,6 +68,16 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
   const wasGeneratingRef = useRef(generating);
 
   useDismissable(preview !== null, () => setPreview(null));
+
+  useEffect(() => {
+    if (!preview) return;
+    const url = preview.url;
+    return () => URL.revokeObjectURL(url);
+  }, [preview]);
+
+  useEffect(() => () => {
+    if (saveNoticeTimerRef.current !== null) window.clearTimeout(saveNoticeTimerRef.current);
+  }, []);
 
   // 生成结束（generating 由 true 变 false）时刷新批次列表，并读取可能的错误。
   useEffect(() => {
@@ -157,7 +181,32 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
 
   async function previewImage(imageId: string) {
     const blob = await imageBlobStore.getImage(imageId);
-    if (blob) setPreview(URL.createObjectURL(blob));
+    if (blob) setPreview({ imageId, url: URL.createObjectURL(blob) });
+  }
+
+  function showSaveNotice(message: string, error = false) {
+    if (saveNoticeTimerRef.current !== null) window.clearTimeout(saveNoticeTimerRef.current);
+    setSaveNotice({ message, error });
+    saveNoticeTimerRef.current = window.setTimeout(() => {
+      setSaveNotice(null);
+      saveNoticeTimerRef.current = null;
+    }, 2_400);
+  }
+
+  async function handleSaveImage(imageId: string) {
+    if (savingImageId !== null) return;
+    setSavingImageId(imageId);
+    try {
+      const blob = await imageBlobStore.getImage(imageId);
+      if (!blob) throw new Error("图片已不存在");
+      await saveImageToAlbum(blob);
+      showSaveNotice("已保存到相册");
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      showSaveNotice(`保存失败：${detail}`, true);
+    } finally {
+      setSavingImageId(null);
+    }
   }
 
   async function handleOptimize() {
@@ -217,7 +266,12 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
           <div className="imggen-ref-strip">
             {referenceIds.map((id) => (
               <div className="imggen-ref-thumb" key={id}>
-                <BlobImage imageId={id} alt="参考图" onClick={() => void previewImage(id)} />
+                <BlobImage
+                  imageId={id}
+                  alt="参考图"
+                  onClick={() => void previewImage(id)}
+                  onLongPress={() => void handleSaveImage(id)}
+                />
                 <button className="imggen-ref-remove" onClick={() => removeReference(id)} aria-label="移除参考图">
                   <X size={12} />
                 </button>
@@ -236,7 +290,13 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
             <div className={`imggen-canvas-grid${fitToView ? " fit-to-view" : ""}`}>
               {selectedRun.imageIds.map((id) => (
                 <div className="imggen-canvas-item" key={id}>
-                  <BlobImage imageId={id} alt="生成图" className="imggen-canvas-img" onClick={() => void previewImage(id)} />
+                  <BlobImage
+                    imageId={id}
+                    alt="生成图"
+                    className="imggen-canvas-img"
+                    onClick={() => void previewImage(id)}
+                    onLongPress={() => void handleSaveImage(id)}
+                  />
                   <button
                     className="imggen-add-ref-btn"
                     onClick={(e) => { e.stopPropagation(); void addGeneratedAsReference(id); }}
@@ -267,7 +327,11 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
                 onClick={() => selectRun(run)}
               >
                 {run.imageIds.length > 0 ? (
-                  <BlobImage imageId={run.imageIds[run.imageIds.length - 1]} alt="历史" />
+                  <BlobImage
+                    imageId={run.imageIds[run.imageIds.length - 1]}
+                    alt="历史"
+                    onLongPress={() => void handleSaveImage(run.imageIds[run.imageIds.length - 1])}
+                  />
                 ) : (
                   <span className="imggen-history-fail">失败</span>
                 )}
@@ -326,7 +390,25 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
             <button className="image-preview-close" aria-label="关闭预览" onClick={() => setPreview(null)}>
               <X size={22} />
             </button>
-            <img className="image-preview-full" src={preview} alt="预览" onClick={(e) => e.stopPropagation()} />
+            <div className="imggen-preview-content" onClick={(e) => e.stopPropagation()}>
+              <img className="image-preview-full" src={preview.url} alt="预览" />
+              <button
+                className="imggen-preview-save"
+                disabled={savingImageId !== null}
+                onClick={() => void handleSaveImage(preview.imageId)}
+              >
+                {savingImageId === preview.imageId ? <Loader2 className="imggen-spin" size={18} /> : <Download size={18} />}
+                <span>{savingImageId === preview.imageId ? "正在保存" : "保存到相册"}</span>
+              </button>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {saveNotice && (
+        <Portal>
+          <div className={`imggen-save-notice${saveNotice.error ? " error" : ""}`}>
+            {saveNotice.message}
           </div>
         </Portal>
       )}
