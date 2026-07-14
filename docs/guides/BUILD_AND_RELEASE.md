@@ -110,8 +110,38 @@ bash scripts/build-remote.sh
 
 ## Android APK 构建
 
+Android 启动器图标统一以 `src-tauri/icons/android/` 为源。更新图标后运行以下命令，将普通、圆形和自适应图标同步到 Capacitor Android 工程的全部分辨率目录：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sync-android-icons.ps1
+```
+
+首次在本机配置正式签名：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-signing.ps1
+```
+
+该脚本会在根目录 `env/` 下生成 `code-lite-remote-release.jks` 和 `android-signing.properties`。目录已被 Git 忽略，properties 保存随机生成的密码，仓库代码和构建日志都不包含密码。两份文件必须一起做加密备份；丢失 release keystore 后，直接分发的旧 App 将无法通过覆盖安装升级。
+
+构建并自动验证正式签名 APK：
+
 ```powershell
 .\build-apk.ps1 -NoProxy
+```
+
+正式产物命名为：
+
+```text
+code-lite-remote_<version>_<build-id>.apk
+```
+
+例如 `code-lite-remote_0.2.1_build-2026-07-14-09-30.apk`。release 构建使用本地 keystore，构建完成后调用 Android SDK 的 `apksigner` 验证证书；WebView 调试仅在 debug 构建启用。
+
+`build-apk.ps1` 默认构建 release。需要调试 APK 时显式传入 `-Debug`：
+
+```powershell
+.\build-apk.ps1 -Debug -NoProxy
 ```
 
 脚本会先生成一次构建元数据，再依次执行前端构建、Capacitor 同步和 Gradle 构建。Gradle 的 `versionName` 从根目录 `VERSION` 获取，`versionCode` 由构建分钟换算为单调递增整数；完整版本在 App 的关于页中展示。
