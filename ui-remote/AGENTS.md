@@ -305,8 +305,9 @@ AI 对话是**独立于 code-lite 业务**的附加模块，直连大模型 API�
 **图片生成**（AI Tab 内切换、`ImageGenPage`、图片供应商配置）与 AI 对话同构，直连供应商
 `/v1/images/generations`、`/v1/images/edits`（参考图走 base64 JSON，不用 multipart）与
 `/v1/chat/completions`（提示词优化），**同样受 `isAiAvailable()` gate**。请求经
-`services/imageHttp.ts` 分流：dev 走 `/ai-proxy` fetch；原生通常走 `CapacitorHttp`，需要主动终止的
-生成请求改走 `capacitor-stream-http-v2` 收集完整 JSON 并支持取消。图片二进制存 IndexedDB（`imageBlobStore`），
+`services/imageHttp.ts` 分流：dev 走 `/ai-proxy` fetch；原生生成请求和图片下载走 `CapacitorHttp`，
+其中生成请求设置较长读取超时；终止后立即结束本地任务并忽略原生请求的后续响应。图片二进制存
+IndexedDB（`imageBlobStore`），
 供应商/记录元数据存 Preferences（`ImageProviderStore` / `ImageGenStore`）。生图核心逻辑在
 共享包 `@code-lite/image-gen` 的直连客户端。详见 `docs/design/0713-IMAGE-GENERATION.md` 第 10 节。
 
