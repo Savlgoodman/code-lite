@@ -17,7 +17,7 @@
  */
 
 import type { AiProvider, AiModel } from "./AiProviderStore";
-import type { AiImage, AiMessage } from "./AiConversationStore";
+import type { AiImage, AiMessage, AiTokenUsage } from "./AiConversationStore";
 import type { AiReasoningEffort } from "./AiChatSettingsStore";
 import { openStream, collectText } from "./httpTransport";
 
@@ -58,7 +58,7 @@ export async function fetchModels(provider: AiProvider): Promise<string[]> {
 
 export interface StreamChatCallbacks {
   onDelta: (delta: string) => void;
-  onDone: () => void;
+  onDone: (usage?: AiTokenUsage) => void;
   onError: (error: Error) => void;
 }
 
@@ -67,6 +67,7 @@ export interface StreamChatParams {
   model: AiModel;
   messages: AiMessage[];
   reasoningEffort: AiReasoningEffort | null;
+  includeUsage: boolean;
   signal?: AbortSignal;
 }
 
@@ -159,6 +160,41 @@ function responsesDelta(event: unknown): string {
   return "";
 }
 
+function tokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+/** 兼容 Chat Completions 与 Responses 的 usage 字段名。 */
+function normalizeUsage(value: unknown): AiTokenUsage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const usage = value as Record<string, unknown>;
+  const inputTokens = tokenCount(usage.input_tokens) ?? tokenCount(usage.prompt_tokens);
+  const outputTokens = tokenCount(usage.output_tokens) ?? tokenCount(usage.completion_tokens);
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+
+  const detailsValue = usage.output_tokens_details ?? usage.completion_tokens_details;
+  const details = detailsValue && typeof detailsValue === "object"
+    ? detailsValue as Record<string, unknown>
+    : {};
+  const reasoningTokens = tokenCount(details.reasoning_tokens);
+  const totalTokens = tokenCount(usage.total_tokens);
+
+  return {
+    inputTokens,
+    outputTokens,
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+}
+
+function eventUsage(event: unknown): AiTokenUsage | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const payload = event as { usage?: unknown; response?: { usage?: unknown } };
+  return normalizeUsage(payload.response?.usage ?? payload.usage);
+}
+
 /**
  * 发起一次流式对话。messages 为完整历史（含最新用户消息），assistant 增量经
  * onDelta 回调。调用方负责把增量拼进 UI 与落盘。
@@ -167,7 +203,7 @@ export async function streamChat(
   params: StreamChatParams,
   callbacks: StreamChatCallbacks,
 ): Promise<void> {
-  const { provider, model, messages, reasoningEffort, signal } = params;
+  const { provider, model, messages, reasoningEffort, includeUsage, signal } = params;
   const base = normalizeBaseUrl(provider.baseUrl);
 
   try {
@@ -193,6 +229,7 @@ export async function streamChat(
         max_tokens: model.maxOutputTokens,
         stream: true,
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+        ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
       };
       extract = chatDelta;
     }
@@ -204,11 +241,13 @@ export async function streamChat(
       signal,
     });
 
+    let usage: AiTokenUsage | undefined;
     await readSse(responseBody, signal, (event) => {
+      usage = eventUsage(event) ?? usage;
       const delta = extract(event);
       if (delta) callbacks.onDelta(delta);
     });
-    callbacks.onDone();
+    callbacks.onDone(usage);
   } catch (err) {
     if (signal?.aborted) {
       // 用户主动取消：视为正常收尾

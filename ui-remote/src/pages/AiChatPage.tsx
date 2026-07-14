@@ -10,6 +10,7 @@ import {
   type AiConversation,
   type AiMessage,
   type AiImage,
+  type AiTokenUsage,
 } from "../services/AiConversationStore";
 import { aiProviderStore, type AiModel, type AiProvider } from "../services/AiProviderStore";
 import { streamChat, blobToDataUrl } from "../services/aiClient";
@@ -35,7 +36,7 @@ function makeId(prefix: string) {
 }
 
 export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
-  const { reasoningEffort } = useAiChatSettings();
+  const { reasoningEffort, showTokenUsage } = useAiChatSettings();
   const [conversation, setConversation] = useState<AiConversation | null>(null);
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState("");
@@ -364,15 +365,23 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
     abortRef.current = controller;
     setIsRunning(true);
 
-    // 增量在 updater 内部拼接，避免 React 批处理时读到过期 content 丢字
+    // 以 ref 为流式消息真源，避免 React 批处理时读到过期 content 丢字。
     const appendDelta = (delta: string) => {
-      setMessages((prev) => {
-        const next = prev.map((m) =>
-          m.id === assistantMessage.id ? { ...m, content: m.content + delta, updatedAt: Date.now() } : m,
-        );
-        messagesRef.current = next;
-        return next;
-      });
+      const next = messagesRef.current.map((m) =>
+        m.id === assistantMessage.id ? { ...m, content: m.content + delta, updatedAt: Date.now() } : m,
+      );
+      messagesRef.current = next;
+      setMessages(next);
+    };
+
+    const attachUsage = (usage: AiTokenUsage | undefined) => {
+      if (!usage) return messagesRef.current;
+      const next = messagesRef.current.map((m) =>
+        m.id === assistantMessage.id ? { ...m, usage, updatedAt: Date.now() } : m,
+      );
+      messagesRef.current = next;
+      setMessages(next);
+      return next;
     };
 
     await streamChat(
@@ -381,14 +390,16 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
         model: resolved.model,
         messages: history,
         reasoningEffort,
+        includeUsage: showTokenUsage,
         signal: controller.signal,
       },
       {
         onDelta: (delta) => appendDelta(delta),
-        onDone: () => {
+        onDone: (usage) => {
+          const next = attachUsage(usage);
           setIsRunning(false);
           abortRef.current = null;
-          persist(messagesRef.current);
+          persist(next);
         },
         onError: (error) => {
           const next = messagesRef.current.map((m) =>
@@ -439,6 +450,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
               key={msg.id}
               message={msg}
               streaming={isRunning && i === messages.length - 1 && msg.role === "assistant"}
+              showTokenUsage={showTokenUsage}
               onPreviewImage={(url, name) => setPreviewImage({ url, name })}
             />
           ))
@@ -584,10 +596,12 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 function AiMessageBubble({
   message,
   streaming,
+  showTokenUsage,
   onPreviewImage,
 }: {
   message: AiMessage;
   streaming: boolean;
+  showTokenUsage: boolean;
   onPreviewImage: (url: string, name: string) => void;
 }) {
   const isUser = message.role === "user";
@@ -627,8 +641,18 @@ function AiMessageBubble({
         </div>
       </div>
       {!streaming && (
-        <div className="message-time" title={formatFullDateTime(time)}>
-          {formatMessageTime(time)}
+        <div className="ai-message-meta">
+          <span className="message-time" title={formatFullDateTime(time)}>
+            {formatMessageTime(time)}
+          </span>
+          {showTokenUsage && message.usage && (
+            <span className="ai-token-usage">
+              输入 {message.usage.inputTokens.toLocaleString()} · 输出 {message.usage.outputTokens.toLocaleString()}
+              {message.usage.reasoningTokens !== undefined
+                ? ` · 思考 ${message.usage.reasoningTokens.toLocaleString()}`
+                : ""}
+            </span>
+          )}
         </div>
       )}
     </>
