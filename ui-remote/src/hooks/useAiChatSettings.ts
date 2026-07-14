@@ -18,5 +18,9 @@ export function useAiChatSettings() {
     return aiChatSettingsStore.update({ reasoningEffort });
   }, []);
 
-  return { ...settings, setReasoningEffort };
+  const setShowTokenUsage = useCallback((showTokenUsage: boolean) => {
+    return aiChatSettingsStore.update({ showTokenUsage });
+  }, []);
+
+  return { ...settings, setReasoningEffort, setShowTokenUsage };
 }

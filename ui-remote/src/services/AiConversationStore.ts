@@ -20,6 +20,13 @@ export interface AiImage {
   mimeType: string;
 }
 
+export interface AiTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+}
+
 export interface AiMessage {
   id: string;
   role: "user" | "assistant";
@@ -28,6 +35,8 @@ export interface AiMessage {
   updatedAt?: number;
   /** 用户消息可携带图片（多模态） */
   images?: AiImage[];
+  /** assistant 消息对应这一轮请求的 Token 用量 */
+  usage?: AiTokenUsage;
   error?: string;
 }
 

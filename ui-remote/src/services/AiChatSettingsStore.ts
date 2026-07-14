@@ -7,16 +7,21 @@ export type AiReasoningEffort = (typeof AI_REASONING_EFFORTS)[number];
 
 export interface AiChatSettings {
   reasoningEffort: AiReasoningEffort | null;
+  showTokenUsage: boolean;
 }
 
 const DEFAULT_SETTINGS: AiChatSettings = {
   reasoningEffort: null,
+  showTokenUsage: false,
 };
 
 function normalizeSettings(value: unknown): AiChatSettings {
   const raw = value && typeof value === "object" ? value as Partial<AiChatSettings> : {};
   const reasoningEffort = AI_REASONING_EFFORTS.find((effort) => effort === raw.reasoningEffort) ?? null;
-  return { reasoningEffort };
+  return {
+    reasoningEffort,
+    showTokenUsage: raw.showTokenUsage === true,
+  };
 }
 
 function parseSettings(raw: string | null): AiChatSettings {

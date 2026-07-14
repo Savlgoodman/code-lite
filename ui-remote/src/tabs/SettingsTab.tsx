@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Moon, Sun, Check, Server, Archive, ChevronRight, Smartphone, Info, Image as ImageIcon, Brain } from "lucide-react";
+import { Moon, Sun, Check, Server, Archive, ChevronRight, Smartphone, Info, Image as ImageIcon, Brain, Hash } from "lucide-react";
 import { Select } from "../components/ui";
 import { useTheme, THEME_LABELS, type ThemeName } from "../hooks/useTheme";
 import { useAiChatSettings } from "../hooks/useAiChatSettings";
@@ -28,7 +28,12 @@ interface SettingsTabProps {
 
 export function SettingsTab({ onOpenAiSettings, onOpenAiArchived, onOpenImageProviders }: SettingsTabProps) {
   const { theme, mode, setTheme, toggleMode } = useTheme();
-  const { reasoningEffort, setReasoningEffort } = useAiChatSettings();
+  const {
+    reasoningEffort,
+    showTokenUsage,
+    setReasoningEffort,
+    setShowTokenUsage,
+  } = useAiChatSettings();
   const isDark = mode === "dark";
   const [showAbout, setShowAbout] = useState(false);
   const aiAvailable = isAiAvailable();
@@ -94,6 +99,19 @@ export function SettingsTab({ onOpenAiSettings, onOpenAiArchived, onOpenImagePro
                     }}
                   />
                 </div>
+              </li>
+              <li className="settings-item ai-chat-token-setting">
+                <button
+                  type="button"
+                  className="ai-chat-token-button"
+                  aria-pressed={showTokenUsage}
+                  onClick={() => void setShowTokenUsage(!showTokenUsage)}
+                >
+                  <span className="settings-item-label"><Hash size={17} /> 显示 Token 消耗</span>
+                  <span className={`toggle${showTokenUsage ? " on" : ""}`}>
+                    <span className="toggle-knob" />
+                  </span>
+                </button>
               </li>
               <li className="settings-item settings-item-nav" onClick={onOpenAiSettings}>
                 <span className="settings-item-label"><Server size={17} /> 模型供应商配置</span>
