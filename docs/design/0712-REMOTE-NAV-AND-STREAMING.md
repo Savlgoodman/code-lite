@@ -146,12 +146,18 @@ peer-dep `@capacitor/core ^8.3.0`，匹配本项目 8.4.1）。它用原生 HTTP
 
 ### 3.3 AI 对话思考强度与 Token 显示
 
-思考强度和 Token 显示是远端独立 AI 对话模块的全局偏好，不影响远程 Agent 会话、图片生成或
-提示词优化。偏好由 `services/AiChatSettingsStore.ts` 通过 Capacitor Preferences 与
-`localStorage` 双写持久化，默认值为：
+思考强度和 Token 显示只影响远端独立 AI 对话模块，不影响远程 Agent 会话、图片生成或提示词优化。
+两者的生命周期不同：
 
-- 思考强度：`null`（兼容模式）。可选值为 `null / low / medium / high / xhigh`。
-- 显示 Token 消耗：关闭。
+- 思考强度是**会话级配置**，保存在 `AiConversation.reasoningEffort`，可选值为
+  `null / low / medium / high / xhigh`。输入区的对话设置弹窗负责修改当前会话的模型与思考强度。
+- `AiChatSettingsStore.defaultReasoningEffort` 只保存“下一个新会话”的默认思考强度。新建会话时
+  把该值复制进新会话；只有用户在对话设置弹窗中手动点选思考强度时才更新默认值。打开、发送或
+  仅修改历史会话的模型均不得反向覆盖默认值。
+- 显示 Token 消耗是全局显示偏好，由 `AiChatSettingsStore.showTokenUsage` 保存，默认关闭。
+
+`AiChatSettingsStore` 通过 Capacitor Preferences 与 `localStorage` 双写持久化。思考强度默认值为
+`null`（兼容模式），旧会话缺少会话级字段时也按 `null` 迁移。
 
 `null` 不是发送给供应商的字符串值，而是明确表示省略思考强度字段，以兼容不支持 reasoning
 参数的模型。非空值按供应商协议映射：
@@ -160,6 +166,8 @@ peer-dep `@capacitor/core ^8.3.0`，匹配本项目 8.4.1）。它用原生 HTTP
 |---|---|
 | `chat_completions` | `reasoning_effort: "low|medium|high|xhigh"` |
 | `responses` | `reasoning: { effort: "low|medium|high|xhigh" }` |
+
+输入区在模型名称旁展示当前会话的非空思考强度；值为 `null` 时不展示强度标签。
 
 打开 Token 显示后，`chat_completions` 请求增加 `stream_options: { include_usage: true }`；
 `responses` 从流式完成事件读取 `response.usage`。客户端把两种协议归一化为每条 assistant 消息上的
