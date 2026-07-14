@@ -305,8 +305,8 @@ AI 对话是**独立于 code-lite 业务**的附加模块，直连大模型 API�
 **图片生成**（AI Tab 内切换、`ImageGenPage`、图片供应商配置）与 AI 对话同构，直连供应商
 `/v1/images/generations`、`/v1/images/edits`（参考图走 base64 JSON，不用 multipart）与
 `/v1/chat/completions`（提示词优化），**同样受 `isAiAvailable()` gate**。请求经
-`services/imageHttp.ts` 分流：dev 走 `/ai-proxy` fetch，原生走 `@capacitor/core` 内置
-`CapacitorHttp`（非流式 JSON，能拿 status）。图片二进制存 IndexedDB（`imageBlobStore`），
+`services/imageHttp.ts` 分流：dev 走 `/ai-proxy` fetch；原生通常走 `CapacitorHttp`，需要主动终止的
+生成请求改走 `capacitor-stream-http-v2` 收集完整 JSON 并支持取消。图片二进制存 IndexedDB（`imageBlobStore`），
 供应商/记录元数据存 Preferences（`ImageProviderStore` / `ImageGenStore`）。生图核心逻辑在
 共享包 `@code-lite/image-gen` 的直连客户端。详见 `docs/design/0713-IMAGE-GENERATION.md` 第 10 节。
 
@@ -334,6 +334,9 @@ AI 对话是**独立于 code-lite 业务**的附加模块，直连大模型 API�
   `/ai-proxy`，原生走 `capacitor-stream-http-v2` 原生 HTTP（绕 WebView CORS，事件桥接为
   ReadableStream 保留逐字流式）。生产 PWA 不会走到这里，因为入口已被 gate 掉。
   `aiClient` 只认 `openStream` / `collectText`，不关心底层实现。
+- **后台任务不归页面所有**：AI 对话由 `aiChatTaskService`、生图由 `imageGenTasks` 持有请求和
+  活动状态。应用进入后台或返回列表不得主动 abort；只有用户点击停止/终止、请求完成/失败或进程
+  被杀时结束。活动 AI 对话在列表显示可点击的旋转状态按钮。
 - **`/ai-proxy` 仅存在于 dev**：它是 `vite.config.ts` 里的 dev 中间件，`vite build` 产物
   **不包含**它。若将来要在服务器上让网页版也能用 AI，需在服务器（nginx/caddy/node）
   固化一个同源反向代理，并相应放开 `isAiAvailable()` —— 但当前策略是网页版不做 AI。

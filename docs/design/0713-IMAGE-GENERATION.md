@@ -571,14 +571,14 @@ CSS 用 grid：外层 `grid-template-rows: 1fr auto`（上部工作区 + 底部�
 
 | 环境 | 生图是否可用 | 请求走向 |
 |------|------------|---------|
-| 原生 App | 可用 | `@capacitor/core` 内置 `CapacitorHttp`（原生 HTTP 绕 WebView CORS，JSON 请求/响应，能拿 status） |
+| 原生 App | 可用 | 可取消的生成请求走 `capacitor-stream-http-v2` 收集完整 JSON；其它 JSON/图片下载走 `CapacitorHttp` |
 | dev（Vite） | 可用 | 经同源 `/ai-proxy` 中间件转发 fetch（已支持 JSON body） |
 | PWA / 生产静态 | 不可用 | 入口 gate 掉，显示「仅 App 可用」 |
 
-**为什么原生分支用 `CapacitorHttp` 而非 `capacitor-stream-http-v2`**：生图接口返回的是
-**一次性 JSON**（`data[].url` 或 `b64_json`），不是 SSE 流，不需要 chunk 级流式；而
-`CapacitorHttp` 是 Capacitor 内置、支持 JSON POST 并能拿到 HTTP status（流式插件拿不到），
-更适合非流式请求。提示词优化（chat/completions 非流式，取完整响应）也走 `CapacitorHttp`。
+生图接口返回一次性 JSON（`data[].url` 或 `b64_json`），正常不需要 SSE 解析。但生成任务需要支持
+用户主动终止，因此原生生成 POST 复用 `capacitor-stream-http-v2` 的可取消请求，把 chunk 收集完后
+一次性解析 JSON；提示词优化等无需任务取消的 JSON 请求，以及图片直链下载，仍使用能拿 HTTP status
+的 `CapacitorHttp`。dev 环境统一用带 AbortSignal 的 fetch。
 
 ### 10.2 参考图统一走 base64 JSON（不引入 multipart 插件）
 
@@ -675,3 +675,15 @@ dev/原生两条路都用同一条 JSON 请求。
    `NavHost` case；设置页 AI 段落加入口（受 `isAiAvailable()` gate）。
 6. 样式加进 `styles/` 对应文件（新建 `image-gen` 段落或并入 `chat.css`/`lists.css`），颜色走令牌。
 7. `npm run build`（tsc strict + vite）通过；原生分支与参考图 base64 须真机验证。
+
+### 10.8 后台运行与主动终止
+
+生图任务由 `services/imageGenService.ts` 单例管理，不绑定 `ImageGenPage` 的挂载状态。每个活动
+`recordId` 对应一个 AbortController：
+
+- 应用进入后台或从生成页返回列表时不取消任务；只要 App 进程仍存活，原生请求继续执行，完成后
+  图片照常写入 IndexedDB、批次写入 ImageGenStore。
+- 生成页订阅活动任务。生成开始后主按钮从“生成”切换为“终止”，点击后中止当前 record 的请求；
+  取消不记录为生成错误，已写入但尚未形成批次的临时图片要清理。
+- 任务完成、失败或取消时清理 controller 与活动状态。用户或系统杀死 App 进程后，内存任务自然
+  终止；本设计不引入 Android 前台服务或常驻通知。
