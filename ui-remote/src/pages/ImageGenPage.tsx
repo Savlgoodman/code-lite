@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, Check, ImagePlus, Loader2, Sparkles, Wand2, X } from "lucide-react";
+import { ArrowLeft, Check, ImagePlus, Loader2, Sparkles, Square, Wand2, X } from "lucide-react";
 import { RECOMMENDED_SIZES } from "@code-lite/image-gen";
 import { Portal, Select, TextArea } from "../components/ui";
 import { BlobImage } from "../components/BlobImage";
@@ -129,7 +129,7 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
   );
 
   const providerOptions = providers.map((p) => ({ value: p.id, label: p.name }));
-  const canGenerate = !generating && Boolean(providerId) && Boolean(model.trim()) && Boolean(prompt.trim());
+  const canGenerate = Boolean(providerId) && Boolean(model.trim()) && Boolean(prompt.trim());
 
   async function handleAddReference(files: FileList | null) {
     const list = Array.from(files ?? []).filter((f) => f.type.startsWith("image/"));
@@ -174,6 +174,10 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
   }
 
   function handleGenerate() {
+    if (generating) {
+      imageGenTasks.cancel(recordId);
+      return;
+    }
     if (!canGenerate) return;
     setError(null);
     const params: ImageRunParams = {
@@ -304,9 +308,13 @@ export function ImageGenPage({ recordId, onBack }: ImageGenPageProps) {
             <ImagePlus size={16} />
             <span>参考图</span>
           </button>
-          <button className="imggen-btn-primary" disabled={!canGenerate} onClick={handleGenerate}>
-            {generating ? <Loader2 className="imggen-spin" size={16} /> : <Sparkles size={16} />}
-            <span>{generating ? "生成中" : "生成"}</span>
+          <button
+            className={`imggen-btn-primary${generating ? " cancel" : ""}`}
+            disabled={!generating && !canGenerate}
+            onClick={handleGenerate}
+          >
+            {generating ? <Square size={16} /> : <Sparkles size={16} />}
+            <span>{generating ? "终止" : "生成"}</span>
           </button>
         </div>
         <input ref={fileInputRef} type="file" accept={IMAGE_ACCEPT} multiple hidden onChange={(e) => void handleAddReference(e.currentTarget.files)} />

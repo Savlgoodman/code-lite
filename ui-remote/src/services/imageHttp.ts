@@ -14,6 +14,7 @@
 import { CapacitorHttp } from "@capacitor/core";
 import type { ImageJsonHttp } from "@code-lite/image-gen";
 import { isNativeApp } from "../lib/environment";
+import { collectText, openStream } from "./httpTransport";
 
 /** dev/web 分支：把真实 URL 映射到同源 /ai-proxy 转发地址。 */
 function proxyUrl(url: string): string {
@@ -27,8 +28,28 @@ function authHeaders(apiKey: string): Record<string, string> {
 }
 
 /** 发一次 JSON POST，返回解析后的 JSON 对象；非 2xx 抛错。 */
-async function postJson(url: string, apiKey: string, body: unknown): Promise<unknown> {
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+}
+
+async function postJson(
+  url: string,
+  apiKey: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  throwIfAborted(signal);
   if (isNativeApp()) {
+    // 生成任务需要可取消：复用原生流式插件，收集完整响应后再解析 JSON。
+    if (signal) {
+      const stream = await openStream(url, {
+        method: "POST",
+        headers: authHeaders(apiKey),
+        body: JSON.stringify(body),
+        signal,
+      });
+      return safeParse(await collectText(stream));
+    }
     const resp = await CapacitorHttp.request({
       url,
       method: "POST",
@@ -46,6 +67,7 @@ async function postJson(url: string, apiKey: string, body: unknown): Promise<unk
     method: "POST",
     headers: authHeaders(apiKey),
     body: JSON.stringify(body),
+    signal,
   });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => "");
@@ -91,10 +113,17 @@ function dataUrlToBlob(dataUrl: string): Blob {
  * 下载图片直链为 Blob（供应商返回 response_format=url 时用）。
  * data URL 直接解码；http(s) 直链 dev 经 /ai-proxy，原生用 CapacitorHttp responseType=blob。
  */
-export async function downloadImage(url: string, apiKey: string): Promise<Blob> {
+export async function downloadImage(
+  url: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  throwIfAborted(signal);
   // 有的供应商在 url 字段里塞的是 data URL，直接解码，不能套代理前缀。
   if (url.startsWith("data:")) {
-    return dataUrlToBlob(url);
+    const blob = dataUrlToBlob(url);
+    throwIfAborted(signal);
+    return blob;
   }
   if (isNativeApp()) {
     const resp = await CapacitorHttp.request({
@@ -103,6 +132,7 @@ export async function downloadImage(url: string, apiKey: string): Promise<Blob> 
       headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
       responseType: "blob",
     });
+    throwIfAborted(signal);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`图片下载失败 (${resp.status})`);
     }
@@ -117,10 +147,19 @@ export async function downloadImage(url: string, apiKey: string): Promise<Blob> 
   const resp = await fetch(proxyUrl(url), {
     method: "GET",
     headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
+    signal,
   });
   if (!resp.ok) throw new Error(`图片下载失败 (${resp.status})`);
-  return resp.blob();
+  const blob = await resp.blob();
+  throwIfAborted(signal);
+  return blob;
 }
 
 /** 提供给共享包直连客户端的 JSON HTTP 实现。 */
-export const imageJsonHttp: ImageJsonHttp = { postJson };
+export function createImageJsonHttp(signal?: AbortSignal): ImageJsonHttp {
+  return {
+    postJson: (url, apiKey, body) => postJson(url, apiKey, body, signal),
+  };
+}
+
+export const imageJsonHttp: ImageJsonHttp = createImageJsonHttp();

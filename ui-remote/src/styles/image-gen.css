@@ -399,10 +399,20 @@
   color: var(--on-accent);
   font-size: 14px;
   font-weight: 600;
+  cursor: pointer;
+}
+
+.imggen-btn-primary.cancel {
+  background: var(--orange);
+}
+
+.imggen-btn-primary.cancel:active {
+  background: var(--orange-pressed);
 }
 
 .imggen-btn-primary:disabled {
   opacity: 0.5;
+  cursor: default;
 }
 
 .imggen-spin {
