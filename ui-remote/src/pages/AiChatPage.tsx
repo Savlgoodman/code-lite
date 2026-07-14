@@ -15,6 +15,7 @@ import { aiProviderStore, type AiModel, type AiProvider } from "../services/AiPr
 import { streamChat, blobToDataUrl } from "../services/aiClient";
 import { useDismissable } from "../hooks/useDismissable";
 import { useNativeRepaint } from "../hooks/useNativeRepaint";
+import { useAiChatSettings } from "../hooks/useAiChatSettings";
 import {
   IMAGE_ACCEPT,
   MAX_DRAFT_IMAGES,
@@ -34,6 +35,7 @@ function makeId(prefix: string) {
 }
 
 export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
+  const { reasoningEffort } = useAiChatSettings();
   const [conversation, setConversation] = useState<AiConversation | null>(null);
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState("");
@@ -374,7 +376,13 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
     };
 
     await streamChat(
-      { provider: resolved.provider, model: resolved.model, messages: history, signal: controller.signal },
+      {
+        provider: resolved.provider,
+        model: resolved.model,
+        messages: history,
+        reasoningEffort,
+        signal: controller.signal,
+      },
       {
         onDelta: (delta) => appendDelta(delta),
         onDone: () => {

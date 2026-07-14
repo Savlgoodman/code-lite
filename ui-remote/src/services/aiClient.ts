@@ -18,6 +18,7 @@
 
 import type { AiProvider, AiModel } from "./AiProviderStore";
 import type { AiImage, AiMessage } from "./AiConversationStore";
+import type { AiReasoningEffort } from "./AiChatSettingsStore";
 import { openStream, collectText } from "./httpTransport";
 
 /** 规范化 baseUrl：去掉结尾斜杠。 */
@@ -65,6 +66,7 @@ export interface StreamChatParams {
   provider: AiProvider;
   model: AiModel;
   messages: AiMessage[];
+  reasoningEffort: AiReasoningEffort | null;
   signal?: AbortSignal;
 }
 
@@ -165,7 +167,7 @@ export async function streamChat(
   params: StreamChatParams,
   callbacks: StreamChatCallbacks,
 ): Promise<void> {
-  const { provider, model, messages, signal } = params;
+  const { provider, model, messages, reasoningEffort, signal } = params;
   const base = normalizeBaseUrl(provider.baseUrl);
 
   try {
@@ -180,6 +182,7 @@ export async function streamChat(
         input: buildResponsesInput(messages, model.multimodal),
         max_output_tokens: model.maxOutputTokens,
         stream: true,
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
       };
       extract = responsesDelta;
     } else {
@@ -189,6 +192,7 @@ export async function streamChat(
         messages: buildChatMessages(messages, model.multimodal),
         max_tokens: model.maxOutputTokens,
         stream: true,
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       };
       extract = chatDelta;
     }
