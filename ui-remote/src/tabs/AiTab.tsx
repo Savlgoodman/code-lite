@@ -4,6 +4,7 @@ import { Fab, EmptyState, Portal } from "../components/ui";
 import { BlobImage } from "../components/BlobImage";
 import { useAiConversations } from "../hooks/useAiConversations";
 import { useAiProviders } from "../hooks/useAiProviders";
+import { useAiChatSettings } from "../hooks/useAiChatSettings";
 import { useImageRecords } from "../hooks/useImageRecords";
 import { aiConversationStore, type AiConversation } from "../services/AiConversationStore";
 import { imageGenStore } from "../services/ImageGenStore";
@@ -24,6 +25,7 @@ export function AiTab({ onOpenConversation, onOpenImageRecord, active = true }: 
   const conversations = useAiConversations();
   const records = useImageRecords();
   const { models } = useAiProviders();
+  const { defaultReasoningEffort } = useAiChatSettings();
   const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<AiMode>("chat");
 
@@ -81,7 +83,10 @@ export function AiTab({ onOpenConversation, onOpenImageRecord, active = true }: 
       onOpenConversation={onOpenConversation}
       onStartNew={async () => {
         if (models.length === 0) return;
-        const conv = await aiConversationStore.createConversation(models[0].id);
+        const conv = await aiConversationStore.createConversation(
+          models[0].id,
+          defaultReasoningEffort,
+        );
         onOpenConversation(conv.id);
       }}
       modeToggle={modeToggle}

@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ArrowLeft, ArrowDown, Image, Loader2, Send, Cpu, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowDown, Image, Loader2, Send, Settings, Square, X } from "lucide-react";
 import { MessageRenderer } from "../components/MessageRenderer";
-import { AiModelSheet } from "../sheets/AiModelSheet";
+import {
+  AiModelSheet,
+  type AiConversationConfigSelection,
+} from "../sheets/AiModelSheet";
 import { ImageSourceSheet } from "../sheets/ImageSourceSheet";
 import { EmptyState, Portal, TextArea } from "../components/ui";
 import { formatMessageTime, formatFullDateTime } from "../lib/formatters";
@@ -36,7 +39,7 @@ function makeId(prefix: string) {
 }
 
 export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
-  const { reasoningEffort, showTokenUsage } = useAiChatSettings();
+  const { showTokenUsage, setDefaultReasoningEffort } = useAiChatSettings();
   const [conversation, setConversation] = useState<AiConversation | null>(null);
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState("");
@@ -71,6 +74,7 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
   messagesRef.current = messages;
 
   const multimodal = resolved?.model.multimodal ?? false;
+  const reasoningEffort = conversation?.reasoningEffort ?? null;
 
   // 载入会话元数据、消息、解析当前模型
   useEffect(() => {
@@ -421,10 +425,19 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
     setIsRunning(false);
   };
 
-  const handleSelectModel = (modelRefId: string) => {
-    void aiConversationStore.updateConversation(conversationId, { modelRefId });
-    setConversation((prev) => (prev ? { ...prev, modelRefId } : prev));
+  const handleSaveConfig = (selection: AiConversationConfigSelection) => {
+    const { modelRefId, reasoningEffort: nextEffort, reasoningTouched } = selection;
+    void aiConversationStore.updateConversation(conversationId, {
+      modelRefId,
+      reasoningEffort: nextEffort,
+    });
+    setConversation((prev) => (prev ? {
+      ...prev,
+      modelRefId,
+      reasoningEffort: nextEffort,
+    } : prev));
     void aiProviderStore.resolveModel(modelRefId).then(setResolved);
+    if (reasoningTouched) void setDefaultReasoningEffort(nextEffort);
   };
 
   const modelLabel = resolved?.model.label ?? "未选择模型";
@@ -516,11 +529,11 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
           <div className="input-bottom-row">
             <button
               className="input-config-btn"
-              aria-label="选择模型"
-              title={modelLabel}
+              aria-label="对话设置"
+              title="对话设置"
               onClick={() => setShowModelSheet(true)}
             >
-              <Cpu size={18} />
+              <Settings size={18} />
             </button>
             <button
               className="input-config-btn"
@@ -531,7 +544,15 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
             >
               {imagesProcessing ? <Loader2 className="draft-image-spin" size={18} /> : <Image size={18} />}
             </button>
-            <span className="ai-model-inline" onClick={() => setShowModelSheet(true)}>{modelLabel}</span>
+            <button
+              type="button"
+              className="ai-config-inline"
+              onClick={() => setShowModelSheet(true)}
+              title="对话设置"
+            >
+              <span className="ai-model-inline">{modelLabel}</span>
+              {reasoningEffort && <span className="ai-effort-inline">{reasoningEffort}</span>}
+            </button>
             {isRunning ? (
               <button ref={sendButtonRef} className="send-btn cancel" onClick={handleCancel}>
                 <Square size={18} />
@@ -553,9 +574,10 @@ export function AiChatPage({ conversationId, onBack }: AiChatPageProps) {
 
       {showModelSheet && (
         <AiModelSheet
-          value={conversation?.modelRefId ?? ""}
+          modelRefId={conversation?.modelRefId ?? ""}
+          reasoningEffort={reasoningEffort}
           onClose={() => setShowModelSheet(false)}
-          onSelect={handleSelectModel}
+          onSave={handleSaveConfig}
         />
       )}
 
