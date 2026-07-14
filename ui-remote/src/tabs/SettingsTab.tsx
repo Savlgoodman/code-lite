@@ -1,13 +1,24 @@
 import { useState } from "react";
-import { Moon, Sun, Check, Server, Archive, ChevronRight, Smartphone, Info, Image as ImageIcon } from "lucide-react";
+import { Moon, Sun, Check, Server, Archive, ChevronRight, Smartphone, Info, Image as ImageIcon, Brain } from "lucide-react";
+import { Select } from "../components/ui";
 import { useTheme, THEME_LABELS, type ThemeName } from "../hooks/useTheme";
+import { useAiChatSettings } from "../hooks/useAiChatSettings";
 import { AboutSheet } from "../sheets/AboutSheet";
 import { isAiAvailable } from "../lib/environment";
+import type { AiReasoningEffort } from "../services/AiChatSettingsStore";
 
 const THEME_SWATCHES: Record<ThemeName, { bg: string; accent: string; card: string }> = {
   mono: { bg: "#f6f5f3", accent: "#1f2328", card: "#ffffff" },
   warm: { bg: "#f9f4ef", accent: "#8c7851", card: "#f25042" },
 };
+
+const REASONING_EFFORT_OPTIONS = [
+  { value: "null", label: "不设置 (null)" },
+  { value: "low", label: "low" },
+  { value: "medium", label: "medium" },
+  { value: "high", label: "high" },
+  { value: "xhigh", label: "xhigh" },
+];
 
 interface SettingsTabProps {
   onOpenAiSettings?: () => void;
@@ -17,6 +28,7 @@ interface SettingsTabProps {
 
 export function SettingsTab({ onOpenAiSettings, onOpenAiArchived, onOpenImageProviders }: SettingsTabProps) {
   const { theme, mode, setTheme, toggleMode } = useTheme();
+  const { reasoningEffort, setReasoningEffort } = useAiChatSettings();
   const isDark = mode === "dark";
   const [showAbout, setShowAbout] = useState(false);
   const aiAvailable = isAiAvailable();
@@ -69,7 +81,20 @@ export function SettingsTab({ onOpenAiSettings, onOpenAiArchived, onOpenImagePro
         <div className="settings-section">
           <h3>AI 对话</h3>
           {aiAvailable ? (
-            <ul>
+            <ul className="ai-chat-settings-list">
+              <li className="settings-item ai-chat-setting-control">
+                <span className="settings-item-label"><Brain size={17} /> 思考强度</span>
+                <div className="ai-reasoning-select">
+                  <Select
+                    value={reasoningEffort ?? "null"}
+                    options={REASONING_EFFORT_OPTIONS}
+                    onChange={(value) => {
+                      const effort = value === "null" ? null : value as AiReasoningEffort;
+                      void setReasoningEffort(effort);
+                    }}
+                  />
+                </div>
+              </li>
               <li className="settings-item settings-item-nav" onClick={onOpenAiSettings}>
                 <span className="settings-item-label"><Server size={17} /> 模型供应商配置</span>
                 <ChevronRight size={18} />
