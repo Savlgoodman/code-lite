@@ -17,6 +17,8 @@ backend/config/nanobot_config.local.json
 *.key
 *.p12
 *.pfx
+*.jks
+*.keystore
 
 # 日志与本地临时数据
 logs/

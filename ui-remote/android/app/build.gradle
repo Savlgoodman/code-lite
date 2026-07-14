@@ -19,11 +19,47 @@ if (!codeLiteVersionCodeValue) {
     ) + 1
 }
 def codeLiteVersionCode = Integer.parseInt(codeLiteVersionCodeValue.toString())
+def codeLiteRepoRoot = new File(rootProject.projectDir, '../..').canonicalFile
+def codeLiteSigningPropertiesFile = new File(codeLiteRepoRoot, 'env/android-signing.properties')
+def codeLiteSigningProperties = new java.util.Properties()
+def codeLiteReleaseSigningAvailable = codeLiteSigningPropertiesFile.isFile()
+def codeLiteReleaseKeystoreFile = null
+
+if (codeLiteReleaseSigningAvailable) {
+    codeLiteSigningPropertiesFile.withInputStream { stream ->
+        codeLiteSigningProperties.load(stream)
+    }
+    def requiredSigningKeys = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+    def missingSigningKeys = requiredSigningKeys.findAll { key ->
+        !codeLiteSigningProperties.getProperty(key)?.trim()
+    }
+    if (!missingSigningKeys.isEmpty()) {
+        throw new GradleException("Missing Android signing properties: ${missingSigningKeys.join(', ')}")
+    }
+
+    codeLiteReleaseKeystoreFile = new File(codeLiteSigningProperties.getProperty('storeFile'))
+    if (!codeLiteReleaseKeystoreFile.isAbsolute()) {
+        codeLiteReleaseKeystoreFile = new File(codeLiteRepoRoot, codeLiteReleaseKeystoreFile.path)
+    }
+    if (!codeLiteReleaseKeystoreFile.isFile()) {
+        throw new GradleException("Android release keystore not found: ${codeLiteReleaseKeystoreFile}")
+    }
+}
 
 android {
     namespace = "com.codelite.remote"
     compileSdk = rootProject.ext.compileSdkVersion
     buildToolsVersion = "36.1.0"
+    signingConfigs {
+        release {
+            if (codeLiteReleaseSigningAvailable) {
+                storeFile codeLiteReleaseKeystoreFile
+                storePassword codeLiteSigningProperties.getProperty('storePassword')
+                keyAlias codeLiteSigningProperties.getProperty('keyAlias')
+                keyPassword codeLiteSigningProperties.getProperty('keyPassword')
+            }
+        }
+    }
     defaultConfig {
         applicationId "com.codelite.remote"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -40,9 +76,25 @@ android {
     }
     buildTypes {
         release {
+            if (codeLiteReleaseSigningAvailable) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    def releasePackageRequested = taskGraph.allTasks.any { task ->
+        task.path.startsWith(':app:')
+                && task.name.endsWith('Release')
+                && ['assemble', 'bundle', 'package'].any { prefix -> task.name.startsWith(prefix) }
+    }
+    if (releasePackageRequested && !codeLiteReleaseSigningAvailable) {
+        throw new GradleException(
+                "Android release signing is not configured. Run scripts/setup-android-signing.ps1 first."
+        )
     }
 }
 
