@@ -9,6 +9,7 @@ import { useImageRecords } from "../hooks/useImageRecords";
 import { aiConversationStore, type AiConversation } from "../services/AiConversationStore";
 import { imageGenStore } from "../services/ImageGenStore";
 import { imageGenTasks } from "../services/imageGenService";
+import { aiChatTasks } from "../services/aiChatTaskService";
 import { formatMessageTime } from "../lib/formatters";
 import { isAiAvailable } from "../lib/environment";
 
@@ -114,6 +115,10 @@ function ChatModeView({
   modeToggle: React.ReactNode;
 }) {
   const list = conversations.filter((c) => !c.archived).sort((a, b) => b.updatedAt - a.updatedAt);
+  const activeConversations = useSyncExternalStore(
+    aiChatTasks.subscribeActive,
+    aiChatTasks.getActiveSnapshot,
+  );
 
   if (!hasModel) {
     return (
@@ -136,21 +141,55 @@ function ChatModeView({
         <EmptyState icon="☺" title="还没有对话">点击右下角开始新对话</EmptyState>
       ) : (
         <ul className="ai-conv-list">
-          {list.map((conv) => (
-            <li key={conv.id} className="ai-conv-item" onClick={() => onOpenConversation(conv.id)}>
-              <span className="ai-conv-icon"><MessageSquare size={16} /></span>
-              <div className="ai-conv-main">
-                <span className="ai-conv-title">{conv.title || "未命名对话"}</span>
-                <span className="ai-conv-time">{formatMessageTime(conv.updatedAt)}</span>
-              </div>
-              <button className="ai-icon-btn" aria-label="归档" title="归档" onClick={(e) => { e.stopPropagation(); void aiConversationStore.setArchived(conv.id, true); }}>
-                <Archive size={16} />
-              </button>
-              <button className="ai-icon-btn danger" aria-label="删除" title="删除" onClick={(e) => { e.stopPropagation(); void aiConversationStore.deleteConversation(conv.id); }}>
-                <Trash2 size={16} />
-              </button>
-            </li>
-          ))}
+          {list.map((conv) => {
+            const running = activeConversations.includes(conv.id);
+            return (
+              <li key={conv.id} className="ai-conv-item" onClick={() => onOpenConversation(conv.id)}>
+                <span className="ai-conv-icon"><MessageSquare size={16} /></span>
+                <div className="ai-conv-main">
+                  <span className="ai-conv-title">{conv.title || "未命名对话"}</span>
+                  <span className="ai-conv-time">{formatMessageTime(conv.updatedAt)}</span>
+                </div>
+                {running && (
+                  <button
+                    className="ai-icon-btn ai-conv-running"
+                    aria-label="返回进行中的对话"
+                    title="返回进行中的对话"
+                    onClick={(e) => { e.stopPropagation(); onOpenConversation(conv.id); }}
+                  >
+                    <Loader2 className="ai-spin" size={17} />
+                  </button>
+                )}
+                <button
+                  className="ai-icon-btn"
+                  disabled={running}
+                  aria-label="归档"
+                  title="归档"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void aiConversationStore.setArchived(conv.id, true);
+                  }}
+                >
+                  <Archive size={16} />
+                </button>
+                <button
+                  className="ai-icon-btn danger"
+                  disabled={running}
+                  aria-label="删除"
+                  title="删除"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void (async () => {
+                      await aiChatTasks.forget(conv.id);
+                      await aiConversationStore.deleteConversation(conv.id);
+                    })();
+                  }}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
       {modeToggle}
