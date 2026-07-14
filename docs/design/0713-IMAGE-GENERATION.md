@@ -571,14 +571,17 @@ CSS 用 grid：外层 `grid-template-rows: 1fr auto`（上部工作区 + 底部�
 
 | 环境 | 生图是否可用 | 请求走向 |
 |------|------------|---------|
-| 原生 App | 可用 | 可取消的生成请求走 `capacitor-stream-http-v2` 收集完整 JSON；其它 JSON/图片下载走 `CapacitorHttp` |
+| 原生 App | 可用 | 生成 JSON 与图片下载均走 `CapacitorHttp`，生成请求设置较长读取超时 |
 | dev（Vite） | 可用 | 经同源 `/ai-proxy` 中间件转发 fetch（已支持 JSON body） |
 | PWA / 生产静态 | 不可用 | 入口 gate 掉，显示「仅 App 可用」 |
 
-生图接口返回一次性 JSON（`data[].url` 或 `b64_json`），正常不需要 SSE 解析。但生成任务需要支持
-用户主动终止，因此原生生成 POST 复用 `capacitor-stream-http-v2` 的可取消请求，把 chunk 收集完后
-一次性解析 JSON；提示词优化等无需任务取消的 JSON 请求，以及图片直链下载，仍使用能拿 HTTP status
-的 `CapacitorHttp`。dev 环境统一用带 AbortSignal 的 fetch。
+生图接口返回一次性 JSON（`data[].url` 或 `b64_json`），不应使用只为 SSE 设计的流式插件。
+`capacitor-stream-http-v2` 的 Android 实现把连接与读取超时硬编码为 30 秒，生图在 APK 中容易在
+供应商正常排队期间错误超时；原生生成 POST 统一使用 `CapacitorHttp`，并显式传入 30 秒连接超时与
+5 分钟读取超时。dev 环境统一用带 AbortSignal 的 fetch。
+
+CapacitorHttp 已提交的原生请求不能由 JS 真正断开，因此“终止”会立即中止当前 UI 任务、忽略随后
+返回的响应并清理尚未形成批次的临时图片；供应商侧是否停止执行由其 API 自身决定。
 
 ### 10.2 参考图统一走 base64 JSON（不引入 multipart 插件）
 
@@ -684,6 +687,17 @@ dev/原生两条路都用同一条 JSON 请求。
 - 应用进入后台或从生成页返回列表时不取消任务；只要 App 进程仍存活，原生请求继续执行，完成后
   图片照常写入 IndexedDB、批次写入 ImageGenStore。
 - 生成页订阅活动任务。生成开始后主按钮从“生成”切换为“终止”，点击后中止当前 record 的请求；
-  取消不记录为生成错误，已写入但尚未形成批次的临时图片要清理。
+  原生 CapacitorHttp 请求的后续响应会被忽略。取消不记录为生成错误，已写入但尚未形成批次的临时
+  图片要清理。
 - 任务完成、失败或取消时清理 controller 与活动状态。用户或系统杀死 App 进程后，内存任务自然
   终止；本设计不引入 Android 前台服务或常驻通知。
+
+### 10.9 保存到系统相册
+
+远程端的生成图与参考图本地存放在 IndexedDB，不能依赖 WebView 的 `download` 行为写入 Android
+相册。原生 App 通过本地 `ImageAlbum` Capacitor 插件把 Blob 编码后的图片写入 Android MediaStore：
+
+- Android 10 及以上写入 `Pictures/Code-Lite`，使用 scoped storage，不申请媒体读取权限。
+- Android 9 及以下仅在保存时申请 `WRITE_EXTERNAL_STORAGE`，写入后触发媒体扫描。
+- 图片缩略图、生成结果和历史图片支持长按保存；全屏预览底部固定提供“保存到相册”按钮并显示结果。
+- 非原生环境保留浏览器下载作为降级路径，不影响当前仅 App 可用的生图入口策略。
