@@ -9,6 +9,10 @@
  */
 
 import { Preferences } from "@capacitor/preferences";
+import {
+  normalizeAiReasoningEffort,
+  type AiReasoningEffort,
+} from "../lib/aiReasoning";
 
 const CONVERSATIONS_KEY = "ai-conversations";
 const MESSAGES_KEY_PREFIX = "ai-conv-msgs-";
@@ -45,6 +49,7 @@ export interface AiConversation {
   title: string;
   /** 指向 AiProviderStore 里某个已配置模型的 id */
   modelRefId: string;
+  reasoningEffort: AiReasoningEffort | null;
   createdAt: number;
   updatedAt: number;
   archived: boolean;
@@ -92,7 +97,16 @@ export class AiConversationStore {
   /** 首次进入时加载会话列表到内存快照。 */
   async init(): Promise<void> {
     if (this.loaded) return;
-    this.conversations = (await readJson<AiConversation[]>(CONVERSATIONS_KEY)) ?? [];
+    const stored = (await readJson<AiConversation[]>(CONVERSATIONS_KEY)) ?? [];
+    const needsMigration = stored.some((conversation) => (
+      !("reasoningEffort" in conversation)
+      || normalizeAiReasoningEffort(conversation.reasoningEffort) !== conversation.reasoningEffort
+    ));
+    this.conversations = stored.map((conversation) => ({
+      ...conversation,
+      reasoningEffort: normalizeAiReasoningEffort(conversation.reasoningEffort),
+    }));
+    if (needsMigration) await writeJson(CONVERSATIONS_KEY, this.conversations);
     this.loaded = true;
     this.emit();
   }
@@ -106,12 +120,17 @@ export class AiConversationStore {
     return this.conversations.find((c) => c.id === id);
   }
 
-  async createConversation(modelRefId: string, title = "新对话"): Promise<AiConversation> {
+  async createConversation(
+    modelRefId: string,
+    reasoningEffort: AiReasoningEffort | null,
+    title = "新对话",
+  ): Promise<AiConversation> {
     const now = Date.now();
     const conversation: AiConversation = {
       id: crypto.randomUUID(),
       title,
       modelRefId,
+      reasoningEffort,
       createdAt: now,
       updatedAt: now,
       archived: false,

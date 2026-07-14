@@ -104,40 +104,6 @@
   color: var(--muted);
 }
 
-.settings-section ul.ai-chat-settings-list {
-  overflow: visible;
-}
-
-.ai-chat-setting-control {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 10px;
-  padding-bottom: 10px;
-  cursor: default;
-}
-
-.ai-chat-setting-control:hover {
-  background: none;
-}
-
-.ai-reasoning-select {
-  width: min(48%, 168px);
-  min-width: 136px;
-}
-
-.ai-reasoning-select .select-trigger {
-  padding: 8px 10px;
-  font-size: 13px;
-}
-
-.ai-reasoning-select .select-option {
-  font-size: 13px;
-}
-
 .ai-chat-token-setting {
   padding: 0;
 }
@@ -552,12 +518,18 @@
 
 @keyframes ai-spin { to { transform: rotate(360deg); } }
 
-/* ── 对话内模型选择 ── */
+/* ── 对话内模型与思考强度设置 ── */
 
-.ai-model-picker {
+.ai-conversation-config {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 20px;
+}
+
+.ai-conversation-config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .ai-model-group {
@@ -598,17 +570,66 @@
   font-size: 14px;
 }
 
-/* ── 对话页内联模型名 ── */
+.ai-effort-options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ai-effort-option {
+  min-width: 0;
+  padding: 9px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ai-effort-option.selected {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* ── 输入区当前模型与思考强度 ── */
+
+.ai-config-inline {
+  min-width: 0;
+  max-width: 52%;
+  margin-right: auto;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
 
 .ai-model-inline {
-  margin-right: auto;
+  min-width: 0;
   font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 45%;
-  cursor: pointer;
+}
+
+.ai-effort-inline {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--hover);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .ai-message-error {

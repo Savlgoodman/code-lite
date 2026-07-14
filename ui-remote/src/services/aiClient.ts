@@ -18,7 +18,7 @@
 
 import type { AiProvider, AiModel } from "./AiProviderStore";
 import type { AiImage, AiMessage, AiTokenUsage } from "./AiConversationStore";
-import type { AiReasoningEffort } from "./AiChatSettingsStore";
+import type { AiReasoningEffort } from "../lib/aiReasoning";
 import { openStream, collectText } from "./httpTransport";
 
 /** 规范化 baseUrl：去掉结尾斜杠。 */

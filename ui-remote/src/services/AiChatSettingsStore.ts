@@ -1,25 +1,31 @@
 import { Preferences } from "@capacitor/preferences";
+import {
+  normalizeAiReasoningEffort,
+  type AiReasoningEffort,
+} from "../lib/aiReasoning";
 
 const SETTINGS_KEY = "ai-chat-settings";
 
-export const AI_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
-export type AiReasoningEffort = (typeof AI_REASONING_EFFORTS)[number];
-
 export interface AiChatSettings {
-  reasoningEffort: AiReasoningEffort | null;
+  defaultReasoningEffort: AiReasoningEffort | null;
   showTokenUsage: boolean;
 }
 
 const DEFAULT_SETTINGS: AiChatSettings = {
-  reasoningEffort: null,
+  defaultReasoningEffort: null,
   showTokenUsage: false,
 };
 
 function normalizeSettings(value: unknown): AiChatSettings {
-  const raw = value && typeof value === "object" ? value as Partial<AiChatSettings> : {};
-  const reasoningEffort = AI_REASONING_EFFORTS.find((effort) => effort === raw.reasoningEffort) ?? null;
+  const raw = value && typeof value === "object"
+    ? value as Partial<AiChatSettings> & { reasoningEffort?: unknown }
+    : {};
+  const storedDefault = "defaultReasoningEffort" in raw
+    ? raw.defaultReasoningEffort
+    : raw.reasoningEffort;
   return {
-    reasoningEffort,
+    // 兼容第一版全局 reasoningEffort，迁移后仅作为新会话默认值。
+    defaultReasoningEffort: normalizeAiReasoningEffort(storedDefault),
     showTokenUsage: raw.showTokenUsage === true,
   };
 }

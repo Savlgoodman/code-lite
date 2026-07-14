@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import {
-  aiChatSettingsStore,
-  type AiReasoningEffort,
-} from "../services/AiChatSettingsStore";
+import { aiChatSettingsStore } from "../services/AiChatSettingsStore";
+import type { AiReasoningEffort } from "../lib/aiReasoning";
 
 export function useAiChatSettings() {
   const settings = useSyncExternalStore(
@@ -14,13 +12,13 @@ export function useAiChatSettings() {
     void aiChatSettingsStore.init();
   }, []);
 
-  const setReasoningEffort = useCallback((reasoningEffort: AiReasoningEffort | null) => {
-    return aiChatSettingsStore.update({ reasoningEffort });
+  const setDefaultReasoningEffort = useCallback((defaultReasoningEffort: AiReasoningEffort | null) => {
+    return aiChatSettingsStore.update({ defaultReasoningEffort });
   }, []);
 
   const setShowTokenUsage = useCallback((showTokenUsage: boolean) => {
     return aiChatSettingsStore.update({ showTokenUsage });
   }, []);
 
-  return { ...settings, setReasoningEffort, setShowTokenUsage };
+  return { ...settings, setDefaultReasoningEffort, setShowTokenUsage };
 }
