@@ -63,6 +63,10 @@ export const imageGenTasks = {
     const controller = generationControllers.get(recordId);
     if (!controller) return false;
     controller.abort();
+    generationControllers.delete(recordId);
+    activeRecords.delete(recordId);
+    genErrors.delete(recordId);
+    emitGen();
     return true;
   },
 };
@@ -94,15 +98,15 @@ export function startGeneration(recordId: string, params: ImageRunParams): void 
     try {
       await runGeneration(recordId, params, controller.signal);
     } catch (err) {
-      if (!isAbortError(err)) {
+      if (generationControllers.get(recordId) === controller && !isAbortError(err)) {
         genErrors.set(recordId, err instanceof Error ? err.message : String(err));
       }
     } finally {
       if (generationControllers.get(recordId) === controller) {
         generationControllers.delete(recordId);
+        activeRecords.delete(recordId);
+        emitGen();
       }
-      activeRecords.delete(recordId);
-      emitGen();
     }
   })();
 }

@@ -14,7 +14,9 @@
 import { CapacitorHttp } from "@capacitor/core";
 import type { ImageJsonHttp } from "@code-lite/image-gen";
 import { isNativeApp } from "../lib/environment";
-import { collectText, openStream } from "./httpTransport";
+
+const IMAGE_CONNECT_TIMEOUT_MS = 30_000;
+const IMAGE_READ_TIMEOUT_MS = 5 * 60_000;
 
 /** dev/web 分支：把真实 URL 映射到同源 /ai-proxy 转发地址。 */
 function proxyUrl(url: string): string {
@@ -40,22 +42,15 @@ async function postJson(
 ): Promise<unknown> {
   throwIfAborted(signal);
   if (isNativeApp()) {
-    // 生成任务需要可取消：复用原生流式插件，收集完整响应后再解析 JSON。
-    if (signal) {
-      const stream = await openStream(url, {
-        method: "POST",
-        headers: authHeaders(apiKey),
-        body: JSON.stringify(body),
-        signal,
-      });
-      return safeParse(await collectText(stream));
-    }
     const resp = await CapacitorHttp.request({
       url,
       method: "POST",
       headers: authHeaders(apiKey),
       data: body,
+      connectTimeout: IMAGE_CONNECT_TIMEOUT_MS,
+      readTimeout: IMAGE_READ_TIMEOUT_MS,
     });
+    throwIfAborted(signal);
     if (resp.status < 200 || resp.status >= 300) {
       const detail = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
       throw new Error(mapStatusError(resp.status, detail));
@@ -131,6 +126,8 @@ export async function downloadImage(
       method: "GET",
       headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
       responseType: "blob",
+      connectTimeout: IMAGE_CONNECT_TIMEOUT_MS,
+      readTimeout: IMAGE_READ_TIMEOUT_MS,
     });
     throwIfAborted(signal);
     if (resp.status < 200 || resp.status >= 300) {
