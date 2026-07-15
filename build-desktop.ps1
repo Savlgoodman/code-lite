@@ -168,7 +168,7 @@ if ($distFullPath.StartsWith($repoFullPath, [System.StringComparison]::OrdinalIg
 }
 
 Write-Host ""
-Write-Host "  Release artifacts in $distFullPath:" -ForegroundColor Green
+Write-Host "  Release artifacts in ${distFullPath}:" -ForegroundColor Green
 Get-ChildItem -LiteralPath $distFullPath |
   Select-Object Name, @{N = 'Size(MB)'; E = { [math]::Round($_.Length / 1MB, 2) } }, LastWriteTime |
   Format-Table -AutoSize
