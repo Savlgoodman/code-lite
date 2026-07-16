@@ -122,6 +122,7 @@ export interface ImageProvider {
   hasApiKey: boolean;
   apiKeyPreview: string;
   defaultModel: string;      // 例如 gpt-image-2，可空
+  requestTimeoutSeconds: number; // 生成请求与结果图片下载超时，默认 300 秒
   createdAt: number;
   updatedAt: number;
 }
@@ -226,14 +227,14 @@ export function createImageGenClient(transport: ImageGenTransport) {
 ### 4.1 配置存储：图片供应商
 
 复用 `docs/0703` 的思路，但**图片供应商与文本模型供应商分开存储**，因为它们语义不同
-（图片供应商仅 url+apiKey，无「供应商->模型->能力」层级）。
+（图片供应商仅连接信息、默认模型与请求超时，无「供应商->模型->能力」层级）。
 
 在 `app_config.json` 顶层新增 `imageProviders` 数组（`ModelConfigStore` 只管 `llmProviders`，
 故新建独立 store 更清晰）：
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "imageProviders": [
     {
       "id": "imgprovider_xxx",
@@ -241,6 +242,7 @@ export function createImageGenClient(transport: ImageGenTransport) {
       "baseUrl": "https://cdn.12ai.org/v1",
       "apiKey": "sk-...",          // 仅后端持有，接口不回明文
       "defaultModel": "gpt-image-2",
+      "requestTimeoutSeconds": 300,
       "enabled": true,
       "createdAt": 0,
       "updatedAt": 0
@@ -253,10 +255,13 @@ export function createImageGenClient(transport: ImageGenTransport) {
 职责与 `ModelConfigStore` 平行：
 
 - `list_providers()` -> 遮蔽密钥的 public 列表（`hasApiKey` / `apiKeyPreview`，复用 `_preview_secret` 思路）。
-- `create_provider(name, base_url, api_key, default_model)`。
+- `create_provider(name, base_url, api_key, default_model, request_timeout_seconds)`。
 - `update_provider(id, patch)`：`apiKey` 为空表示不改。
 - `delete_provider(id)`。
-- `provider_connection(id)` -> `{baseUrl, apiKey, defaultModel}`（仅后端内部用，取真实密钥发外部请求）。
+- `provider_connection(id)` -> `{baseUrl, apiKey, defaultModel, requestTimeoutSeconds}`（仅后端内部用，取真实密钥发外部请求）。
+
+`requestTimeoutSeconds` 取值 10 到 3600 秒，默认 300 秒；读取 schema 1 或缺字段的旧配置时
+自动补默认值。它同时控制生成 POST 与供应商结果图片 URL 下载，避免生成成功后下载阶段无限等待。
 
 原子写、UTF-8、复用 `storage/conversations.atomic_write_json`。API Key 不进日志、不进接口响应。
 考虑到 `ModelConfigStore` 已经独占 `app_config.json` 的读写与 normalize，为避免两个 store
@@ -294,7 +299,7 @@ IO，包在 `asyncio.to_thread` 里执行。
 
 ```text
 GET    /api/image/providers                 列出图片供应商（密钥遮蔽）
-POST   /api/image/providers                 新建（body: name, baseUrl, apiKey, defaultModel）
+POST   /api/image/providers                 新建（body: name, baseUrl, apiKey, defaultModel, requestTimeoutSeconds）
 PATCH  /api/image/providers/{providerId}    更新（apiKey 空则不改）
 DELETE /api/image/providers/{providerId}    删除
 ```
@@ -494,8 +499,8 @@ CSS 用 grid：外层 `grid-template-rows: 1fr auto`（上部工作区 + 底部�
    `{ id: "imageProviders", icon: Image, label: "图片生成供应商" }`。
 3. `ui/src/pages/settings/SettingsPage.tsx`：`initialSection` 支持定位；新增
    `activeSection === "imageProviders"` 渲染 `<ImageProvidersSettings />`。
-4. 新建 `ui/src/pages/settings/ImageProvidersSettings.tsx`：表单仅 url + apiKey（可选 name、
-   defaultModel），列表展示已配供应商（密钥遮蔽、启用开关、编辑、删除），复用现有
+4. 新建 `ui/src/pages/settings/ImageProvidersSettings.tsx`：表单包含 url + apiKey（可选 name、
+   defaultModel）与请求超时秒数，列表展示已配供应商（密钥遮蔽、启用开关、超时、编辑、删除），复用现有
    `settings-card`/`settings-field`/`settings-primary-button` 等类名与 `ModelProvidersSettings`
    的交互骨架（去掉「模型发现/能力」层，只留连接信息）。
 
@@ -577,8 +582,9 @@ CSS 用 grid：外层 `grid-template-rows: 1fr auto`（上部工作区 + 底部�
 
 生图接口返回一次性 JSON（`data[].url` 或 `b64_json`），不应使用只为 SSE 设计的流式插件。
 `capacitor-stream-http-v2` 的 Android 实现把连接与读取超时硬编码为 30 秒，生图在 APK 中容易在
-供应商正常排队期间错误超时；原生生成 POST 统一使用 `CapacitorHttp`，并显式传入 30 秒连接超时与
-5 分钟读取超时。dev 环境统一用带 AbortSignal 的 fetch。
+供应商正常排队期间错误超时；原生生成 POST 统一使用 `CapacitorHttp`。读取超时由图片供应商设置的
+`requestTimeoutSeconds` 控制（默认 300 秒，范围 10 到 3600 秒），连接超时最多 30 秒且不超过该配置。
+dev 环境用带 AbortSignal 的 fetch，并以同一配置覆盖响应体读取全过程。
 
 CapacitorHttp 已提交的原生请求不能由 JS 真正断开，因此“终止”会立即中止当前 UI 任务、忽略随后
 返回的响应并清理尚未形成批次的临时图片；供应商侧是否停止执行由其 API 自身决定。
@@ -626,7 +632,7 @@ dev/原生两条路都用同一条 JSON 请求。
 
 仿照 `AiProviderStore` / `AiConversationStore`（Preferences + localStorage 双写 + subscribe）：
 
-- **`services/ImageProviderStore.ts`**：图片供应商（仅 url + apiKey + 可选 name / defaultModel），
+- **`services/ImageProviderStore.ts`**：图片供应商（url + apiKey + 可选 name / defaultModel + 请求超时），
   与 AI 文本供应商分开存（键 `image-providers`）。`subscribe/loadProviders/saveProvider/removeProvider`。
 - **`services/ImageGenStore.ts`**：生图任务与批次记录。
   - 索引键 `image-records` 存任务元数据列表（id/title/createdAt/updatedAt/coverImageId/runCount）。
@@ -659,7 +665,7 @@ dev/原生两条路都用同一条 JSON 请求。
      用 `Select`、生成主按钮。
    - 历史批次条：横向滚动缩略图，点击恢复该批次参数/提示词/参考图/生成图（与桌面端一致）。
 3. **图片供应商配置**（新 `ScreenEntry`，如 `imageProviders` + `imageProviderForm`）：挂在
-   设置页 AI 段落下新增一项「图片生成供应商」，仅 url + apiKey（+ 名称/默认模型）；表单基于
+   设置页 AI 段落下新增一项「图片生成供应商」，包含 url + apiKey（+ 名称/默认模型）与请求超时；表单基于
    `Input`，列表基于现有 `ai-provider-card` 样式复用。同样受 `isAiAvailable()` gate。
 
 **移动端布局取舍**：桌面端是"左参数/右上参考/右下生成/底部历史"的宽屏四区；移动端竖屏改为

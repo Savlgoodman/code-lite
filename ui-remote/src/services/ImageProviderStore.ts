@@ -7,6 +7,9 @@
  */
 
 import { Preferences } from "@capacitor/preferences";
+import {
+  normalizeImageRequestTimeoutSeconds,
+} from "@code-lite/image-gen";
 
 const PROVIDERS_KEY = "image-providers";
 
@@ -16,6 +19,7 @@ export interface ImageProviderRecord {
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
+  requestTimeoutSeconds: number;
 }
 
 export const DEFAULT_IMAGE_MODEL = "gpt-image-2";
@@ -50,14 +54,22 @@ export class ImageProviderStore {
   }
 
   async loadProviders(): Promise<ImageProviderRecord[]> {
-    return (await readJson<ImageProviderRecord[]>(PROVIDERS_KEY)) ?? [];
+    const providers = (await readJson<ImageProviderRecord[]>(PROVIDERS_KEY)) ?? [];
+    return providers.map((provider) => ({
+      ...provider,
+      requestTimeoutSeconds: normalizeImageRequestTimeoutSeconds(provider.requestTimeoutSeconds),
+    }));
   }
 
   async saveProvider(provider: ImageProviderRecord): Promise<void> {
     const providers = await this.loadProviders();
-    const idx = providers.findIndex((p) => p.id === provider.id);
-    if (idx >= 0) providers[idx] = provider;
-    else providers.push(provider);
+    const normalized = {
+      ...provider,
+      requestTimeoutSeconds: normalizeImageRequestTimeoutSeconds(provider.requestTimeoutSeconds),
+    };
+    const idx = providers.findIndex((p) => p.id === normalized.id);
+    if (idx >= 0) providers[idx] = normalized;
+    else providers.push(normalized);
     await writeJson(PROVIDERS_KEY, providers);
     this.emit();
   }

@@ -12,11 +12,14 @@
  */
 
 import { CapacitorHttp } from "@capacitor/core";
-import type { ImageJsonHttp } from "@code-lite/image-gen";
+import {
+  DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS,
+  normalizeImageRequestTimeoutSeconds,
+  type ImageJsonHttp,
+} from "@code-lite/image-gen";
 import { isNativeApp } from "../lib/environment";
 
 const IMAGE_CONNECT_TIMEOUT_MS = 30_000;
-const IMAGE_READ_TIMEOUT_MS = 5 * 60_000;
 
 /** dev/web 分支：把真实 URL 映射到同源 /ai-proxy 转发地址。 */
 function proxyUrl(url: string): string {
@@ -34,22 +37,79 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 }
 
+function timeoutMilliseconds(requestTimeoutSeconds: number): number {
+  return normalizeImageRequestTimeoutSeconds(requestTimeoutSeconds) * 1000;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message ?? "");
+  }
+  return String(error ?? "");
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return /timeout|timed out|time out/i.test(errorMessage(error));
+}
+
+async function withFetchTimeout<T>(
+  requestTimeoutSeconds: number,
+  signal: AbortSignal | undefined,
+  label: string,
+  request: (requestSignal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  throwIfAborted(signal);
+  const timeoutSeconds = normalizeImageRequestTimeoutSeconds(requestTimeoutSeconds);
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort();
+  signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timer = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutSeconds * 1000);
+
+  try {
+    return await request(controller.signal);
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(`${label}超时（${timeoutSeconds} 秒）`);
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timer);
+    signal?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
 async function postJson(
   url: string,
   apiKey: string,
   body: unknown,
   signal?: AbortSignal,
+  requestTimeoutSeconds = DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS,
 ): Promise<unknown> {
   throwIfAborted(signal);
+  const normalizedTimeout = normalizeImageRequestTimeoutSeconds(requestTimeoutSeconds);
+  const requestTimeoutMs = timeoutMilliseconds(normalizedTimeout);
   if (isNativeApp()) {
-    const resp = await CapacitorHttp.request({
-      url,
-      method: "POST",
-      headers: authHeaders(apiKey),
-      data: body,
-      connectTimeout: IMAGE_CONNECT_TIMEOUT_MS,
-      readTimeout: IMAGE_READ_TIMEOUT_MS,
-    });
+    let resp: Awaited<ReturnType<typeof CapacitorHttp.request>>;
+    try {
+      resp = await CapacitorHttp.request({
+        url,
+        method: "POST",
+        headers: authHeaders(apiKey),
+        data: body,
+        connectTimeout: Math.min(IMAGE_CONNECT_TIMEOUT_MS, requestTimeoutMs),
+        readTimeout: requestTimeoutMs,
+      });
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        throw new Error(`图片请求超时（${normalizedTimeout} 秒）`);
+      }
+      throw error;
+    }
     throwIfAborted(signal);
     if (resp.status < 200 || resp.status >= 300) {
       const detail = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
@@ -58,17 +118,19 @@ async function postJson(
     // CapacitorHttp 会按 Content-Type 自动解析 JSON；字符串则手动 parse。
     return typeof resp.data === "string" ? safeParse(resp.data) : resp.data;
   }
-  const resp = await fetch(proxyUrl(url), {
-    method: "POST",
-    headers: authHeaders(apiKey),
-    body: JSON.stringify(body),
-    signal,
+  return withFetchTimeout(normalizedTimeout, signal, "图片请求", async (requestSignal) => {
+    const resp = await fetch(proxyUrl(url), {
+      method: "POST",
+      headers: authHeaders(apiKey),
+      body: JSON.stringify(body),
+      signal: requestSignal,
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => "");
+      throw new Error(mapStatusError(resp.status, detail));
+    }
+    return resp.json();
   });
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => "");
-    throw new Error(mapStatusError(resp.status, detail));
-  }
-  return resp.json();
 }
 
 function safeParse(text: string): unknown {
@@ -112,6 +174,7 @@ export async function downloadImage(
   url: string,
   apiKey: string,
   signal?: AbortSignal,
+  requestTimeoutSeconds = DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS,
 ): Promise<Blob> {
   throwIfAborted(signal);
   // 有的供应商在 url 字段里塞的是 data URL，直接解码，不能套代理前缀。
@@ -120,15 +183,25 @@ export async function downloadImage(
     throwIfAborted(signal);
     return blob;
   }
+  const normalizedTimeout = normalizeImageRequestTimeoutSeconds(requestTimeoutSeconds);
+  const requestTimeoutMs = timeoutMilliseconds(normalizedTimeout);
   if (isNativeApp()) {
-    const resp = await CapacitorHttp.request({
-      url,
-      method: "GET",
-      headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
-      responseType: "blob",
-      connectTimeout: IMAGE_CONNECT_TIMEOUT_MS,
-      readTimeout: IMAGE_READ_TIMEOUT_MS,
-    });
+    let resp: Awaited<ReturnType<typeof CapacitorHttp.request>>;
+    try {
+      resp = await CapacitorHttp.request({
+        url,
+        method: "GET",
+        headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
+        responseType: "blob",
+        connectTimeout: Math.min(IMAGE_CONNECT_TIMEOUT_MS, requestTimeoutMs),
+        readTimeout: requestTimeoutMs,
+      });
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        throw new Error(`图片下载超时（${normalizedTimeout} 秒）`);
+      }
+      throw error;
+    }
     throwIfAborted(signal);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`图片下载失败 (${resp.status})`);
@@ -141,21 +214,30 @@ export async function downloadImage(
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return new Blob([bytes], { type: mime || "image/png" });
   }
-  const resp = await fetch(proxyUrl(url), {
-    method: "GET",
-    headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
-    signal,
+  return withFetchTimeout(normalizedTimeout, signal, "图片下载", async (requestSignal) => {
+    const resp = await fetch(proxyUrl(url), {
+      method: "GET",
+      headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
+      signal: requestSignal,
+    });
+    if (!resp.ok) throw new Error(`图片下载失败 (${resp.status})`);
+    return resp.blob();
   });
-  if (!resp.ok) throw new Error(`图片下载失败 (${resp.status})`);
-  const blob = await resp.blob();
-  throwIfAborted(signal);
-  return blob;
 }
 
 /** 提供给共享包直连客户端的 JSON HTTP 实现。 */
-export function createImageJsonHttp(signal?: AbortSignal): ImageJsonHttp {
+export function createImageJsonHttp(
+  signal?: AbortSignal,
+  requestTimeoutSeconds = DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS,
+): ImageJsonHttp {
   return {
-    postJson: (url, apiKey, body) => postJson(url, apiKey, body, signal),
+    postJson: (url, apiKey, body) => postJson(
+      url,
+      apiKey,
+      body,
+      signal,
+      requestTimeoutSeconds,
+    ),
   };
 }
 

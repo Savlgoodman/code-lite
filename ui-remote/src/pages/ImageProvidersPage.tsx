@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { ArrowLeft, Plus, Trash2, Pencil } from "lucide-react";
 import { Button, Input } from "../components/ui";
+import {
+  DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS,
+  MAX_IMAGE_REQUEST_TIMEOUT_SECONDS,
+  MIN_IMAGE_REQUEST_TIMEOUT_SECONDS,
+  isValidImageRequestTimeoutSeconds,
+} from "@code-lite/image-gen";
 import { useNav } from "../hooks/useNav";
 import { useImageProviders } from "../hooks/useImageProviders";
 import {
@@ -61,6 +67,7 @@ export function ImageProvidersListPage({ onBack }: { onBack: () => void }) {
               </div>
               <div className="ai-model-chips">
                 <span className="ai-hint-inline">默认模型：{provider.defaultModel || DEFAULT_IMAGE_MODEL}</span>
+                <span className="ai-hint-inline">请求超时：{provider.requestTimeoutSeconds} 秒</span>
               </div>
             </div>
           ))}
@@ -86,8 +93,13 @@ export function ImageProviderFormPage({
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
   const [apiKey, setApiKey] = useState(provider?.apiKey ?? "");
   const [defaultModel, setDefaultModel] = useState(provider?.defaultModel ?? DEFAULT_IMAGE_MODEL);
+  const [requestTimeoutSeconds, setRequestTimeoutSeconds] = useState(
+    String(provider?.requestTimeoutSeconds ?? DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS),
+  );
 
-  const canSave = Boolean(baseUrl.trim() && apiKey.trim());
+  const parsedRequestTimeout = Number(requestTimeoutSeconds);
+  const timeoutIsValid = isValidImageRequestTimeoutSeconds(parsedRequestTimeout);
+  const canSave = Boolean(baseUrl.trim() && apiKey.trim() && timeoutIsValid);
 
   const handleSave = async () => {
     const record: ImageProviderRecord = {
@@ -96,6 +108,7 @@ export function ImageProviderFormPage({
       baseUrl: baseUrl.trim(),
       apiKey: apiKey.trim(),
       defaultModel: defaultModel.trim() || DEFAULT_IMAGE_MODEL,
+      requestTimeoutSeconds: parsedRequestTimeout,
     };
     await imageProviderStore.saveProvider(record);
     nav.pop();
@@ -134,6 +147,20 @@ export function ImageProviderFormPage({
           <div className="field">
             <label>默认模型</label>
             <Input value={defaultModel} onValueChange={setDefaultModel} placeholder="gpt-image-2" spellCheck={false} autoCapitalize="none" />
+          </div>
+          <div className="field">
+            <label>请求超时（秒）</label>
+            <Input
+              inputMode="numeric"
+              value={requestTimeoutSeconds}
+              onValueChange={(value) => setRequestTimeoutSeconds(value.replace(/\D/g, ""))}
+              placeholder={String(DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS)}
+            />
+            {!timeoutIsValid && requestTimeoutSeconds ? (
+              <span className="ai-hint-inline">
+                请输入 {MIN_IMAGE_REQUEST_TIMEOUT_SECONDS} 到 {MAX_IMAGE_REQUEST_TIMEOUT_SECONDS} 秒
+              </span>
+            ) : null}
           </div>
           <Button variant="primary" block disabled={!canSave} onClick={handleSave}>保存</Button>
         </div>

@@ -13,7 +13,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from code_lite_backend.api.dependencies import get_services
 from code_lite_backend.services.feature_config import DEFAULT_IMAGE_PROMPT
-from code_lite_backend.services.image_config import ImageConfigError
+from code_lite_backend.services.image_config import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    ImageConfigError,
+)
 from code_lite_backend.services.prompt_optimize import optimize_prompt as optimize_with_model
 from code_lite_backend.services.runtime import AppServices
 
@@ -21,9 +24,6 @@ from code_lite_backend.services.runtime import AppServices
 router = APIRouter()
 
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
-GENERATION_TIMEOUT = 180
-
-
 # ── 供应商 CRUD ──
 
 @router.get("/image/providers")
@@ -44,6 +44,10 @@ async def create_image_provider(
             base_url=str(payload.get("baseUrl") or ""),
             api_key=str(payload.get("apiKey") or ""),
             default_model=str(payload.get("defaultModel") or "gpt-image-2"),
+            request_timeout_seconds=payload.get(
+                "requestTimeoutSeconds",
+                DEFAULT_REQUEST_TIMEOUT_SECONDS,
+            ),
         )
     except ImageConfigError as error:
         return JSONResponse({"error": str(error)}, status_code=400)
@@ -253,6 +257,7 @@ async def generate_image(
             size=size,
             quality=quality,
             reference_files=reference_files,
+            request_timeout_seconds=int(connection["requestTimeoutSeconds"]),
         )
     except RuntimeError as error:
         run = await asyncio.to_thread(
@@ -342,7 +347,22 @@ def _image_endpoint(base_url: str, path: str) -> str:
     return f"{normalized}/v1/{path}"
 
 
-def _decode_image_data(item: dict[str, Any], api_key: str) -> tuple[bytes, str] | None:
+def _is_timeout_error(error: BaseException) -> bool:
+    reason = getattr(error, "reason", None)
+    message = f"{error} {reason or ''}".lower()
+    return (
+        isinstance(error, TimeoutError)
+        or isinstance(reason, TimeoutError)
+        or "timed out" in message
+        or "timeout" in message
+    )
+
+
+def _decode_image_data(
+    item: dict[str, Any],
+    api_key: str,
+    request_timeout_seconds: int,
+) -> tuple[bytes, str] | None:
     b64 = item.get("b64_json")
     if isinstance(b64, str) and b64:
         try:
@@ -353,10 +373,12 @@ def _decode_image_data(item: dict[str, Any], api_key: str) -> tuple[bytes, str] 
     if isinstance(url, str) and url:
         request = Request(url, headers={"Authorization": f"Bearer {api_key}"}, method="GET")
         try:
-            with urlopen(request, timeout=GENERATION_TIMEOUT) as response:
+            with urlopen(request, timeout=request_timeout_seconds) as response:
                 mime_type = response.headers.get("Content-Type", "image/png").split(";")[0].strip()
                 return response.read(), mime_type or "image/png"
-        except (OSError, URLError, TimeoutError):
+        except (OSError, URLError, TimeoutError) as error:
+            if _is_timeout_error(error):
+                raise RuntimeError(f"图片下载超时（{request_timeout_seconds} 秒）") from error
             return None
     return None
 
@@ -371,6 +393,7 @@ def _call_image_provider(
     size: str,
     quality: str,
     reference_files: list[tuple[bytes, str]],
+    request_timeout_seconds: int,
 ) -> list[dict[str, Any]]:
     if reference_files:
         endpoint = _image_endpoint(base_url, "images/edits")
@@ -399,7 +422,7 @@ def _call_image_provider(
         )
 
     try:
-        with urlopen(request, timeout=GENERATION_TIMEOUT) as response:
+        with urlopen(request, timeout=request_timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8", errors="replace"))
     except HTTPError as error:
         if error.code == 403:
@@ -410,6 +433,8 @@ def _call_image_provider(
             raise RuntimeError("API Key 无效") from error
         raise RuntimeError(f"图片生成接口返回 {error.code}") from error
     except (OSError, URLError, TimeoutError) as error:
+        if _is_timeout_error(error):
+            raise RuntimeError(f"图片生成请求超时（{request_timeout_seconds} 秒）") from error
         raise RuntimeError("无法连接图片生成供应商") from error
     except json.JSONDecodeError as error:
         raise RuntimeError("图片生成供应商返回内容无法解析") from error
@@ -422,7 +447,7 @@ def _call_image_provider(
     for item in data:
         if not isinstance(item, dict):
             continue
-        decoded = _decode_image_data(item, api_key)
+        decoded = _decode_image_data(item, api_key, request_timeout_seconds)
         if decoded is None:
             continue
         image_bytes, mime_type = decoded

@@ -145,7 +145,10 @@ export async function runGeneration(
     references,
   };
 
-  const generationClient = createDirectImageGenClient(createImageJsonHttp(signal));
+  const requestTimeoutSeconds = provider.requestTimeoutSeconds;
+  const generationClient = createDirectImageGenClient(
+    createImageJsonHttp(signal, requestTimeoutSeconds),
+  );
   const results = await generationClient.generate(
     { baseUrl: provider.baseUrl, apiKey: provider.apiKey },
     input,
@@ -163,7 +166,12 @@ export async function runGeneration(
         mimeType = result.mimeType ?? "image/png";
         blob = base64ToBlob(result.base64, mimeType);
       } else if (result.url) {
-        blob = await downloadImage(result.url, provider.apiKey, signal);
+        blob = await downloadImage(
+          result.url,
+          provider.apiKey,
+          signal,
+          requestTimeoutSeconds,
+        );
         mimeType = blob.type || "image/png";
       } else {
         continue;

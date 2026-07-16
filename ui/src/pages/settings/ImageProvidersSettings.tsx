@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 
 import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 
-import type { ImageProvider } from "@code-lite/image-gen";
+import {
+  DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS,
+  MAX_IMAGE_REQUEST_TIMEOUT_SECONDS,
+  MIN_IMAGE_REQUEST_TIMEOUT_SECONDS,
+  isValidImageRequestTimeoutSeconds,
+  type ImageProvider,
+} from "@code-lite/image-gen";
 
 import { getImageGenClient } from "../../services/imageGenStore";
 
@@ -13,6 +19,7 @@ interface ProviderDraft {
   enabled: boolean;
   id: string;
   name: string;
+  requestTimeoutSeconds: string;
 }
 
 function providerNameFromUrl(value: string) {
@@ -23,6 +30,11 @@ function providerNameFromUrl(value: string) {
   }
 }
 
+function parseRequestTimeout(value: string): number | null {
+  const parsed = Number(value);
+  return isValidImageRequestTimeoutSeconds(parsed) ? parsed : null;
+}
+
 export function ImageProvidersSettings() {
   const client = getImageGenClient();
   const [providers, setProviders] = useState<ImageProvider[]>([]);
@@ -30,6 +42,9 @@ export function ImageProvidersSettings() {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [defaultModel, setDefaultModel] = useState("gpt-image-2");
+  const [requestTimeoutSeconds, setRequestTimeoutSeconds] = useState(
+    String(DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS),
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProviderDraft | null>(null);
@@ -55,8 +70,13 @@ export function ImageProvidersSettings() {
   async function addProvider() {
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedApiKey = apiKey.trim();
+    const timeout = parseRequestTimeout(requestTimeoutSeconds);
     if (!trimmedBaseUrl || !trimmedApiKey) {
       setError("请填写 URL 和 API Key");
+      return;
+    }
+    if (timeout === null) {
+      setError(`请求超时需在 ${MIN_IMAGE_REQUEST_TIMEOUT_SECONDS} 到 ${MAX_IMAGE_REQUEST_TIMEOUT_SECONDS} 秒之间`);
       return;
     }
     setIsLoading(true);
@@ -66,12 +86,14 @@ export function ImageProvidersSettings() {
         apiKey: trimmedApiKey,
         baseUrl: trimmedBaseUrl,
         defaultModel: defaultModel.trim() || "gpt-image-2",
-        name: name.trim() || providerNameFromUrl(trimmedBaseUrl)
+        name: name.trim() || providerNameFromUrl(trimmedBaseUrl),
+        requestTimeoutSeconds: timeout,
       });
       setName("");
       setBaseUrl("");
       setApiKey("");
       setDefaultModel("gpt-image-2");
+      setRequestTimeoutSeconds(String(DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS));
       await refresh();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -87,7 +109,8 @@ export function ImageProvidersSettings() {
       defaultModel: provider.defaultModel,
       enabled: provider.enabled,
       id: provider.id,
-      name: provider.name
+      name: provider.name,
+      requestTimeoutSeconds: String(provider.requestTimeoutSeconds),
     });
     setError(null);
   }
@@ -98,8 +121,13 @@ export function ImageProvidersSettings() {
     }
     const trimmedName = draft.name.trim();
     const trimmedBaseUrl = draft.baseUrl.trim();
+    const timeout = parseRequestTimeout(draft.requestTimeoutSeconds);
     if (!trimmedName || !trimmedBaseUrl) {
       setError("请填写供应商名称和 URL");
+      return;
+    }
+    if (timeout === null) {
+      setError(`请求超时需在 ${MIN_IMAGE_REQUEST_TIMEOUT_SECONDS} 到 ${MAX_IMAGE_REQUEST_TIMEOUT_SECONDS} 秒之间`);
       return;
     }
     setBusyId(draft.id);
@@ -110,6 +138,7 @@ export function ImageProvidersSettings() {
         defaultModel: draft.defaultModel.trim() || "gpt-image-2",
         enabled: draft.enabled,
         name: trimmedName,
+        requestTimeoutSeconds: timeout,
         ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
       });
       setDraft(null);
@@ -189,6 +218,18 @@ export function ImageProvidersSettings() {
               value={apiKey}
             />
           </label>
+          <label className="settings-field settings-field-wide">
+            <span>请求超时（秒）</span>
+            <input
+              inputMode="numeric"
+              max={MAX_IMAGE_REQUEST_TIMEOUT_SECONDS}
+              min={MIN_IMAGE_REQUEST_TIMEOUT_SECONDS}
+              onChange={(event) => setRequestTimeoutSeconds(event.target.value.replace(/\D/g, ""))}
+              step={1}
+              type="number"
+              value={requestTimeoutSeconds}
+            />
+          </label>
         </div>
         <div className="settings-toggle-row">
           <button className="settings-primary-button" disabled={isLoading} onClick={() => void addProvider()} type="button">
@@ -218,6 +259,7 @@ export function ImageProvidersSettings() {
                       密钥
                     </span>
                     <span className="enabled">{provider.defaultModel}</span>
+                    <span className="enabled">{provider.requestTimeoutSeconds} 秒超时</span>
                   </div>
                 </div>
                 <div className="settings-row-actions provider-actions">
@@ -286,6 +328,21 @@ export function ImageProvidersSettings() {
                   placeholder="留空则保持原密钥"
                   type="password"
                   value={draft.apiKey}
+                />
+              </label>
+              <label className="settings-field settings-field-wide">
+                <span>请求超时（秒）</span>
+                <input
+                  inputMode="numeric"
+                  max={MAX_IMAGE_REQUEST_TIMEOUT_SECONDS}
+                  min={MIN_IMAGE_REQUEST_TIMEOUT_SECONDS}
+                  onChange={(event) => setDraft({
+                    ...draft,
+                    requestTimeoutSeconds: event.target.value.replace(/\D/g, ""),
+                  })}
+                  step={1}
+                  type="number"
+                  value={draft.requestTimeoutSeconds}
                 />
               </label>
             </div>

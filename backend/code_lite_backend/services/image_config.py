@@ -9,8 +9,11 @@ from code_lite_backend.core.config import RuntimeConfig
 from code_lite_backend.storage.conversations import atomic_write_json, now_ms
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_MODEL = "gpt-image-2"
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 300
+MIN_REQUEST_TIMEOUT_SECONDS = 10
+MAX_REQUEST_TIMEOUT_SECONDS = 3600
 
 
 class ImageConfigError(ValueError):
@@ -36,6 +39,30 @@ def _preview_secret(value: str) -> str:
 def _provider_name_from_url(base_url: str) -> str:
     value = base_url.strip().removeprefix("https://").removeprefix("http://").split("/", 1)[0]
     return value or "图片供应商"
+
+
+def _normalize_request_timeout_seconds(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_REQUEST_TIMEOUT_SECONDS
+    return min(MAX_REQUEST_TIMEOUT_SECONDS, max(MIN_REQUEST_TIMEOUT_SECONDS, parsed))
+
+
+def _validate_request_timeout_seconds(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ImageConfigError("请求超时必须是整数秒数")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        parsed = int(value.strip())
+    else:
+        raise ImageConfigError("请求超时必须是整数秒数")
+    if parsed < MIN_REQUEST_TIMEOUT_SECONDS or parsed > MAX_REQUEST_TIMEOUT_SECONDS:
+        raise ImageConfigError(
+            f"请求超时需在 {MIN_REQUEST_TIMEOUT_SECONDS} 到 {MAX_REQUEST_TIMEOUT_SECONDS} 秒之间"
+        )
+    return parsed
 
 
 def _empty_config() -> dict[str, Any]:
@@ -72,11 +99,13 @@ class ImageProviderConfigStore:
         base_url: str,
         api_key: str,
         default_model: str = DEFAULT_MODEL,
+        request_timeout_seconds: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         base_url = base_url.strip().rstrip("/")
         api_key = api_key.strip()
         name = name.strip() or _provider_name_from_url(base_url)
         default_model = default_model.strip() or DEFAULT_MODEL
+        request_timeout_seconds = _validate_request_timeout_seconds(request_timeout_seconds)
         if not base_url:
             raise ImageConfigError("Base URL 不能为空")
         if not api_key:
@@ -89,6 +118,7 @@ class ImageProviderConfigStore:
             "baseUrl": base_url,
             "apiKey": api_key,
             "defaultModel": default_model,
+            "requestTimeoutSeconds": request_timeout_seconds,
             "enabled": True,
             "createdAt": now_ms(),
             "updatedAt": now_ms(),
@@ -117,6 +147,10 @@ class ImageProviderConfigStore:
                 provider["apiKey"] = api_key
         if "defaultModel" in patch:
             provider["defaultModel"] = str(patch.get("defaultModel") or "").strip() or DEFAULT_MODEL
+        if "requestTimeoutSeconds" in patch:
+            provider["requestTimeoutSeconds"] = _validate_request_timeout_seconds(
+                patch.get("requestTimeoutSeconds")
+            )
         if "enabled" in patch:
             provider["enabled"] = bool(patch.get("enabled"))
         provider["updatedAt"] = now_ms()
@@ -132,7 +166,7 @@ class ImageProviderConfigStore:
         ]
         self.save(config)
 
-    def provider_connection(self, provider_id: str) -> dict[str, str]:
+    def provider_connection(self, provider_id: str) -> dict[str, Any]:
         config = self.load()
         provider = self._find_provider(config, provider_id)
         if provider is None:
@@ -143,6 +177,9 @@ class ImageProviderConfigStore:
             "baseUrl": str(provider.get("baseUrl") or ""),
             "apiKey": str(provider.get("apiKey") or ""),
             "defaultModel": str(provider.get("defaultModel") or DEFAULT_MODEL),
+            "requestTimeoutSeconds": _normalize_request_timeout_seconds(
+                provider.get("requestTimeoutSeconds")
+            ),
         }
 
     def _normalize(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -162,6 +199,9 @@ class ImageProviderConfigStore:
                 "baseUrl": str(item.get("baseUrl") or "").strip().rstrip("/"),
                 "apiKey": str(item.get("apiKey") or ""),
                 "defaultModel": str(item.get("defaultModel") or DEFAULT_MODEL),
+                "requestTimeoutSeconds": _normalize_request_timeout_seconds(
+                    item.get("requestTimeoutSeconds")
+                ),
                 "enabled": item.get("enabled", True) is not False,
                 "createdAt": int(item.get("createdAt") or now_ms()),
                 "updatedAt": int(item.get("updatedAt") or now_ms()),
@@ -183,6 +223,9 @@ class ImageProviderConfigStore:
             "name": provider.get("name"),
             "baseUrl": provider.get("baseUrl"),
             "defaultModel": provider.get("defaultModel"),
+            "requestTimeoutSeconds": _normalize_request_timeout_seconds(
+                provider.get("requestTimeoutSeconds")
+            ),
             "enabled": provider.get("enabled", True),
             "createdAt": provider.get("createdAt"),
             "updatedAt": provider.get("updatedAt"),

@@ -4,6 +4,31 @@
 export type ImageQuality = "auto" | "low" | "medium" | "high";
 export type ImageResponseFormat = "url" | "b64_json";
 
+export const DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS = 300;
+export const MIN_IMAGE_REQUEST_TIMEOUT_SECONDS = 10;
+export const MAX_IMAGE_REQUEST_TIMEOUT_SECONDS = 3600;
+
+export function isValidImageRequestTimeoutSeconds(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isInteger(value)
+    && value >= MIN_IMAGE_REQUEST_TIMEOUT_SECONDS
+    && value <= MAX_IMAGE_REQUEST_TIMEOUT_SECONDS;
+}
+
+export function normalizeImageRequestTimeoutSeconds(value: unknown): number {
+  if (value === null || value === undefined || value === "") {
+    return DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS;
+  }
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_IMAGE_REQUEST_TIMEOUT_SECONDS;
+  }
+  return Math.min(
+    MAX_IMAGE_REQUEST_TIMEOUT_SECONDS,
+    Math.max(MIN_IMAGE_REQUEST_TIMEOUT_SECONDS, Math.round(parsed)),
+  );
+}
+
 /** 图片生成供应商（前端可见视图，密钥遮蔽）。 */
 export interface ImageProvider {
   id: string;
@@ -13,6 +38,7 @@ export interface ImageProvider {
   hasApiKey: boolean;
   apiKeyPreview: string;
   defaultModel: string;
+  requestTimeoutSeconds: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -23,6 +49,7 @@ export interface ImageProviderCreateInput {
   baseUrl: string;
   apiKey: string;
   defaultModel?: string;
+  requestTimeoutSeconds?: number;
 }
 
 /** 更新供应商入参；apiKey 为空表示不修改已有密钥。 */
@@ -32,6 +59,7 @@ export interface ImageProviderUpdateInput {
   apiKey?: string;
   defaultModel?: string;
   enabled?: boolean;
+  requestTimeoutSeconds?: number;
 }
 
 /** 一次生成的请求参数（前端组装，不含真实密钥；providerId 指向后端已存密钥）。 */
