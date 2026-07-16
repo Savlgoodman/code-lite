@@ -7,14 +7,13 @@
   max-height: min(148px, calc(100vh - 220px));
   align-self: center;
   overflow: hidden;
-  border: 1px solid rgba(218, 216, 211, 0.72);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--bg-elevated);
   box-shadow: 0 10px 26px rgba(31, 35, 42, 0.1);
   color: var(--text-primary);
   cursor: pointer;
   pointer-events: auto;
-  backdrop-filter: blur(14px);
   transition:
     height 0.24s cubic-bezier(0.2, 0, 0, 1),
     width 0.18s ease,
@@ -26,8 +25,8 @@
 
 .plan-progress-panel:hover,
 .plan-progress-panel:focus-visible {
-  border-color: rgba(199, 197, 191, 0.9);
-  background: rgba(255, 255, 255, 0.86);
+  border-color: var(--border-secondary);
+  background: var(--bg-secondary);
   box-shadow: 0 12px 30px rgba(31, 35, 42, 0.13);
 }
 
@@ -37,7 +36,7 @@
 }
 
 .plan-progress-panel.expanded {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bg-elevated);
 }
 
 .plan-progress-header {

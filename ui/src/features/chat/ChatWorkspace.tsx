@@ -1,3 +1,5 @@
+import { useCallback, useRef } from "react";
+
 import type {
   AgentSummary,
   ApprovalRequest,
@@ -69,6 +71,27 @@ function workspaceBasename(workspace?: string): string {
   return parts[parts.length - 1] || "code-lite";
 }
 
+function useEventCallback<Args extends unknown[]>(callback: (...args: Args) => void) {
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+  return useCallback((...args: Args) => callbackRef.current(...args), []);
+}
+
+function useBillableMessages(messages: ChatMessage[]): ChatMessage[] {
+  const cachedRef = useRef<ChatMessage[]>([]);
+  const next = messages.filter((message) => message.role === "assistant" && message.usage);
+  const cached = cachedRef.current;
+  const changed = cached.length !== next.length || next.some((message, index) => (
+    cached[index]?.id !== message.id
+    || cached[index]?.model !== message.model
+    || cached[index]?.usage !== message.usage
+  ));
+  if (changed) {
+    cachedRef.current = next;
+  }
+  return cachedRef.current;
+}
+
 export function ChatWorkspace({
   accessMode,
   activeTurnId,
@@ -112,8 +135,21 @@ export function ChatWorkspace({
   workspace
 }: ChatWorkspaceProps) {
   const activePlan = latestMergedPlanFromMessages(messages) ?? null;
+  const billableMessages = useBillableMessages(messages);
   const showEmptyWelcome = messages.length === 0 && !isRunning && !pendingApproval && !pendingInput;
   const workspaceName = workspaceBasename(workspace);
+  const handleAccessModeChange = useEventCallback(onAccessModeChange);
+  const handleConfigChange = useEventCallback(onConfigChange);
+  const handleDraftChange = useEventCallback(onDraftChange);
+  const handleDraftImagesAdd = useEventCallback(onDraftImagesAdd);
+  const handleDraftImageRemove = useEventCallback(onDraftImageRemove);
+  const handleModelFamilyChange = useEventCallback(onModelFamilyChange);
+  const handleOptimizePrompt = useEventCallback(() => onOptimizePrompt?.());
+  const handleReasoningEffortChange = useEventCallback(onReasoningEffortChange);
+  const handleResolveApproval = useEventCallback(onResolveApproval);
+  const handleResolveInput = useEventCallback(onResolveInput);
+  const handleSendMessage = useEventCallback(onSendMessage);
+  const handleStopTurn = useEventCallback(onStopTurn);
 
   return (
     <main className={`chat-workspace ${showEmptyWelcome ? "empty-chat" : ""}`}>
@@ -132,6 +168,7 @@ export function ChatWorkspace({
         accessMode={accessMode}
         activeTurnId={activeTurnId}
         agent={agent}
+        billingMessages={billableMessages}
         commands={commands}
         configOptions={configOptions}
         configLoading={configLoading}
@@ -141,24 +178,23 @@ export function ChatWorkspace({
         draftImages={draftImages}
         imagesProcessing={imagesProcessing}
         sendDisabled={sendDisabled}
-        messages={messages}
         modes={modes}
         models={models}
-        onAccessModeChange={onAccessModeChange}
-        onConfigChange={onConfigChange}
-        onDraftChange={onDraftChange}
-        onDraftImagesAdd={onDraftImagesAdd}
-        onDraftImageRemove={onDraftImageRemove}
-        onModelFamilyChange={onModelFamilyChange}
-        onOptimizePrompt={onOptimizePrompt}
+        onAccessModeChange={handleAccessModeChange}
+        onConfigChange={handleConfigChange}
+        onDraftChange={handleDraftChange}
+        onDraftImagesAdd={handleDraftImagesAdd}
+        onDraftImageRemove={handleDraftImageRemove}
+        onModelFamilyChange={handleModelFamilyChange}
+        onOptimizePrompt={handleOptimizePrompt}
         optimizePromptEnabled={optimizePromptEnabled}
         optimizePromptCanUndo={optimizePromptCanUndo}
         optimizingPrompt={optimizingPrompt}
-        onReasoningEffortChange={onReasoningEffortChange}
-        onResolveApproval={onResolveApproval}
-        onResolveInput={onResolveInput}
-        onSendMessage={onSendMessage}
-        onStopTurn={onStopTurn}
+        onReasoningEffortChange={handleReasoningEffortChange}
+        onResolveApproval={handleResolveApproval}
+        onResolveInput={handleResolveInput}
+        onSendMessage={handleSendMessage}
+        onStopTurn={handleStopTurn}
         pendingApproval={pendingApproval}
         pendingInput={pendingInput}
         plan={activePlan}

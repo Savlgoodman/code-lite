@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, Fragment } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Ban,
@@ -81,7 +81,7 @@ interface ChatComposerProps {
   draftImageError: string | null;
   draftImages: DraftImage[];
   imagesProcessing: boolean;
-  messages: ChatMessage[];
+  billingMessages: ChatMessage[];
   models: SessionModel[];
   modes: SessionMode[];
   onAccessModeChange: (value: string) => void;
@@ -124,7 +124,7 @@ function isLogoutCommand(command: SlashCommand) {
   );
 }
 
-export function ChatComposer({
+export const ChatComposer = memo(function ChatComposer({
   accessMode,
   activeTurnId,
   agent,
@@ -136,7 +136,7 @@ export function ChatComposer({
   draftImageError,
   draftImages,
   imagesProcessing,
-  messages,
+  billingMessages,
   models,
   modes,
   onAccessModeChange,
@@ -222,8 +222,8 @@ export function ChatComposer({
   const currentMode = modes.find((mode) => mode.id === accessMode) ?? modes.find((mode) => mode.isDefault) ?? modes[0];
   const runtimeTone = agentRuntimeTone(agent);
   const billingSummary = useMemo(
-    () => buildSessionBillingSummary(messages, billingPrices),
-    [messages, billingPrices],
+    () => buildSessionBillingSummary(billingMessages, billingPrices),
+    [billingMessages, billingPrices],
   );
 
   useEffect(() => {
@@ -1108,4 +1108,4 @@ export function ChatComposer({
     <ImagePreview image={previewImage} onClose={() => setPreviewImage(null)} />
     </Fragment>
   );
-}
+});

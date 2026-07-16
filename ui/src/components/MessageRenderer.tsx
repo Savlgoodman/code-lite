@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useEffect, useState, type ComponentProps } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useState, type ComponentProps } from "react";
 import { code } from "@streamdown/code";
 import { createMathPlugin } from "@streamdown/math";
 import { Streamdown, type AnimateOptions, type Components, type ControlsConfig, type ExtraProps } from "streamdown";
@@ -26,8 +26,13 @@ export function FileRefProvider({
   onOpenFileRef?: (ref: FileRef) => void;
   loadImage?: (ref: FileRef) => Promise<string>;
 }) {
+  const value = useMemo(
+    () => ({ onOpenFileRef, loadImage }),
+    [loadImage, onOpenFileRef]
+  );
+
   return (
-    <FileRefContext.Provider value={{ onOpenFileRef, loadImage }}>{children}</FileRefContext.Provider>
+    <FileRefContext.Provider value={value}>{children}</FileRefContext.Provider>
   );
 }
 
@@ -123,7 +128,7 @@ function FileRefImage({ fileRef }: { fileRef: FileRef }) {
     return () => {
       cancelled = true;
     };
-  }, [fileRef, loadImage, src]);
+  }, [fileRef.path, loadImage, src]);
 
   if (src) {
     return (
@@ -172,23 +177,28 @@ const streamdownAnimation: AnimateOptions = {
   stagger: 24
 };
 
+const streamdownPlugins = { code, math };
+
 export const MessageRenderer = memo(function MessageRenderer({ content, streaming }: MessageRendererProps) {
   const isStreaming = Boolean(streaming);
   // 先把本地文件链接改写成哨兵 URL（绕过 harden），再做数学定界归一。
-  const normalized = normalizeMathDelimiters(rewriteFileRefsForRender(content));
+  const normalized = useMemo(
+    () => normalizeMathDelimiters(rewriteFileRefsForRender(content)),
+    [content]
+  );
 
   return (
     <div className="streamdown-shell">
       <Streamdown
-        animated={streamdownAnimation}
+        animated={isStreaming ? streamdownAnimation : false}
         caret={isStreaming ? "block" : undefined}
         className="streamdown-body"
         components={markdownComponents}
         controls={streamdownControls}
         isAnimating={isStreaming}
         lineNumbers={false}
-        mode="streaming"
-        plugins={{ code, math }}
+        mode={isStreaming ? "streaming" : "static"}
+        plugins={streamdownPlugins}
       >
         {normalized}
       </Streamdown>

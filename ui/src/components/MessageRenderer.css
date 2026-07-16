@@ -96,9 +96,8 @@
   padding: 2px;
   border: 1px solid var(--border-primary);
   border-radius: 7px;
-  background: var(--bg-elevated-alpha);
+  background: var(--bg-elevated);
   box-shadow: var(--shadow-md);
-  backdrop-filter: blur(10px);
   pointer-events: auto;
 }
 

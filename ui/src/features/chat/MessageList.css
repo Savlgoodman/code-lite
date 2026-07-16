@@ -1,7 +1,9 @@
 .chat-scroll {
   flex: 1;
   min-height: 0;
-  overflow: overlay;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 28px 24px calc(var(--chat-composer-bottom) + var(--chat-composer-current-height) + var(--chat-scroll-bottom-gap));
   scrollbar-gutter: auto;
   scrollbar-width: none;
@@ -39,17 +41,28 @@
   border-radius: 999px;
   background: transparent;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chat-scrollbar[data-visible="true"] {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-scrollbar i {
   position: absolute;
+  top: 0;
   right: 4px;
   left: 4px;
+  height: 28px;
   min-height: 28px;
   border-radius: 999px;
   background: rgba(75, 82, 92, 0.28);
   cursor: grab;
+  contain: layout paint;
   transition: background 0.16s ease;
+  will-change: transform;
 }
 
 .chat-scrollbar i:active {
@@ -74,6 +87,14 @@
   width: 100%;
   display: flex;
   margin: 22px 0;
+  contain: layout paint style;
+  contain-intrinsic-size: auto 180px;
+  content-visibility: auto;
+}
+
+.message.streaming {
+  contain-intrinsic-size: none;
+  content-visibility: visible;
 }
 
 .message.user {
@@ -355,10 +376,9 @@
   transform: translateX(-50%);
   border: 1px solid var(--border-primary);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.52);
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   box-shadow: 0 10px 28px rgba(30, 35, 42, 0.12);
-  backdrop-filter: blur(10px);
   transition:
     bottom 0.24s cubic-bezier(0.2, 0, 0, 1),
     background 0.16s ease,
@@ -366,7 +386,7 @@
 }
 
 .scroll-bottom-button:hover {
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--bg-secondary);
 }
 
 .chat-workspace:has(.plan-progress-panel) .chat-scroll {

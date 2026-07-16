@@ -1,5 +1,5 @@
 import { ArrowDown, ChevronRight, Minimize2 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { FileRef } from "@code-lite/chat-render";
 import { MessageRenderer, FileRefProvider } from "../../components/MessageRenderer";
@@ -47,14 +47,16 @@ function scrollCruiseProgress(progress: number) {
 }
 
 function formatFullDateTime(value: number) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(new Date(value));
+  return fullDateTimeFormatter.format(new Date(value));
 }
+
+const fullDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "long",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
 
 function AssistantMessageContent({
   isCompactTurn,
@@ -65,11 +67,14 @@ function AssistantMessageContent({
   message: ChatMessage;
   sessionId: string;
 }) {
+  const entries = useMemo(
+    () => buildAssistantInlineEntries(message.content, message.toolCalls),
+    [message.content, message.toolCalls]
+  );
+
   if (isCompactTurn && !message.error) {
     return null;
   }
-
-  const entries = buildAssistantInlineEntries(message.content, message.toolCalls);
 
   if (entries.length === 0) {
     return <MessageRenderer content={message.content} streaming={message.streaming} />;
@@ -206,7 +211,7 @@ const MessageItem = memo(function MessageItem({
     message.role === "assistant" && !message.streaming && !message.error && (isCompactTurn || isCompactedMessage(message));
 
   return (
-    <article className={`message ${message.role}`}>
+    <article className={`message ${message.role}${message.streaming ? " streaming" : ""}`}>
       <div className="message-body">
         {message.role === "assistant" && message.reasoning ? (
           <details className="reasoning-block">
@@ -260,19 +265,17 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
   const scrollRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const scrollbarTrackRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarThumbRef = useRef<HTMLElement | null>(null);
+  const scrollSyncFrameRef = useRef<number | null>(null);
+  const shouldStickOnSyncRef = useRef(false);
   const isPinnedToBottomRef = useRef(true);
+  const showScrollToBottomRef = useRef(false);
   const smoothScrollFrameRef = useRef<number | null>(null);
   const smoothScrollActiveRef = useRef(false);
-  const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showRunningThinking, setShowRunningThinking] = useState(false);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [openFileRef, setOpenFileRef] = useState<FileRef | null>(null);
-  const [scrollbarState, setScrollbarState] = useState({
-    thumbHeight: 100,
-    thumbTop: 0,
-    visible: false
-  });
   const latestStreamingAssistantIndex = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
@@ -289,23 +292,63 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
   const canShowRunningThinking = isRunning && !isWaitingForUser;
   const shouldShowThinkingImmediately = canShowRunningThinking && (!latestStreamingAssistant || !latestStreamingAssistant.content.trim());
 
-  isPinnedToBottomRef.current = isPinnedToBottom;
-
   function isAtBottom(element: HTMLElement) {
     return element.scrollHeight - element.scrollTop - element.clientHeight <= 8;
   }
 
-  function updateScrollbarState(element: HTMLElement) {
-    const scrollRange = element.scrollHeight - element.clientHeight;
-    const visible = scrollRange > 1;
-    if (!visible) {
-      setScrollbarState({ thumbHeight: 100, thumbTop: 0, visible: false });
+  function setScrollToBottomVisible(visible: boolean) {
+    if (showScrollToBottomRef.current === visible) {
+      return;
+    }
+    showScrollToBottomRef.current = visible;
+    setShowScrollToBottom(visible);
+  }
+
+  function updateScrollbar(element: HTMLElement) {
+    const track = scrollbarTrackRef.current;
+    const thumb = scrollbarThumbRef.current;
+    if (!track || !thumb) {
       return;
     }
 
-    const thumbHeight = Math.max(8, (element.clientHeight / element.scrollHeight) * 100);
-    const thumbTop = Math.min(100 - thumbHeight, (element.scrollTop / scrollRange) * (100 - thumbHeight));
-    setScrollbarState({ thumbHeight, thumbTop, visible: true });
+    const scrollRange = element.scrollHeight - element.clientHeight;
+    const trackHeight = track.clientHeight;
+    const visible = scrollRange > 1 && trackHeight > 0;
+    track.dataset.visible = visible ? "true" : "false";
+    if (!visible) {
+      thumb.style.transform = "translate3d(0, 0, 0)";
+      return;
+    }
+
+    const thumbHeight = Math.min(trackHeight, Math.max(28, (element.clientHeight / element.scrollHeight) * trackHeight));
+    const thumbTravel = Math.max(0, trackHeight - thumbHeight);
+    const thumbTop = Math.min(thumbTravel, (element.scrollTop / scrollRange) * thumbTravel);
+    thumb.style.height = `${thumbHeight}px`;
+    thumb.style.transform = `translate3d(0, ${thumbTop}px, 0)`;
+  }
+
+  function syncScrollState(element: HTMLElement) {
+    const nextIsAtBottom = isAtBottom(element);
+    isPinnedToBottomRef.current = nextIsAtBottom;
+    setScrollToBottomVisible(!smoothScrollActiveRef.current && !nextIsAtBottom);
+    updateScrollbar(element);
+  }
+
+  function scheduleScrollSync(element: HTMLElement, stickToBottom = false) {
+    shouldStickOnSyncRef.current ||= stickToBottom;
+    if (scrollSyncFrameRef.current !== null) {
+      return;
+    }
+
+    scrollSyncFrameRef.current = requestAnimationFrame(() => {
+      scrollSyncFrameRef.current = null;
+      const shouldStick = shouldStickOnSyncRef.current;
+      shouldStickOnSyncRef.current = false;
+      if (shouldStick && isPinnedToBottomRef.current && !smoothScrollActiveRef.current) {
+        element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      }
+      syncScrollState(element);
+    });
   }
 
   function cancelSmoothScroll() {
@@ -324,9 +367,9 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
     const distance = targetTop - startTop;
     if (distance <= 1) {
       element.scrollTop = targetTop;
-      setIsPinnedToBottom(true);
-      setShowScrollToBottom(false);
-      updateScrollbarState(element);
+      isPinnedToBottomRef.current = true;
+      setScrollToBottomVisible(false);
+      scheduleScrollSync(element);
       return;
     }
 
@@ -347,9 +390,9 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
       element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
       smoothScrollFrameRef.current = null;
       smoothScrollActiveRef.current = false;
-      setIsPinnedToBottom(true);
-      setShowScrollToBottom(false);
-      updateScrollbarState(element);
+      isPinnedToBottomRef.current = true;
+      setScrollToBottomVisible(false);
+      scheduleScrollSync(element);
     };
 
     smoothScrollFrameRef.current = requestAnimationFrame(step);
@@ -375,21 +418,22 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
   function handleScrollbarPointerDown(event: React.PointerEvent<HTMLElement>) {
     const element = scrollRef.current;
     const track = scrollbarTrackRef.current;
-    if (!element || !track) {
+    const thumb = scrollbarThumbRef.current;
+    if (!element || !track || !thumb) {
       return;
     }
     event.preventDefault();
     cancelSmoothScroll();
 
     const trackHeight = track.clientHeight;
-    const thumbHeight = (scrollbarState.thumbHeight / 100) * trackHeight;
+    const thumbHeight = thumb.offsetHeight;
     const thumbTravel = Math.max(1, trackHeight - thumbHeight);
     const contentRange = element.scrollHeight - element.clientHeight;
     const startPointerY = event.clientY;
     const startScrollTop = element.scrollTop;
 
     // 若按在轨道空白处（非 thumb 本身），先把 thumb 中心跳到指针位置。
-    const clickedThumb = (event.target as HTMLElement).tagName.toLowerCase() === "i";
+    const clickedThumb = event.target === thumb;
     let anchorPointerY = startPointerY;
     let anchorScrollTop = startScrollTop;
     if (!clickedThumb) {
@@ -445,30 +489,29 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
       return;
     }
 
+    isPinnedToBottomRef.current = true;
+    setScrollToBottomVisible(false);
     const handleScroll = () => {
-      const nextIsAtBottom = isAtBottom(element);
-      setIsPinnedToBottom(nextIsAtBottom);
-      if (smoothScrollActiveRef.current) {
-        setShowScrollToBottom(false);
-        updateScrollbarState(element);
-        return;
-      }
-      setShowScrollToBottom(!nextIsAtBottom);
-      updateScrollbarState(element);
+      isPinnedToBottomRef.current = isAtBottom(element);
+      setScrollToBottomVisible(!smoothScrollActiveRef.current && !isPinnedToBottomRef.current);
+      scheduleScrollSync(element);
     };
     const cancelOnUserScroll = () => cancelSmoothScroll();
 
-    handleScroll();
+    scheduleScrollSync(element, true);
     element.addEventListener("scroll", handleScroll, { passive: true });
     element.addEventListener("touchstart", cancelOnUserScroll, { passive: true });
     element.addEventListener("wheel", cancelOnUserScroll, { passive: true });
-    window.addEventListener("resize", handleScroll);
     return () => {
       cancelSmoothScroll();
+      if (scrollSyncFrameRef.current !== null) {
+        cancelAnimationFrame(scrollSyncFrameRef.current);
+        scrollSyncFrameRef.current = null;
+      }
+      shouldStickOnSyncRef.current = false;
       element.removeEventListener("scroll", handleScroll);
       element.removeEventListener("touchstart", cancelOnUserScroll);
       element.removeEventListener("wheel", cancelOnUserScroll);
-      window.removeEventListener("resize", handleScroll);
     };
   }, [sessionId]);
 
@@ -481,38 +524,22 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
       return;
     }
     const observer = new ResizeObserver(() => {
-      if (isPinnedToBottomRef.current && !smoothScrollActiveRef.current) {
-        element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-      }
-      updateScrollbarState(element);
+      scheduleScrollSync(element, isPinnedToBottomRef.current && !smoothScrollActiveRef.current);
     });
     observer.observe(content);
+    observer.observe(element);
     return () => observer.disconnect();
   }, [sessionId]);
 
-  useEffect(() => {
-    if (isPinnedToBottom) {
-      requestAnimationFrame(() => scrollToBottom("auto"));
-    }
-    requestAnimationFrame(() => {
-      const element = scrollRef.current;
-      if (element) {
-        updateScrollbarState(element);
-      }
-    });
-  }, [isPinnedToBottom, messages, showRunningThinking]);
-
-  useEffect(() => {
-    requestAnimationFrame(() => scrollToBottom("auto"));
+  const loadFileRefImage = useCallback(async (ref: FileRef) => {
+    const res = await loadWorkspaceFile(sessionId, ref.path);
+    return `data:${res.mimeType};base64,${res.content}`;
   }, [sessionId]);
 
   return (
     <FileRefProvider
       onOpenFileRef={setOpenFileRef}
-      loadImage={async (ref) => {
-        const res = await loadWorkspaceFile(sessionId, ref.path);
-        return `data:${res.mimeType};base64,${res.content}`;
-      }}
+      loadImage={loadFileRefImage}
     >
       <section className="chat-scroll" ref={scrollRef}>
         <div className="chat-content" ref={contentRef}>
@@ -536,21 +563,20 @@ export function MessageList({ isRunning, isWaitingForUser = false, messages, ses
           ) : null}
         </div>
       </section>
-      {scrollbarState.visible ? (
-        <div
-          className="chat-scrollbar"
-          ref={scrollbarTrackRef}
-          onPointerDown={handleScrollbarPointerDown}
-        >
-          <i style={{ height: `${scrollbarState.thumbHeight}%`, top: `${scrollbarState.thumbTop}%` }} />
-        </div>
-      ) : null}
+      <div
+        aria-hidden="true"
+        className="chat-scrollbar"
+        ref={scrollbarTrackRef}
+        onPointerDown={handleScrollbarPointerDown}
+      >
+        <i ref={scrollbarThumbRef} />
+      </div>
       {showScrollToBottom ? (
         <button
           className="scroll-bottom-button"
           aria-label="回到底部"
           onClick={() => {
-            setShowScrollToBottom(false);
+            setScrollToBottomVisible(false);
             scrollToBottom("smooth");
           }}
         >
